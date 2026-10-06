@@ -22,12 +22,14 @@ export function TVButton({
   children,
   className = '',
   onClick,
+  disabled,
   ...props
 }: TVButtonProps) {
   const { ref, isFocused } = useFocusable<HTMLButtonElement>({
     id,
     groupId,
     onEnter: () => {
+      if (disabled) return;
       onEnter?.();
       onClick?.({} as MouseEvent<HTMLButtonElement>);
     },
@@ -51,6 +53,7 @@ export function TVButton({
   };
 
   const handleClick = (e: MouseEvent<HTMLButtonElement>) => {
+    if (disabled) return;
     if (onClick) {
       onClick(e);
     } else {
@@ -62,7 +65,8 @@ export function TVButton({
     <button
       ref={ref}
       tabIndex={-1}
-      className={`${baseStyle} ${variantStyles[variant]} ${className}`}
+      disabled={disabled}
+      className={`${baseStyle} ${variantStyles[variant]} ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${className}`}
       onClick={handleClick}
       {...props}
     >

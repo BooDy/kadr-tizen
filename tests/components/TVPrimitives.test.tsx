@@ -57,6 +57,34 @@ describe('TVButton', () => {
     fireEvent.keyDown(window, { key: 'Enter', keyCode: TVKeys.ENTER });
     expect(onEnter).toHaveBeenCalledTimes(1);
   });
+
+  it('does not invoke onEnter or onClick when disabled', () => {
+    const onEnter = vi.fn();
+    const onClick = vi.fn();
+
+    render(
+      <FocusProvider>
+        <TVButton
+          id="btn-disabled"
+          groupId="row"
+          disabled
+          onEnter={onEnter}
+          onClick={onClick}
+          autoFocus
+        >
+          Disabled Button
+        </TVButton>
+      </FocusProvider>
+    );
+
+    fireEvent.keyDown(window, { key: 'Enter', keyCode: TVKeys.ENTER });
+    expect(onEnter).not.toHaveBeenCalled();
+    expect(onClick).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText('Disabled Button'));
+    expect(onEnter).not.toHaveBeenCalled();
+    expect(onClick).not.toHaveBeenCalled();
+  });
 });
 
 describe('TVCard', () => {

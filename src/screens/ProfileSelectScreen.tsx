@@ -32,6 +32,8 @@ export function ProfileSelectScreen({
       if (res.lockedOutSecs) setLockoutSecs(res.lockedOutSecs);
     } else {
       setSelectedUser(null);
+      setErrorMsg(undefined);
+      setLockoutSecs(0);
     }
   };
 
@@ -43,7 +45,9 @@ export function ProfileSelectScreen({
       if (
         code === TVKeys.BACK_TIZEN ||
         code === TVKeys.BACK_WEB ||
-        e.key === 'Escape'
+        code === TVKeys.BACKSPACE ||
+        e.key === 'Escape' ||
+        e.key === 'Backspace'
       ) {
         onBackToServerConnect?.();
       }
@@ -71,6 +75,7 @@ export function ProfileSelectScreen({
             subtitle={profile.role === 'admin' ? 'Administrator' : 'Standard'}
             onSelect={() => {
               setErrorMsg(undefined);
+              setLockoutSecs(0);
               setSelectedUser(profile);
             }}
             autoFocus={idx === 0}
@@ -82,7 +87,12 @@ export function ProfileSelectScreen({
         isOpen={Boolean(selectedUser)}
         username={selectedUser?.username || ''}
         onSubmit={handlePinSubmit}
-        onClose={() => setSelectedUser(null)}
+        onClose={() => {
+          setSelectedUser(null);
+          setErrorMsg(undefined);
+          setLockoutSecs(0);
+        }}
+        onLockoutEnd={() => setLockoutSecs(0)}
         errorMessage={errorMsg}
         lockedOutSecs={lockoutSecs}
       />

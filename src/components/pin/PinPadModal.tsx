@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { TVButton } from '../tv/TVButton';
 import { TVModal } from '../tv/TVModal';
 import { KeypadGrid } from './KeypadGrid';
@@ -11,6 +11,7 @@ export interface PinPadModalProps {
   onClose: () => void;
   lockedOutSecs?: number;
   errorMessage?: string;
+  onLockoutEnd?: () => void;
 }
 
 export function PinPadModal({
@@ -20,9 +21,15 @@ export function PinPadModal({
   onClose,
   lockedOutSecs = 0,
   errorMessage,
+  onLockoutEnd,
 }: PinPadModalProps) {
   const [pin, setPin] = useState('');
+  const pinRef = useRef(pin);
+  pinRef.current = pin;
+
   const [countdown, setCountdown] = useState(lockedOutSecs);
+  const onLockoutEndRef = useRef(onLockoutEnd);
+  onLockoutEndRef.current = onLockoutEnd;
 
   useEffect(() => {
     setCountdown(lockedOutSecs);
@@ -31,17 +38,59 @@ export function PinPadModal({
   useEffect(() => {
     if (countdown <= 0) return;
     const interval = setInterval(() => {
-      setCountdown((prev) => Math.max(0, prev - 1));
+      setCountdown((prev) => {
+        const next = Math.max(0, prev - 1);
+        if (next === 0) {
+          onLockoutEndRef.current?.();
+        }
+        return next;
+      });
     }, 1000);
     return () => clearInterval(interval);
   }, [countdown]);
 
+  // Reset pin when modal closes
   useEffect(() => {
     if (!isOpen) {
+      pinRef.current = '';
       setPin('');
     }
   }, [isOpen]);
 
+  // Critical Finding 1: Reset pin when errorMessage changes or becomes truthy
+  useEffect(() => {
+    if (errorMessage) {
+      pinRef.current = '';
+      setPin('');
+    }
+  }, [errorMessage]);
+
+  const handleDigit = (digit: string) => {
+    if (countdown > 0) return;
+    if (pinRef.current.length < 4) {
+      const next = pinRef.current + digit;
+      pinRef.current = next;
+      setPin(next);
+      if (next.length === 4) {
+        onSubmit(next);
+      }
+    }
+  };
+
+  const handleBackspace = () => {
+    if (pinRef.current.length > 0) {
+      const next = pinRef.current.slice(0, -1);
+      pinRef.current = next;
+      setPin(next);
+    }
+  };
+
+  const handleClear = () => {
+    pinRef.current = '';
+    setPin('');
+  };
+
+  // Important Finding 4: Capture phase listener to intercept Backspace before FocusContext
   useEffect(() => {
     if (!isOpen) return;
 
@@ -61,43 +110,17 @@ export function PinPadModal({
         } else if (code >= 96 && code <= 105) {
           digit = String(code - 96);
         }
-
-        setPin((prev) => {
-          if (prev.length < 4) {
-            const next = prev + digit;
-            if (next.length === 4) onSubmit(next);
-            return next;
-          }
-          return prev;
-        });
+        handleDigit(digit);
       } else if (code === TVKeys.BACKSPACE || e.key === 'Backspace') {
-        setPin((prev) => prev.slice(0, -1));
+        e.preventDefault();
+        e.stopPropagation();
+        handleBackspace();
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, countdown, onSubmit]);
-
-  const handleDigit = (digit: string) => {
-    if (countdown > 0) return;
-    setPin((prev) => {
-      if (prev.length < 4) {
-        const next = prev + digit;
-        if (next.length === 4) onSubmit(next);
-        return next;
-      }
-      return prev;
-    });
-  };
-
-  const handleBackspace = () => {
-    setPin((prev) => prev.slice(0, -1));
-  };
-
-  const handleClear = () => {
-    setPin('');
-  };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [isOpen, countdown]);
 
   if (!isOpen) return null;
 
@@ -142,6 +165,7 @@ export function PinPadModal({
       <TVButton
         id="pin-cancel-btn"
         groupId="pin-pad-modal"
+        order={13}
         variant="secondary"
         onEnter={onClose}
         onClick={onClose}

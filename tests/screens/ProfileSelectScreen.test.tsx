@@ -166,4 +166,69 @@ describe('ProfileSelectScreen', () => {
     fireEvent.click(screen.getByText(/Cancel/i));
     expect(screen.queryByText(/Enter PIN for Boody/i)).not.toBeInTheDocument();
   });
+
+  it('does not carry over lockout state when switching to another profile', async () => {
+    const onLogin = vi.fn().mockImplementation((userId: string) => {
+      if (userId === 'u1') {
+        return Promise.resolve({ success: false, error: 'Locked out', lockedOutSecs: 30 });
+      }
+      return Promise.resolve({ success: true });
+    });
+
+    render(
+      <FocusProvider>
+        <ProfileSelectScreen
+          profiles={mockProfiles}
+          serverName="Kadr Server"
+          onLogin={onLogin}
+        />
+      </FocusProvider>
+    );
+
+    // Select profile 1 (Boody)
+    fireEvent.click(screen.getByText('Boody'));
+
+    // Trigger lockout on profile 1
+    fireEvent.keyDown(window, { key: '1', keyCode: 49 });
+    fireEvent.keyDown(window, { key: '1', keyCode: 49 });
+    fireEvent.keyDown(window, { key: '1', keyCode: 49 });
+    fireEvent.keyDown(window, { key: '1', keyCode: 49 });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Locked out for 30s/i)).toBeInTheDocument();
+    });
+
+    // Close modal via Cancel button
+    fireEvent.click(screen.getByText(/Cancel/i));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Enter PIN/i)).not.toBeInTheDocument();
+    });
+
+    // Select profile 2 (Guest)
+    fireEvent.click(screen.getByText('Guest'));
+
+    // Profile 2 modal MUST NOT be locked out!
+    expect(screen.getByText(/Enter PIN for Guest/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Locked out for/i)).not.toBeInTheDocument();
+  });
+
+  it('calls onBackToServerConnect when Backspace key is pressed on main screen', () => {
+    const onBackToServerConnect = vi.fn();
+
+    render(
+      <FocusProvider>
+        <ProfileSelectScreen
+          profiles={mockProfiles}
+          serverName="Kadr Server"
+          onLogin={vi.fn()}
+          onBackToServerConnect={onBackToServerConnect}
+        />
+      </FocusProvider>
+    );
+
+    fireEvent.keyDown(window, { key: 'Backspace', keyCode: TVKeys.BACKSPACE });
+    expect(onBackToServerConnect).toHaveBeenCalledTimes(1);
+  });
 });
+
