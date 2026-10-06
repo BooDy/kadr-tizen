@@ -7,10 +7,11 @@ import { TVKeys } from '../../navigation/keys';
 export interface PinPadModalProps {
   isOpen: boolean;
   username: string;
-  onSubmit: (pin: string) => void;
+  onSubmit: (pin: string) => void | Promise<unknown>;
   onClose: () => void;
   lockedOutSecs?: number;
   errorMessage?: string;
+  onErrorClear?: () => void;
   onLockoutEnd?: () => void;
 }
 
@@ -21,6 +22,7 @@ export function PinPadModal({
   onClose,
   lockedOutSecs = 0,
   errorMessage,
+  onErrorClear,
   onLockoutEnd,
 }: PinPadModalProps) {
   const [pin, setPin] = useState('');
@@ -38,16 +40,16 @@ export function PinPadModal({
   useEffect(() => {
     if (countdown <= 0) return;
     const interval = setInterval(() => {
-      setCountdown((prev) => {
-        const next = Math.max(0, prev - 1);
-        if (next === 0) {
-          onLockoutEndRef.current?.();
-        }
-        return next;
-      });
+      setCountdown((prev) => Math.max(0, prev - 1));
     }, 1000);
     return () => clearInterval(interval);
   }, [countdown]);
+
+  useEffect(() => {
+    if (countdown === 0 && lockedOutSecs > 0) {
+      onLockoutEndRef.current?.();
+    }
+  }, [countdown, lockedOutSecs]);
 
   // Reset pin when modal closes
   useEffect(() => {
@@ -57,7 +59,7 @@ export function PinPadModal({
     }
   }, [isOpen]);
 
-  // Critical Finding 1: Reset pin when errorMessage changes or becomes truthy
+  // Reset pin when errorMessage changes or becomes truthy
   useEffect(() => {
     if (errorMessage) {
       pinRef.current = '';
@@ -67,13 +69,25 @@ export function PinPadModal({
 
   const handleDigit = (digit: string) => {
     if (countdown > 0) return;
-    if (pinRef.current.length < 4) {
-      const next = pinRef.current + digit;
-      pinRef.current = next;
-      setPin(next);
-      if (next.length === 4) {
-        onSubmit(next);
-      }
+    if (errorMessage) {
+      onErrorClear?.();
+    }
+
+    let next: string;
+    if (pinRef.current.length >= 4) {
+      next = digit;
+    } else {
+      next = pinRef.current + digit;
+    }
+
+    pinRef.current = next;
+    setPin(next);
+
+    if (next.length === 4) {
+      Promise.resolve(onSubmit(next)).finally(() => {
+        pinRef.current = '';
+        setPin('');
+      });
     }
   };
 
@@ -90,37 +104,39 @@ export function PinPadModal({
     setPin('');
   };
 
-  // Important Finding 4: Capture phase listener to intercept Backspace before FocusContext
+  // Ref-based key listener so listener is stable and never re-bound while open
+  const handleKeyDownRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  handleKeyDownRef.current = (e: KeyboardEvent) => {
+    const code = e.keyCode || e.which;
+
+    const isNumKey =
+      (code >= TVKeys.NUM_0 && code <= TVKeys.NUM_9) ||
+      (code >= 96 && code <= 105) ||
+      (e.key >= '0' && e.key <= '9');
+
+    if (isNumKey) {
+      if (countdown > 0) return;
+      let digit = e.key;
+      if (code >= TVKeys.NUM_0 && code <= TVKeys.NUM_9) {
+        digit = String(code - TVKeys.NUM_0);
+      } else if (code >= 96 && code <= 105) {
+        digit = String(code - 96);
+      }
+      handleDigit(digit);
+    } else if (code === TVKeys.BACKSPACE || e.key === 'Backspace') {
+      e.preventDefault();
+      e.stopPropagation();
+      handleBackspace();
+    }
+  };
+
   useEffect(() => {
     if (!isOpen) return;
 
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const code = e.keyCode || e.which;
-
-      const isNumKey =
-        (code >= TVKeys.NUM_0 && code <= TVKeys.NUM_9) ||
-        (code >= 96 && code <= 105) ||
-        (e.key >= '0' && e.key <= '9');
-
-      if (isNumKey) {
-        if (countdown > 0) return;
-        let digit = e.key;
-        if (code >= TVKeys.NUM_0 && code <= TVKeys.NUM_9) {
-          digit = String(code - TVKeys.NUM_0);
-        } else if (code >= 96 && code <= 105) {
-          digit = String(code - 96);
-        }
-        handleDigit(digit);
-      } else if (code === TVKeys.BACKSPACE || e.key === 'Backspace') {
-        e.preventDefault();
-        e.stopPropagation();
-        handleBackspace();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [isOpen, countdown]);
+    const onKey = (e: KeyboardEvent) => handleKeyDownRef.current(e);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 

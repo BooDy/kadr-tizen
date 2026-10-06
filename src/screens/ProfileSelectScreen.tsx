@@ -35,6 +35,7 @@ export function ProfileSelectScreen({
       setErrorMsg(undefined);
       setLockoutSecs(0);
     }
+    return res;
   };
 
   useEffect(() => {
@@ -87,6 +88,7 @@ export function ProfileSelectScreen({
         isOpen={Boolean(selectedUser)}
         username={selectedUser?.username || ''}
         onSubmit={handlePinSubmit}
+        onErrorClear={() => setErrorMsg(undefined)}
         onClose={() => {
           setSelectedUser(null);
           setErrorMsg(undefined);

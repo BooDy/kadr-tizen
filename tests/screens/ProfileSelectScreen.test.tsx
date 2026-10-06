@@ -230,5 +230,71 @@ describe('ProfileSelectScreen', () => {
     fireEvent.keyDown(window, { key: 'Backspace', keyCode: TVKeys.BACKSPACE });
     expect(onBackToServerConnect).toHaveBeenCalledTimes(1);
   });
+
+  it('allows consecutive failed PIN attempts without freezing on identical error messages', async () => {
+    let attempts = 0;
+    const submittedPins: string[] = [];
+    const onLogin = vi.fn().mockImplementation((_userId: string, pin: string) => {
+      attempts++;
+      submittedPins.push(pin);
+      if (attempts === 3) {
+        return Promise.resolve({ success: true });
+      }
+      return Promise.resolve({
+        success: false,
+        error: 'Invalid PIN', // Identical error string on both failures
+      });
+    });
+
+    render(
+      <FocusProvider>
+        <ProfileSelectScreen
+          profiles={mockProfiles}
+          serverName="Kadr Server"
+          onLogin={onLogin}
+        />
+      </FocusProvider>
+    );
+
+    // Select profile (Boody)
+    fireEvent.click(screen.getByText('Boody'));
+    expect(screen.getByText(/Enter PIN for Boody/i)).toBeInTheDocument();
+
+    // First invalid PIN attempt: 1, 2, 3, 4
+    fireEvent.keyDown(window, { key: '1', keyCode: 49 });
+    fireEvent.keyDown(window, { key: '2', keyCode: 50 });
+    fireEvent.keyDown(window, { key: '3', keyCode: 51 });
+    fireEvent.keyDown(window, { key: '4', keyCode: 52 });
+
+    await waitFor(() => {
+      expect(screen.getByText('Invalid PIN')).toBeInTheDocument();
+    });
+    expect(attempts).toBe(1);
+    expect(submittedPins).toEqual(['1234']);
+
+    // Second invalid PIN attempt with consecutive identical error: 5, 6, 7, 8
+    fireEvent.keyDown(window, { key: '5', keyCode: 53 });
+    fireEvent.keyDown(window, { key: '6', keyCode: 54 });
+    fireEvent.keyDown(window, { key: '7', keyCode: 55 });
+    fireEvent.keyDown(window, { key: '8', keyCode: 56 });
+
+    await waitFor(() => {
+      expect(attempts).toBe(2);
+      expect(submittedPins).toEqual(['1234', '5678']);
+      expect(screen.getByText('Invalid PIN')).toBeInTheDocument();
+    });
+
+    // Third attempt (valid login this time): 9, 9, 9, 9
+    fireEvent.keyDown(window, { key: '9', keyCode: 57 });
+    fireEvent.keyDown(window, { key: '9', keyCode: 57 });
+    fireEvent.keyDown(window, { key: '9', keyCode: 57 });
+    fireEvent.keyDown(window, { key: '9', keyCode: 57 });
+
+    await waitFor(() => {
+      expect(attempts).toBe(3);
+      expect(screen.queryByText(/Enter PIN for Boody/i)).not.toBeInTheDocument();
+    });
+    expect(submittedPins).toEqual(['1234', '5678', '9999']);
+  });
 });
 

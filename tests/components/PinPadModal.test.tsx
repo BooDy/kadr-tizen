@@ -266,6 +266,28 @@ describe('PinPadModal', () => {
 
     // Should successfully submit the new 4-digit PIN
     expect(onSubmit).toHaveBeenCalledWith('5678');
+    onSubmit.mockClear();
+
+    // Rerender with the identical error message (consecutive failure)
+    rerender(
+      <FocusProvider>
+        <PinPadModal
+          isOpen={true}
+          username="Boody"
+          onSubmit={onSubmit}
+          onClose={vi.fn()}
+          errorMessage="Invalid PIN"
+        />
+      </FocusProvider>
+    );
+
+    // Type third attempt: 9, 9, 9, 9
+    fireEvent.keyDown(window, { key: '9', keyCode: 57 });
+    fireEvent.keyDown(window, { key: '9', keyCode: 57 });
+    fireEvent.keyDown(window, { key: '9', keyCode: 57 });
+    fireEvent.keyDown(window, { key: '9', keyCode: 57 });
+
+    expect(onSubmit).toHaveBeenCalledWith('9999');
   });
 
   it('does not pop modal focus trap when Backspace is pressed', () => {
