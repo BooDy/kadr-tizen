@@ -11,6 +11,7 @@ import { TVKeys, registerTizenKeys } from './keys';
 
 export interface FocusContextType {
   focusedId: string | null;
+  activeTrap: string | null;
   setFocusedId: (id: string | null | ((prev: string | null) => string | null)) => void;
   registerNode: (node: FocusNode) => void;
   unregisterNode: (id: string) => void;
@@ -24,6 +25,7 @@ const FocusContext = createContext<FocusContextType | null>(null);
 
 export function FocusProvider({ children }: { children: React.ReactNode }) {
   const [focusedId, setFocusedIdState] = useState<string | null>(null);
+  const [activeTrapState, setActiveTrapState] = useState<string | null>(null);
   const focusedIdRef = useRef<string | null>(null);
   const nodesRef = useRef<Map<string, FocusNode>>(new Map());
   const trapStackRef = useRef<string[]>([]);
@@ -80,6 +82,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
         historyStackRef.current.push(current);
       }
       trapStackRef.current.push(trapGroupId);
+      setActiveTrapState(trapGroupId);
       for (const node of nodesRef.current.values()) {
         if (node.groupId === trapGroupId) {
           setFocusedId(node.id);
@@ -93,11 +96,12 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   const popTrap = useCallback(() => {
     if (trapStackRef.current.length === 0) return;
     trapStackRef.current.pop();
+    const activeTrap = trapStackRef.current[trapStackRef.current.length - 1] ?? null;
+    setActiveTrapState(activeTrap);
     const prev = historyStackRef.current.pop();
     if (prev && nodesRef.current.has(prev)) {
       setFocusedId(prev);
     } else {
-      const activeTrap = trapStackRef.current[trapStackRef.current.length - 1];
       for (const node of nodesRef.current.values()) {
         if (!activeTrap || node.groupId === activeTrap) {
           setFocusedId(node.id);
@@ -248,6 +252,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
 
   const value: FocusContextType = {
     focusedId,
+    activeTrap: activeTrapState,
     setFocusedId,
     registerNode,
     unregisterNode,

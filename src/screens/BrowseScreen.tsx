@@ -42,7 +42,17 @@ function isLeftmostContentNode(id: string | null, layout: ScreenLayout | null): 
     } else if (widget.type === 'catalog_grid') {
       const idx = widget.items.findIndex((item) => `grid-card-${item.id}` === id);
       if (idx !== -1) {
-        return idx === 0 || idx % 4 === 0 || idx % 5 === 0;
+        if (typeof document !== 'undefined') {
+          const el = document.getElementById(id);
+          if (el) {
+            const rect = el.getBoundingClientRect();
+            if (rect.width > 0 || rect.left > 0) {
+              return rect.left < 400;
+            }
+          }
+        }
+        // Fallback for 1080p fixed canvas with 6 columns (xl:grid-cols-6)
+        return idx % 6 === 0;
       }
     }
   }
@@ -63,6 +73,16 @@ function isValidContentNode(id: string | null, layout: ScreenLayout | null): boo
   return false;
 }
 
+function isModalActive(activeTrap?: string | null): boolean {
+  if (activeTrap) return true;
+  if (typeof document !== 'undefined') {
+    return Boolean(
+      document.querySelector('[aria-modal="true"], [role="dialog"], .fixed.z-50')
+    );
+  }
+  return false;
+}
+
 export function BrowseScreen({
   client,
   serverUrl,
@@ -75,7 +95,7 @@ export function BrowseScreen({
   const [layout, setLayout] = useState<ScreenLayout | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const { focusedId, setFocusedId } = useFocusContext();
+  const { focusedId, setFocusedId, activeTrap } = useFocusContext();
 
   const sidebarIds = ['nav-home', 'nav-movies', 'nav-shows', 'nav-switch-profile'];
   const isSidebarFocused = sidebarIds.includes(focusedId ?? '');
@@ -128,11 +148,32 @@ export function BrowseScreen({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const targetEl = e.target as HTMLElement | null;
+
+      // Guard 1: Never intercept Back/Backspace in input or textarea fields
+      if (
+        targetEl &&
+        (targetEl.tagName === 'INPUT' ||
+          targetEl.tagName === 'TEXTAREA' ||
+          targetEl.isContentEditable)
+      ) {
+        return;
+      }
+
+      // Guard 2: Never intercept if a modal or focus trap is active or target is inside a modal
+      const isTargetInModal = Boolean(
+        targetEl?.closest?.('[aria-modal="true"], [role="dialog"]')
+      );
+      if (isTargetInModal || isModalActive(activeTrap)) {
+        return;
+      }
+
       const code = e.keyCode || e.which;
       const currentFocused = focusedIdRef.current;
       const onSidebar = isSidebarFocusedRef.current;
 
       // Back navigation (Escape / TV Back 10009 / Backspace) from content area returns focus to sidebar
+      // Guard 3: Only intercept if current focus is a valid content node in layout
       if (
         code === TVKeys.BACK_TIZEN ||
         code === TVKeys.BACK_WEB ||
@@ -140,7 +181,7 @@ export function BrowseScreen({
         e.key === 'Escape' ||
         e.key === 'Backspace'
       ) {
-        if (!onSidebar && currentFocused) {
+        if (!onSidebar && isValidContentNode(currentFocused, layout)) {
           e.preventDefault();
           e.stopPropagation();
           setFocusedId(`nav-${activeTab}`);
@@ -150,7 +191,11 @@ export function BrowseScreen({
 
       // ArrowLeft from leftmost content element transitions to sidebar
       if (code === TVKeys.LEFT || e.key === 'ArrowLeft') {
-        if (!onSidebar && currentFocused && isLeftmostContentNode(currentFocused, layout)) {
+        if (
+          !onSidebar &&
+          isValidContentNode(currentFocused, layout) &&
+          isLeftmostContentNode(currentFocused, layout)
+        ) {
           e.preventDefault();
           e.stopPropagation();
           setFocusedId(`nav-${activeTab}`);
@@ -176,7 +221,7 @@ export function BrowseScreen({
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [activeTab, layout, setFocusedId]);
+  }, [activeTab, layout, setFocusedId, activeTrap]);
 
   return (
     <div className="w-full h-full flex bg-zinc-950 overflow-hidden">

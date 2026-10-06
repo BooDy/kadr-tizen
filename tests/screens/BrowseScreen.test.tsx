@@ -44,11 +44,13 @@ describe('BrowseScreen', () => {
         type: 'catalog_grid',
         title: 'Feature Films',
         items: [
-          {
-            id: 'film-1',
-            item_id: 'movie-10',
-            title: 'Interstellar',
-          },
+          { id: 'film-1', item_id: 'movie-10', title: 'Interstellar' },
+          { id: 'film-2', item_id: 'movie-11', title: 'Inception' },
+          { id: 'film-3', item_id: 'movie-12', title: 'The Prestige' },
+          { id: 'film-4', item_id: 'movie-13', title: 'Memento' },
+          { id: 'film-5', item_id: 'movie-14', title: 'Oppenheimer' },
+          { id: 'film-6', item_id: 'movie-15', title: 'Dunkirk' },
+          { id: 'film-7', item_id: 'movie-16', title: 'Tenet' },
         ],
       },
     ],
@@ -513,5 +515,138 @@ describe('BrowseScreen', () => {
     await waitFor(() => {
       expect(document.activeElement?.id).toBe('grid-card-film-1');
     });
+  });
+
+  it('pressing ArrowLeft from column 1+ in CatalogGridWidget stays within grid and does NOT jump to sidebar', async () => {
+    vi.spyOn(screensApi, 'fetchScreenLayout').mockResolvedValue(mockMoviesLayout);
+
+    render(
+      <FocusProvider>
+        <BrowseScreen
+          client={mockClient}
+          serverUrl="http://localhost:8492"
+          initialTab="movies"
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+          onSwitchProfile={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(document.activeElement?.id).toBe('grid-card-film-1');
+    });
+
+    // Move right to film-2 (column 1)
+    fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+    expect(document.activeElement?.id).toBe('grid-card-film-2');
+
+    // Move right to film-5 (column 4)
+    fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+    expect(document.activeElement?.id).toBe('grid-card-film-3');
+    fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+    expect(document.activeElement?.id).toBe('grid-card-film-4');
+    fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+    expect(document.activeElement?.id).toBe('grid-card-film-5');
+
+    // Now press ArrowLeft from column 4 (film-5): must stay in grid and move to film-4
+    fireEvent.keyDown(window, { key: 'ArrowLeft', keyCode: TVKeys.LEFT });
+    expect(document.activeElement?.id).toBe('grid-card-film-4');
+    expect(document.activeElement?.id).not.toBe('nav-movies');
+
+    // Move left to film-3, film-2, film-1
+    fireEvent.keyDown(window, { key: 'ArrowLeft', keyCode: TVKeys.LEFT });
+    expect(document.activeElement?.id).toBe('grid-card-film-3');
+    fireEvent.keyDown(window, { key: 'ArrowLeft', keyCode: TVKeys.LEFT });
+    expect(document.activeElement?.id).toBe('grid-card-film-2');
+    fireEvent.keyDown(window, { key: 'ArrowLeft', keyCode: TVKeys.LEFT });
+    expect(document.activeElement?.id).toBe('grid-card-film-1');
+
+    // From column 0 (film-1), ArrowLeft transitions to sidebar nav-movies
+    fireEvent.keyDown(window, { key: 'ArrowLeft', keyCode: TVKeys.LEFT });
+    expect(document.activeElement?.id).toBe('nav-movies');
+  });
+
+  it('does NOT intercept Backspace or Back key when typing in an input element', async () => {
+    vi.spyOn(screensApi, 'fetchScreenLayout').mockResolvedValue(mockHomeLayout);
+
+    render(
+      <FocusProvider>
+        <div>
+          <input data-testid="search-input" defaultValue="query" />
+          <BrowseScreen
+            client={mockClient}
+            serverUrl="http://localhost:8492"
+            onSelectItem={vi.fn()}
+            onPlayItem={vi.fn()}
+            onSwitchProfile={vi.fn()}
+          />
+        </div>
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Home Featured Movie')).toBeInTheDocument();
+    });
+
+    const input = screen.getByTestId('search-input') as HTMLInputElement;
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
+    // Fire Backspace event with input as target
+    const backspaceEvent = new KeyboardEvent('keydown', {
+      key: 'Backspace',
+      keyCode: TVKeys.BACKSPACE,
+      bubbles: true,
+      cancelable: true,
+    });
+    const notCancelled = input.dispatchEvent(backspaceEvent);
+
+    // Event must not be cancelled by BrowseScreen
+    expect(notCancelled).toBe(true);
+    // Focus must stay on input, NOT jump to nav-home
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('does NOT intercept Back or Escape key when a modal dialog is open', async () => {
+    vi.spyOn(screensApi, 'fetchScreenLayout').mockResolvedValue(mockHomeLayout);
+
+    render(
+      <FocusProvider>
+        <div>
+          <BrowseScreen
+            client={mockClient}
+            serverUrl="http://localhost:8492"
+            onSelectItem={vi.fn()}
+            onPlayItem={vi.fn()}
+            onSwitchProfile={vi.fn()}
+          />
+          <div role="dialog" aria-modal="true" data-testid="test-dialog">
+            <button id="modal-btn" data-testid="modal-btn">Close Modal</button>
+          </div>
+        </div>
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Home Featured Movie')).toBeInTheDocument();
+    });
+
+    const modalBtn = screen.getByTestId('modal-btn');
+    modalBtn.focus();
+    expect(document.activeElement).toBe(modalBtn);
+
+    // Fire Escape event while modal is open
+    const escapeEvent = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      keyCode: TVKeys.BACK_WEB,
+      bubbles: true,
+      cancelable: true,
+    });
+    const notCancelled = modalBtn.dispatchEvent(escapeEvent);
+
+    // Escape should not be swallowed or redirected to sidebar nav-home
+    expect(notCancelled).toBe(true);
+    expect(document.activeElement).toBe(modalBtn);
   });
 });
