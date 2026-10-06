@@ -116,6 +116,66 @@ function DynamicUnmountComponent() {
   );
 }
 
+function InlineCallbacksComponent({ count }: { count: number }) {
+  const { focusedId } = useFocusContext();
+  const f1 = useFocusable({
+    id: 'btn-inline-1',
+    groupId: 'row-inline',
+    autoFocus: true,
+    onEnter: () => {},
+    onBack: () => {},
+  });
+  const f2 = useFocusable({
+    id: 'btn-inline-2',
+    groupId: 'row-inline',
+    onEnter: () => {},
+  });
+
+  return (
+    <div>
+      <div data-testid="current-focus">{focusedId}</div>
+      <button ref={f1.ref} tabIndex={-1} data-testid="btn-inline-1">
+        B1 count: {count}
+      </button>
+      <button ref={f2.ref} tabIndex={-1} data-testid="btn-inline-2">
+        B2 count: {count}
+      </button>
+    </div>
+  );
+}
+
+function BackCallbackComponent({ onBack }: { onBack: () => void }) {
+  const { focusedId } = useFocusContext();
+  const f1 = useFocusable({
+    id: 'btn-back',
+    groupId: 'main',
+    autoFocus: true,
+    onBack,
+  });
+
+  return (
+    <div>
+      <div data-testid="current-focus">{focusedId}</div>
+      <button ref={f1.ref} data-testid="btn-back">Back Button</button>
+    </div>
+  );
+}
+
+function EmptyTrapPopComponent() {
+  const { focusedId, popTrap } = useFocusContext();
+  const f1 = useFocusable({ id: 'btn-empty-1', groupId: 'row', autoFocus: false });
+  const f2 = useFocusable({ id: 'btn-empty-2', groupId: 'row', autoFocus: true });
+
+  return (
+    <div>
+      <div data-testid="current-focus">{focusedId}</div>
+      <button ref={f1.ref} data-testid="b1">B1</button>
+      <button ref={f2.ref} data-testid="b2">B2</button>
+      <button data-testid="pop" onClick={() => popTrap()}>Pop</button>
+    </div>
+  );
+}
+
 describe('Spatial Navigation', () => {
   it('assigns initial autoFocus to first element', () => {
     render(
@@ -378,6 +438,71 @@ describe('Spatial Navigation', () => {
       'useFocusContext must be used within a FocusProvider'
     );
     consoleSpy.mockRestore();
+  });
+
+  it('preserves focus across component re-renders when inline callbacks are passed', () => {
+    const { rerender } = render(
+      <FocusProvider>
+        <InlineCallbacksComponent count={0} />
+      </FocusProvider>
+    );
+
+    // Initial focus on btn-inline-1
+    expect(screen.getByTestId('current-focus').textContent).toBe('btn-inline-1');
+
+    // Move focus right to btn-inline-2
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowRight' });
+    });
+    expect(screen.getByTestId('current-focus').textContent).toBe('btn-inline-2');
+
+    // Re-render component with new props (new inline callback closures)
+    rerender(
+      <FocusProvider>
+        <InlineCallbacksComponent count={1} />
+      </FocusProvider>
+    );
+
+    // Focus must still be preserved on btn-inline-2!
+    expect(screen.getByTestId('current-focus').textContent).toBe('btn-inline-2');
+  });
+
+  it('invokes onBack callback on focused element when Escape or TV Back key is pressed', () => {
+    const onBack = vi.fn();
+    render(
+      <FocusProvider>
+        <BackCallbackComponent onBack={onBack} />
+      </FocusProvider>
+    );
+
+    expect(screen.getByTestId('current-focus').textContent).toBe('btn-back');
+
+    act(() => {
+      fireEvent.keyDown(window, { key: 'Escape' });
+    });
+    expect(onBack).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN });
+    });
+    expect(onBack).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not corrupt or reset focus when popTrap is called with an empty trap stack', () => {
+    render(
+      <FocusProvider>
+        <EmptyTrapPopComponent />
+      </FocusProvider>
+    );
+
+    expect(screen.getByTestId('current-focus').textContent).toBe('btn-empty-2');
+
+    act(() => {
+      screen.getByTestId('pop').click();
+    });
+
+    // Focus must remain on btn-empty-2, not get reset to btn-empty-1
+    expect(screen.getByTestId('current-focus').textContent).toBe('btn-empty-2');
   });
 });
 

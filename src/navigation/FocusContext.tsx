@@ -35,6 +35,9 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
 
   const setFocusedId = useCallback(
     (idOrUpdater: string | null | ((prev: string | null) => string | null)) => {
+      if (typeof idOrUpdater !== 'function') {
+        focusedIdRef.current = idOrUpdater;
+      }
       setFocusedIdState((prev) => {
         const next = typeof idOrUpdater === 'function' ? idOrUpdater(prev) : idOrUpdater;
         focusedIdRef.current = next;
@@ -88,6 +91,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   );
 
   const popTrap = useCallback(() => {
+    if (trapStackRef.current.length === 0) return;
     trapStackRef.current.pop();
     const prev = historyStackRef.current.pop();
     if (prev && nodesRef.current.has(prev)) {

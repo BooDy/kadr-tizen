@@ -38,14 +38,16 @@ export function useFocusable<T extends HTMLElement = HTMLElement>({
     (node: T | null) => {
       elementRef.current = node;
       (callbackRef as unknown as { current: T | null }).current = node;
-      registerNode({
-        id: optionsRef.current.id,
-        groupId: optionsRef.current.groupId,
-        element: node,
-        onEnter: optionsRef.current.onEnter,
-        onBack: optionsRef.current.onBack,
-        order: optionsRef.current.order,
-      });
+      if (node) {
+        registerNode({
+          id: optionsRef.current.id,
+          groupId: optionsRef.current.groupId,
+          element: node,
+          onEnter: optionsRef.current.onEnter,
+          onBack: optionsRef.current.onBack,
+          order: optionsRef.current.order,
+        });
+      }
     },
     [registerNode]
   );
@@ -53,6 +55,18 @@ export function useFocusable<T extends HTMLElement = HTMLElement>({
   const ref = callbackRef as unknown as FocusableRef<T>;
   ref.current = elementRef.current;
 
+  // Lifecycle effect: handle autoFocus on mount and unregister on unmount / ID change
+  useEffect(() => {
+    if (autoFocus) {
+      setFocusedId((prev) => (prev === null ? id : prev));
+    }
+
+    return () => {
+      unregisterNode(id);
+    };
+  }, [id, autoFocus, unregisterNode, setFocusedId]);
+
+  // Property update effect: synchronize node attributes without calling unregisterNode
   useEffect(() => {
     registerNode({
       id,
@@ -62,15 +76,7 @@ export function useFocusable<T extends HTMLElement = HTMLElement>({
       onBack,
       order,
     });
-
-    if (autoFocus) {
-      setFocusedId((prev) => (prev === null ? id : prev));
-    }
-
-    return () => {
-      unregisterNode(id);
-    };
-  }, [id, groupId, onEnter, onBack, autoFocus, order, registerNode, unregisterNode, setFocusedId]);
+  }, [id, groupId, onEnter, onBack, order, registerNode]);
 
   return {
     ref,
