@@ -16,6 +16,9 @@ export function WidgetRenderer({
   onSelectItem,
   onPlayItem,
 }: WidgetRendererProps) {
+  const hasHero = layout.widgets.some((w) => w.type === 'hero_spotlight');
+  const firstWidgetId = layout.widgets[0]?.id;
+
   return (
     <div className="flex flex-col w-full pb-16">
       {layout.widgets.map((widget) => {
@@ -36,6 +39,7 @@ export function WidgetRenderer({
               key={widget.id}
               widget={widget}
               serverUrl={serverUrl}
+              autoFocusFirstItem={!hasHero && widget.id === firstWidgetId}
               onSelectItem={onSelectItem}
             />
           );
@@ -46,6 +50,7 @@ export function WidgetRenderer({
               key={widget.id}
               widget={widget}
               serverUrl={serverUrl}
+              autoFocusFirstItem={!hasHero && widget.id === firstWidgetId}
               onSelectItem={onSelectItem}
             />
           );

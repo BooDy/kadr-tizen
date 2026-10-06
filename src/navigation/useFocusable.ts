@@ -78,9 +78,17 @@ export function useFocusable<T extends HTMLElement = HTMLElement>({
     });
   }, [id, groupId, onEnter, onBack, order, registerNode]);
 
+  const isFocused = focusedId === id;
+
+  useEffect(() => {
+    if (isFocused && elementRef.current) {
+      elementRef.current.focus?.({ preventScroll: true });
+    }
+  }, [isFocused]);
+
   return {
     ref,
-    isFocused: focusedId === id,
+    isFocused,
     focus: () => setFocusedId(id),
   };
 }

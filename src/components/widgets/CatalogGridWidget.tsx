@@ -5,9 +5,15 @@ export interface CatalogGridProps {
   widget: ASTGridWidget;
   serverUrl: string;
   onSelectItem: (itemId: string) => void;
+  autoFocusFirstItem?: boolean;
 }
 
-export function CatalogGridWidget({ widget, serverUrl, onSelectItem }: CatalogGridProps) {
+export function CatalogGridWidget({
+  widget,
+  serverUrl,
+  onSelectItem,
+  autoFocusFirstItem,
+}: CatalogGridProps) {
   const cleanServer = serverUrl.replace(/\/+$/, '');
 
   return (
@@ -32,6 +38,7 @@ export function CatalogGridWidget({ widget, serverUrl, onSelectItem }: CatalogGr
               imageUrl={imageUrl}
               badge={item.badge}
               progressPercent={item.progress_percent}
+              autoFocus={autoFocusFirstItem && index === 0}
               onSelect={() => onSelectItem(item.item_id)}
             />
           );

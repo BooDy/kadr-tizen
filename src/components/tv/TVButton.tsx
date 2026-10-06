@@ -64,6 +64,7 @@ export function TVButton({
   return (
     <button
       ref={ref}
+      id={id}
       tabIndex={-1}
       disabled={disabled}
       className={`${baseStyle} ${variantStyles[variant]} ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${className}`}

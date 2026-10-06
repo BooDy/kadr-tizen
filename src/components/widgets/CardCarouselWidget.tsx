@@ -5,9 +5,15 @@ export interface CardCarouselProps {
   widget: ASTCarouselWidget;
   serverUrl: string;
   onSelectItem: (itemId: string) => void;
+  autoFocusFirstItem?: boolean;
 }
 
-export function CardCarouselWidget({ widget, serverUrl, onSelectItem }: CardCarouselProps) {
+export function CardCarouselWidget({
+  widget,
+  serverUrl,
+  onSelectItem,
+  autoFocusFirstItem,
+}: CardCarouselProps) {
   const cleanServer = serverUrl.replace(/\/+$/, '');
 
   return (
@@ -32,6 +38,7 @@ export function CardCarouselWidget({ widget, serverUrl, onSelectItem }: CardCaro
               imageUrl={imageUrl}
               badge={item.badge}
               progressPercent={item.progress_percent}
+              autoFocus={autoFocusFirstItem && index === 0}
               onSelect={() => onSelectItem(item.item_id)}
             />
           );

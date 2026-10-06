@@ -36,6 +36,7 @@ export function TVCard({
   return (
     <div
       ref={ref}
+      id={id}
       tabIndex={-1}
       role="button"
       onClick={onSelect}
