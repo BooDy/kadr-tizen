@@ -85,8 +85,10 @@ export function PinPadModal({
 
     if (next.length === 4) {
       Promise.resolve(onSubmit(next)).finally(() => {
-        pinRef.current = '';
-        setPin('');
+        if (pinRef.current === next) {
+          pinRef.current = '';
+          setPin('');
+        }
       });
     }
   };
