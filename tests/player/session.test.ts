@@ -109,4 +109,34 @@ describe('PlaybackSessionManager', () => {
     expect(endSpy).toHaveBeenCalledWith(client, 'sess-1');
     expect(manager.getSessionId()).toBe('sess-2');
   });
+
+  it('immediately destroys session if destroy() is called while start() is in-flight', async () => {
+    let resolveStart!: (value: any) => void;
+    const startPromise = new Promise((resolve) => {
+      resolveStart = resolve;
+    });
+
+    vi.spyOn(playbackApi, 'startPlaybackSession').mockReturnValue(startPromise as any);
+    const endSpy = vi.spyOn(playbackApi, 'endPlaybackSession').mockResolvedValue();
+
+    const manager = new PlaybackSessionManager(client);
+    const startCall = manager.start(101);
+
+    // Call destroy while start() is in-flight
+    await manager.destroy();
+
+    // Now resolve startPlaybackSession
+    resolveStart({
+      session_id: 'sess-inflight',
+      media_item_id: 101,
+      duration_seconds: 1000,
+      resume_position_seconds: 0,
+    });
+
+    const result = await startCall;
+
+    expect(result).toBeNull();
+    expect(manager.getSessionId()).toBeNull();
+    expect(endSpy).toHaveBeenCalledWith(client, 'sess-inflight');
+  });
 });

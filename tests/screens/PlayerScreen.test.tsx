@@ -510,6 +510,87 @@ describe('PlayerScreen', () => {
       expect(endSpy).toHaveBeenCalledWith(expect.anything(), 'sess-abc');
     });
 
+    it('reports final progress before ending playback session on exit keydown', async () => {
+      vi.spyOn(playbackApi, 'startPlaybackSession').mockResolvedValue({
+        session_id: 'sess-abc',
+        media_item_id: 101,
+        duration_seconds: 3600,
+        resume_position_seconds: 0,
+      });
+      const progressSpy = vi.spyOn(playbackApi, 'reportSessionProgress').mockResolvedValue();
+      const endSpy = vi.spyOn(playbackApi, 'endPlaybackSession').mockResolvedValue();
+      const callOrder: string[] = [];
+      progressSpy.mockImplementation(async () => {
+        callOrder.push('progress');
+      });
+      endSpy.mockImplementation(async () => {
+        callOrder.push('end');
+      });
+
+      render(
+        <PlayerScreen
+          itemId={101}
+          title="Sample Movie"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          onExit={vi.fn()}
+        />
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      act(() => {
+        mockDriver.timeCallback?.(35000, 100000);
+      });
+
+      act(() => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.BACK_TIZEN }));
+      });
+
+      expect(progressSpy).toHaveBeenCalledWith(expect.anything(), 'sess-abc', 35);
+      expect(endSpy).toHaveBeenCalledWith(expect.anything(), 'sess-abc');
+      expect(callOrder).toEqual(['progress', 'end']);
+    });
+
+    it('cancels in-flight session and avoids seek/updates if unmounted before start resolves', async () => {
+      let resolveStart!: (value: any) => void;
+      const startPromise = new Promise((resolve) => {
+        resolveStart = resolve;
+      });
+
+      vi.spyOn(playbackApi, 'startPlaybackSession').mockReturnValue(startPromise as any);
+      const endSpy = vi.spyOn(playbackApi, 'endPlaybackSession').mockResolvedValue();
+
+      const { unmount } = render(
+        <PlayerScreen
+          itemId={101}
+          title="Sample Movie"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          onExit={vi.fn()}
+        />
+      );
+
+      // Unmount while start is in-flight
+      unmount();
+
+      // Now resolve startPlaybackSession
+      await act(async () => {
+        resolveStart({
+          session_id: 'sess-late',
+          media_item_id: 101,
+          duration_seconds: 3600,
+          resume_position_seconds: 50,
+        });
+        await Promise.resolve();
+      });
+
+      expect(mockDriver.seekTo).not.toHaveBeenCalled();
+      expect(endSpy).toHaveBeenCalledWith(expect.anything(), 'sess-late');
+    });
+
     it('falls back to reportPlaybackProgress if session fails to start', async () => {
       vi.spyOn(playbackApi, 'startPlaybackSession').mockRejectedValue(new Error('500 Server Error'));
 

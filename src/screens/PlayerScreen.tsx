@@ -81,6 +81,7 @@ export function PlayerScreen({
 
   useEffect(() => {
     if (!containerRef.current) return;
+    let isMounted = true;
 
     const cleanServerUrl = serverUrl.replace(/\/+$/, '');
     const streamUrl = `${cleanServerUrl}/api/v1/streaming/${itemId}`;
@@ -104,6 +105,10 @@ export function PlayerScreen({
     const numericItemId = typeof itemId === 'number' ? itemId : parseInt(itemId, 10);
     if (!isNaN(numericItemId)) {
       sessionManager.start(numericItemId).then((session) => {
+        if (!isMounted) {
+          sessionManager.destroy();
+          return;
+        }
         if (session) {
           hasActiveSessionRef.current = true;
           if (session.resume_position_seconds > 0 && initialResume === 0) {
@@ -132,6 +137,7 @@ export function PlayerScreen({
     }, 10000);
 
     return () => {
+      isMounted = false;
       clearInterval(scrobbleInterval);
       if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
       // Final scrobble sync before teardown
@@ -180,6 +186,7 @@ export function PlayerScreen({
         e.key === 'Escape'
       ) {
         e.preventDefault();
+        sessionManager.updateProgress(Math.floor(positionMsRef.current / 1000));
         sessionManager.destroy();
         onExit();
       }
