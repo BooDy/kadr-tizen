@@ -20,7 +20,7 @@ export default function App() {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('kadr_token'));
   const [profiles, setProfiles] = useState<ProfileCard[]>([]);
   const [activeItem, setActiveItem] = useState<MediaItemDetail | null>(null);
-  const [playerItem, setPlayerItem] = useState<{ id: string; title: string; startMs: number } | null>(null);
+  const [playerItem, setPlayerItem] = useState<{ id: number | string; title: string; startMs: number } | null>(null);
   const [isOffline, setIsOffline] = useState(
     typeof navigator !== 'undefined' ? !navigator.onLine : false
   );
@@ -94,7 +94,7 @@ export default function App() {
     return { success: false, error: res.error, lockedOutSecs: res.retryAfterSecs };
   };
 
-  const handleOpenDetail = async (itemId: string) => {
+  const handleOpenDetail = async (itemId: number | string) => {
     try {
       const item = await fetchMediaItem(client, itemId);
       setActiveItem(item);
@@ -103,7 +103,7 @@ export default function App() {
     }
   };
 
-  const handlePlayItem = (itemId: string, resumeMs = 0) => {
+  const handlePlayItem = (itemId: number | string, resumeMs = 0) => {
     const title = activeItem?.title || 'Playing';
     setActiveItem(null);
     setPlayerItem({ id: itemId, title, startMs: resumeMs });

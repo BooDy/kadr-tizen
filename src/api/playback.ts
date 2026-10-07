@@ -1,7 +1,7 @@
 export async function reportPlaybackProgress(
   serverUrl: string,
   token: string,
-  itemId: string,
+  itemId: number | string,
   positionMs: number,
   isPaused: boolean
 ): Promise<void> {

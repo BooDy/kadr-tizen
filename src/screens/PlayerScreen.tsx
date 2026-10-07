@@ -6,7 +6,7 @@ import { TVKeys } from '../navigation/keys';
 import { PlayerOSD } from '../components/osd/PlayerOSD';
 
 export interface PlayerScreenProps {
-  itemId: string;
+  itemId: number | string;
   title: string;
   serverUrl: string;
   token: string;

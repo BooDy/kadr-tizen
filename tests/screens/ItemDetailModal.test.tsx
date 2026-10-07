@@ -374,5 +374,40 @@ describe('ItemDetailModal', () => {
       expect(fetchSpy).toHaveBeenCalledWith('/api/v1/items/movie-1');
       expect(result).toEqual(mockMovieWithResume);
     });
+
+    it('supports numeric item ID', async () => {
+      const client = new ApiClient('http://localhost:8492');
+      const numericItem = { ...mockMovieWithResume, id: 101 };
+      const fetchSpy = vi.spyOn(client, 'fetch').mockResolvedValue(numericItem);
+
+      const result = await fetchMediaItem(client, 101);
+
+      expect(fetchSpy).toHaveBeenCalledWith('/api/v1/items/101');
+      expect(result.id).toBe(101);
+    });
+  });
+
+  it('supports numeric item ID and passes numeric id to onPlay', () => {
+    const onPlay = vi.fn();
+    const onClose = vi.fn();
+    const numericItem: MediaItemDetail = {
+      ...mockMovieWithoutResume,
+      id: 42,
+    };
+
+    render(
+      <FocusProvider>
+        <ItemDetailModal
+          isOpen={true}
+          item={numericItem}
+          serverUrl="http://localhost:8492"
+          onPlay={onPlay}
+          onClose={onClose}
+        />
+      </FocusProvider>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /^Play$/i }));
+    expect(onPlay).toHaveBeenCalledWith(42, 0);
   });
 });

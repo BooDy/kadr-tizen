@@ -17,7 +17,12 @@ export function WidgetRenderer({
   onPlayItem,
 }: WidgetRendererProps) {
   const hasHero = layout.widgets.some((w) => w.type === 'hero_banner' && Boolean(w.data));
-  const firstWidgetId = layout.widgets[0]?.id;
+  const firstRenderableWidgetId = layout.widgets.find((w) => {
+    if (w.type === 'hero_banner') return Boolean(w.data);
+    if (w.type === 'carousel') return (w.items?.length ?? 0) > 0;
+    if (w.type === 'grid') return (w.items?.length ?? 0) > 0;
+    return false;
+  })?.id;
 
   return (
     <div className="flex flex-col w-full pb-16">
@@ -40,7 +45,7 @@ export function WidgetRenderer({
               widget={widget}
               serverUrl={serverUrl}
               onSelectItem={onSelectItem}
-              autoFocusFirstItem={!hasHero && widget.id === firstWidgetId}
+              autoFocusFirstItem={!hasHero && widget.id === firstRenderableWidgetId}
             />
           );
         }
@@ -51,7 +56,7 @@ export function WidgetRenderer({
               widget={widget}
               serverUrl={serverUrl}
               onSelectItem={onSelectItem}
-              autoFocusFirstItem={!hasHero && widget.id === firstWidgetId}
+              autoFocusFirstItem={!hasHero && widget.id === firstRenderableWidgetId}
             />
           );
         }

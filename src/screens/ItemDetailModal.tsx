@@ -9,7 +9,7 @@ export interface ItemDetailModalProps {
   isOpen: boolean;
   item: MediaItemDetail | null;
   serverUrl: string;
-  onPlay: (itemId: string, startMs?: number) => void;
+  onPlay: (itemId: number | string, startMs?: number) => void;
   onClose: () => void;
 }
 

@@ -28,7 +28,10 @@ export function CatalogGridWidget({
           </span>
         )}
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6 py-2 px-2">
+      <div
+        className={widget.columns ? 'grid gap-6 py-2 px-2' : 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6 py-2 px-2'}
+        style={widget.columns ? { gridTemplateColumns: `repeat(${widget.columns}, minmax(0, 1fr))` } : undefined}
+      >
         {items.map((item, idx) => {
           const imgUrl = item.poster_url
             ? item.poster_url.startsWith('http')

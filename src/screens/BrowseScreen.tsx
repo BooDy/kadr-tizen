@@ -1,32 +1,51 @@
 import { useState, useEffect, useRef } from 'react';
-import { ScreenLayout } from '../types/ast';
+import { ScreenLayout, ScreenSummary } from '../types/ast';
 import { ApiClient } from '../api/client';
-import { fetchScreenLayout } from '../api/screens';
+import { fetchScreens, fetchScreenLayout } from '../api/screens';
 import { WidgetRenderer } from '../components/widgets/WidgetRenderer';
 import { TVButton } from '../components/tv/TVButton';
-import { Home, Film, Tv, Users } from 'lucide-react';
+import { Home, Film, Tv, Layers, Users } from 'lucide-react';
 import { useFocusContext } from '../navigation/FocusContext';
 import { TVKeys } from '../navigation/keys';
 
 export interface BrowseScreenProps {
   client: ApiClient;
   serverUrl: string;
-  onSelectItem: (itemId: string) => void;
-  onPlayItem: (itemId: string, resumeMs?: number) => void;
+  onSelectItem: (itemId: number | string) => void;
+  onPlayItem: (itemId: number | string, resumeMs?: number) => void;
   onSwitchProfile: () => void;
-  initialTab?: 'home' | 'movies' | 'shows';
+  initialTab?: string;
+}
+
+const defaultScreens: ScreenSummary[] = [
+  { id: 'home', title: 'Home' },
+  { id: 'movies', title: 'Movies' },
+  { id: 'shows', title: 'Shows' },
+];
+
+function getScreenIcon(screenId: string) {
+  switch (screenId) {
+    case 'home':
+      return Home;
+    case 'movies':
+      return Film;
+    case 'shows':
+      return Tv;
+    default:
+      return Layers;
+  }
 }
 
 function getFirstFocusableId(layout: ScreenLayout): string | null {
   for (const widget of layout.widgets) {
-    if (widget.type === 'hero_spotlight') {
+    if (widget.type === 'hero_banner' && widget.data) {
       return `hero-play-${widget.id}`;
     }
-    if (widget.type === 'card_carousel' && widget.items.length > 0) {
-      return `card-${widget.items[0].id}`;
+    if (widget.type === 'carousel' && widget.items && widget.items.length > 0) {
+      return `card-${widget.id}-${widget.items[0].id}`;
     }
-    if (widget.type === 'catalog_grid' && widget.items.length > 0) {
-      return `grid-card-${widget.items[0].id}`;
+    if (widget.type === 'grid' && widget.items && widget.items.length > 0) {
+      return `grid-${widget.id}-${widget.items[0].id}`;
     }
   }
   return null;
@@ -35,12 +54,12 @@ function getFirstFocusableId(layout: ScreenLayout): string | null {
 function isLeftmostContentNode(id: string | null, layout: ScreenLayout | null): boolean {
   if (!id || !layout) return false;
   for (const widget of layout.widgets) {
-    if (widget.type === 'hero_spotlight') {
+    if (widget.type === 'hero_banner') {
       if (id === `hero-play-${widget.id}`) return true;
-    } else if (widget.type === 'card_carousel') {
-      if (widget.items.length > 0 && id === `card-${widget.items[0].id}`) return true;
-    } else if (widget.type === 'catalog_grid') {
-      const idx = widget.items.findIndex((item) => `grid-card-${item.id}` === id);
+    } else if (widget.type === 'carousel') {
+      if (widget.items && widget.items.length > 0 && id === `card-${widget.id}-${widget.items[0].id}`) return true;
+    } else if (widget.type === 'grid') {
+      const idx = widget.items?.findIndex((item) => `grid-${widget.id}-${item.id}` === id) ?? -1;
       if (idx !== -1) {
         if (typeof document !== 'undefined') {
           const el = document.getElementById(id);
@@ -51,8 +70,9 @@ function isLeftmostContentNode(id: string | null, layout: ScreenLayout | null): 
             }
           }
         }
-        // Fallback for 1080p fixed canvas with 6 columns (xl:grid-cols-6)
-        return idx % 6 === 0;
+        // Fallback for 1080p fixed canvas with widget.columns (or 6)
+        const cols = widget.columns || 6;
+        return idx % cols === 0;
       }
     }
   }
@@ -62,12 +82,12 @@ function isLeftmostContentNode(id: string | null, layout: ScreenLayout | null): 
 function isValidContentNode(id: string | null, layout: ScreenLayout | null): boolean {
   if (!id || !layout) return false;
   for (const widget of layout.widgets) {
-    if (widget.type === 'hero_spotlight') {
+    if (widget.type === 'hero_banner' && widget.data) {
       if (id === `hero-play-${widget.id}` || id === `hero-details-${widget.id}`) return true;
-    } else if (widget.type === 'card_carousel') {
-      if (widget.items.some((item) => `card-${item.id}` === id)) return true;
-    } else if (widget.type === 'catalog_grid') {
-      if (widget.items.some((item) => `grid-card-${item.id}` === id)) return true;
+    } else if (widget.type === 'carousel') {
+      if (widget.items?.some((item) => `card-${widget.id}-${item.id}` === id)) return true;
+    } else if (widget.type === 'grid') {
+      if (widget.items?.some((item) => `grid-${widget.id}-${item.id}` === id)) return true;
     }
   }
   return false;
@@ -89,16 +109,21 @@ export function BrowseScreen({
   onSelectItem,
   onPlayItem,
   onSwitchProfile,
-  initialTab = 'home',
+  initialTab,
 }: BrowseScreenProps) {
-  const [activeTab, setActiveTab] = useState<'home' | 'movies' | 'shows'>(initialTab);
+  const [screens, setScreens] = useState<ScreenSummary[]>([]);
+  const [activeTab, setActiveTab] = useState<string>(initialTab || 'home');
   const [layout, setLayout] = useState<ScreenLayout | null>(null);
   const [loading, setLoading] = useState(true);
 
   const { focusedId, setFocusedId, activeTrap } = useFocusContext();
 
-  const sidebarIds = ['nav-home', 'nav-movies', 'nav-shows', 'nav-switch-profile'];
-  const isSidebarFocused = sidebarIds.includes(focusedId ?? '');
+  const isSidebarFocused = Boolean(
+    focusedId &&
+      (focusedId.startsWith('nav-screen-') ||
+        focusedId === 'nav-switch-profile' ||
+        focusedId.startsWith('nav-'))
+  );
 
   const focusedIdRef = useRef(focusedId);
   focusedIdRef.current = focusedId;
@@ -109,11 +134,34 @@ export function BrowseScreen({
   const lastContentFocusedIdRef = useRef<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+    fetchScreens(client)
+      .then((data) => {
+        if (!cancelled && data && data.length > 0) {
+          setScreens(data);
+          if (!initialTab) {
+            setActiveTab(data[0].id);
+          }
+        }
+      })
+      .catch(() => {
+        // Fallback to defaultScreens
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, initialTab]);
+
+  useEffect(() => {
     lastContentFocusedIdRef.current = null;
   }, [activeTab]);
 
   useEffect(() => {
-    if (focusedId && !sidebarIds.includes(focusedId)) {
+    if (
+      focusedId &&
+      !focusedId.startsWith('nav-screen-') &&
+      !focusedId.startsWith('nav-')
+    ) {
       lastContentFocusedIdRef.current = focusedId;
     }
   }, [focusedId]);
@@ -184,7 +232,7 @@ export function BrowseScreen({
         if (!onSidebar && isValidContentNode(currentFocused, layout)) {
           e.preventDefault();
           e.stopPropagation();
-          setFocusedId(`nav-${activeTab}`);
+          setFocusedId(`nav-screen-${activeTab}`);
           return;
         }
       }
@@ -198,7 +246,7 @@ export function BrowseScreen({
         ) {
           e.preventDefault();
           e.stopPropagation();
-          setFocusedId(`nav-${activeTab}`);
+          setFocusedId(`nav-screen-${activeTab}`);
           return;
         }
       }
@@ -223,6 +271,8 @@ export function BrowseScreen({
     return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [activeTab, layout, setFocusedId, activeTrap]);
 
+  const displayScreens = screens.length > 0 ? screens : defaultScreens;
+
   return (
     <div className="w-full h-full flex bg-zinc-950 overflow-hidden">
       {/* Collapsible Left TV Sidebar */}
@@ -236,65 +286,40 @@ export function BrowseScreen({
           <div className="h-16 flex items-center justify-center font-black text-2xl text-sky-400">
             KADR
           </div>
-          <TVButton
-            id="nav-home"
-            groupId="sidebar"
-            order={1}
-            variant={activeTab === 'home' ? 'primary' : 'secondary'}
-            onEnter={() => setActiveTab('home')}
-            className="w-full justify-start px-4"
-          >
-            <Home className="w-6 h-6 shrink-0" />
-            <span
-              className={`${
-                isSidebarFocused ? 'inline' : 'hidden group-hover:inline group-focus-within:inline'
-              } ml-2 text-lg`}
-            >
-              Home
-            </span>
-          </TVButton>
-          <TVButton
-            id="nav-movies"
-            groupId="sidebar"
-            order={2}
-            variant={activeTab === 'movies' ? 'primary' : 'secondary'}
-            onEnter={() => setActiveTab('movies')}
-            className="w-full justify-start px-4"
-          >
-            <Film className="w-6 h-6 shrink-0" />
-            <span
-              className={`${
-                isSidebarFocused ? 'inline' : 'hidden group-hover:inline group-focus-within:inline'
-              } ml-2 text-lg`}
-            >
-              Movies
-            </span>
-          </TVButton>
-          <TVButton
-            id="nav-shows"
-            groupId="sidebar"
-            order={3}
-            variant={activeTab === 'shows' ? 'primary' : 'secondary'}
-            onEnter={() => setActiveTab('shows')}
-            className="w-full justify-start px-4"
-          >
-            <Tv className="w-6 h-6 shrink-0" />
-            <span
-              className={`${
-                isSidebarFocused ? 'inline' : 'hidden group-hover:inline group-focus-within:inline'
-              } ml-2 text-lg`}
-            >
-              Shows
-            </span>
-          </TVButton>
+          {displayScreens.map((screenItem, index) => {
+            const IconComponent = getScreenIcon(screenItem.id);
+            const isActive = activeTab === screenItem.id;
+            return (
+              <TVButton
+                key={screenItem.id}
+                id={`nav-screen-${screenItem.id}`}
+                groupId="sidebar"
+                order={index + 1}
+                variant={isActive ? 'primary' : 'secondary'}
+                onEnter={() => setActiveTab(screenItem.id)}
+                onClick={() => setActiveTab(screenItem.id)}
+                className="w-full justify-start px-4"
+              >
+                <IconComponent className="w-6 h-6 shrink-0" />
+                <span
+                  className={`${
+                    isSidebarFocused ? 'inline' : 'hidden group-hover:inline group-focus-within:inline'
+                  } ml-2 text-lg`}
+                >
+                  {screenItem.title}
+                </span>
+              </TVButton>
+            );
+          })}
         </div>
 
         <TVButton
           id="nav-switch-profile"
           groupId="sidebar"
-          order={4}
+          order={displayScreens.length + 1}
           variant="secondary"
           onEnter={onSwitchProfile}
+          onClick={onSwitchProfile}
           className="w-full justify-start px-4"
         >
           <Users className="w-6 h-6 shrink-0" />

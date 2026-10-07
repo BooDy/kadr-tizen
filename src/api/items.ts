@@ -1,7 +1,7 @@
 import { ApiClient } from './client';
 
 export interface MediaItemDetail {
-  id: string;
+  id: number | string;
   title: string;
   overview?: string;
   release_year?: number;
@@ -13,6 +13,6 @@ export interface MediaItemDetail {
   backdrop_url?: string;
 }
 
-export async function fetchMediaItem(client: ApiClient, itemId: string): Promise<MediaItemDetail> {
+export async function fetchMediaItem(client: ApiClient, itemId: number | string): Promise<MediaItemDetail> {
   return client.fetch<MediaItemDetail>(`/api/v1/items/${itemId}`);
 }

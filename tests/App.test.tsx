@@ -24,6 +24,7 @@ vi.mock('../src/api/items', () => ({
 }));
 
 vi.mock('../src/api/screens', () => ({
+  fetchScreens: vi.fn(),
   fetchScreenLayout: vi.fn(),
 }));
 
@@ -51,26 +52,29 @@ const mockProfiles: ProfileCard[] = [
 ];
 
 const mockHomeLayout: ScreenLayout = {
-  screen_id: 'home',
+  id: 'home',
   title: 'Home',
   widgets: [
     {
       id: 'hero-1',
-      type: 'hero_spotlight',
-      title: 'Hero Dune Feature',
-      item_id: 'item-dune',
+      type: 'hero_banner',
+      data: {
+        id: 100,
+        title: 'Hero Dune Feature',
+        media_type: 'movie',
+      },
     },
     {
       id: 'carousel-1',
-      type: 'card_carousel',
+      type: 'carousel',
       title: 'Trending',
-      items: [{ id: 'card-dune', item_id: 'item-dune', title: 'Trending Dune Part Two' }],
+      items: [{ id: 200, title: 'Trending Dune Part Two', media_type: 'movie' }],
     },
   ],
 };
 
 const mockItemDetail: MediaItemDetail = {
-  id: 'item-dune',
+  id: 200,
   title: 'Dune: Part Two',
   overview: 'Paul Atreides unites with Chani and the Fremen.',
   release_year: 2024,
@@ -86,6 +90,11 @@ describe('App State Machine & Router', () => {
     vi.restoreAllMocks();
     vi.mocked(discovery.discoverLocalServers).mockResolvedValue([]);
     vi.mocked(auth.listProfiles).mockResolvedValue(mockProfiles);
+    vi.mocked(screensApi.fetchScreens).mockResolvedValue([
+      { id: 'home', title: 'Home' },
+      { id: 'movies', title: 'Movies' },
+      { id: 'shows', title: 'Shows' },
+    ]);
     vi.mocked(screensApi.fetchScreenLayout).mockResolvedValue(mockHomeLayout);
     vi.mocked(items.fetchMediaItem).mockResolvedValue(mockItemDetail);
   });
@@ -243,7 +252,7 @@ describe('App State Machine & Router', () => {
     fireEvent.click(screen.getByText('Trending Dune Part Two'));
 
     await waitFor(() => {
-      expect(items.fetchMediaItem).toHaveBeenCalledWith(expect.anything(), 'item-dune');
+      expect(items.fetchMediaItem).toHaveBeenCalledWith(expect.anything(), 200);
     });
 
     await waitFor(() => {
