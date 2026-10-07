@@ -65,8 +65,18 @@ export class Html5PlayerDriver implements PlayerDriver {
     }
   }
 
-  setSubtitleTrack(_trackUrl: string | null): void {
-    // Subtitle handling in HTML5
+  setSubtitleTrack(trackUrl: string | null): void {
+    if (!this.video) return;
+    const existing = this.video.querySelectorAll('track');
+    existing.forEach((t) => t.remove());
+
+    if (trackUrl) {
+      const track = document.createElement('track');
+      track.kind = 'subtitles';
+      track.src = trackUrl;
+      track.default = true;
+      this.video.appendChild(track);
+    }
   }
 
   destroy(): void {

@@ -21,7 +21,7 @@ export interface FocusContextType {
   popFocusTrap: () => void;
 }
 
-const FocusContext = createContext<FocusContextType | null>(null);
+export const FocusContext = createContext<FocusContextType | null>(null);
 
 export function FocusProvider({ children }: { children: React.ReactNode }) {
   const [focusedId, setFocusedIdState] = useState<string | null>(null);

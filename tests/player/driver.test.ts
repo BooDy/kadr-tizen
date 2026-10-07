@@ -114,6 +114,30 @@ describe('Html5PlayerDriver', () => {
     expect(defaultPauseSpy).toHaveBeenCalled();
     expect(container.querySelector('video')).toBeNull();
   });
+
+  it('manages subtitle track elements on setSubtitleTrack', async () => {
+    await driver.init(container, 'http://test.com/stream.mp4', 0);
+    const video = container.querySelector('video') as HTMLVideoElement;
+
+    expect(video.querySelector('track')).toBeNull();
+
+    driver.setSubtitleTrack('http://test.com/subtitles/en.vtt');
+    let track = video.querySelector('track');
+    expect(track).not.toBeNull();
+    expect(track?.src).toBe('http://test.com/subtitles/en.vtt');
+    expect(track?.kind).toBe('subtitles');
+    expect(track?.default).toBe(true);
+
+    // Switching track
+    driver.setSubtitleTrack('http://test.com/subtitles/fr.vtt');
+    const tracks = video.querySelectorAll('track');
+    expect(tracks.length).toBe(1);
+    expect(tracks[0].src).toBe('http://test.com/subtitles/fr.vtt');
+
+    // Disabling track (null)
+    driver.setSubtitleTrack(null);
+    expect(video.querySelector('track')).toBeNull();
+  });
 });
 
 describe('TizenAvplayDriver', () => {

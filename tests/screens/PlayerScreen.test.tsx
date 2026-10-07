@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, act } from '@testing-library/react';
 import { PlayerScreen } from '../../src/screens/PlayerScreen';
 import * as playbackApi from '../../src/api/playback';
+import * as subtitlesApi from '../../src/api/subtitles';
 import { TVKeys } from '../../src/navigation/keys';
 import { PlayerDriver, PlayerState } from '../../src/player/driver';
 
@@ -624,6 +625,139 @@ describe('PlayerScreen', () => {
         25000,
         false
       );
+    });
+  });
+
+  describe('Subtitle Discovery & Track Selection', () => {
+    const mockTracks = [
+      {
+        id: 1,
+        media_item_id: 101,
+        source: 'sidecar',
+        language: 'en',
+        title: 'English',
+        format: 'vtt',
+        is_default: true,
+        is_forced: false,
+        stream_url: '/api/v1/subtitles/1/stream.vtt',
+      },
+      {
+        id: 2,
+        media_item_id: 101,
+        source: 'sidecar',
+        language: 'fr',
+        title: 'French',
+        format: 'vtt',
+        is_default: false,
+        is_forced: false,
+        stream_url: '/api/v1/subtitles/2/stream.vtt',
+      },
+    ];
+
+    it('fetches item subtitles on mount with numeric itemId and sets default track', async () => {
+      const fetchSubtitlesSpy = vi.spyOn(subtitlesApi, 'fetchItemSubtitles').mockResolvedValue(mockTracks);
+
+      const { getByTestId, getByText } = render(
+        <PlayerScreen
+          itemId={101}
+          title="Sample Movie"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          onExit={vi.fn()}
+        />
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(fetchSubtitlesSpy).toHaveBeenCalledWith(expect.anything(), 101);
+      expect(mockDriver.setSubtitleTrack).toHaveBeenCalledWith(
+        'http://localhost:8492/api/v1/subtitles/1/stream.vtt'
+      );
+      expect(getByTestId('subtitles-button')).toBeInTheDocument();
+      expect(getByText('Subtitles')).toBeInTheDocument();
+    });
+
+    it('allows selecting a different subtitle track from OSD and updates driver', async () => {
+      vi.spyOn(subtitlesApi, 'fetchItemSubtitles').mockResolvedValue(mockTracks);
+
+      const { getByTestId } = render(
+        <PlayerScreen
+          itemId={101}
+          title="Sample Movie"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          onExit={vi.fn()}
+        />
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      // Open subtitles popup
+      act(() => {
+        getByTestId('subtitles-button').click();
+      });
+
+      // Select French (id: 2)
+      act(() => {
+        getByTestId('subtitle-option-2').click();
+      });
+
+      expect(mockDriver.setSubtitleTrack).toHaveBeenLastCalledWith(
+        'http://localhost:8492/api/v1/subtitles/2/stream.vtt'
+      );
+    });
+
+    it('allows turning subtitles Off from OSD and updates driver with null', async () => {
+      vi.spyOn(subtitlesApi, 'fetchItemSubtitles').mockResolvedValue(mockTracks);
+
+      const { getByTestId } = render(
+        <PlayerScreen
+          itemId={101}
+          title="Sample Movie"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          onExit={vi.fn()}
+        />
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      act(() => {
+        getByTestId('subtitles-button').click();
+      });
+
+      act(() => {
+        getByTestId('subtitle-option-off').click();
+      });
+
+      expect(mockDriver.setSubtitleTrack).toHaveBeenLastCalledWith(null);
+    });
+
+    it('handles subtitle fetch rejection gracefully without breaking playback', async () => {
+      vi.spyOn(subtitlesApi, 'fetchItemSubtitles').mockRejectedValue(new Error('404 Not Found'));
+
+      const { queryByTestId, getByText } = render(
+        <PlayerScreen
+          itemId={101}
+          title="Sample Movie"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          onExit={vi.fn()}
+        />
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(queryByTestId('subtitles-button')).not.toBeInTheDocument();
+      expect(getByText('Sample Movie')).toBeInTheDocument();
     });
   });
 });
