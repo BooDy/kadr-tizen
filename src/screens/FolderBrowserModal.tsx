@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ApiClient } from '../api/client';
 import { fetchLibraryFolders } from '../api/folders';
 import { FolderImage, LibraryFolderResponse } from '../types/kadr';
@@ -155,6 +155,10 @@ export function FolderBrowserModal({
   }, [client, libraryId, currentPath, isOpen, onLockedLibrary]);
 
   useEffect(() => {
+    setCurrentPath(initialPath || '');
+  }, [libraryId, initialPath]);
+
+  useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -166,7 +170,7 @@ export function FolderBrowserModal({
         e.key === 'Escape'
       ) {
         e.preventDefault();
-        e.stopPropagation();
+        e.stopImmediatePropagation();
         if (currentPath !== '') {
           const parent =
             folderData?.parent_path !== undefined
@@ -181,8 +185,8 @@ export function FolderBrowserModal({
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [isOpen, currentPath, folderData?.parent_path, onClose]);
 
   if (!isOpen) return null;

@@ -1,7 +1,6 @@
-import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
-import { FocusProvider } from '../../src/navigation/FocusContext';
+import { FocusProvider, useFocusContext } from '../../src/navigation/FocusContext';
 import { FolderBrowserModal } from '../../src/screens/FolderBrowserModal';
 import { ApiClient } from '../../src/api/client';
 import { TVKeys } from '../../src/navigation/keys';
@@ -253,7 +252,7 @@ describe('FolderBrowserModal', () => {
     });
   });
 
-  it('navigates up on Remote Back / Escape key when in subdirectory, and closes modal on root', async () => {
+  it('navigates up on Remote Back / Escape key when in subdirectory, maintains focus trap, and closes modal on root', async () => {
     const onClose = vi.fn();
     vi.mocked(foldersApi.fetchLibraryFolders).mockImplementation(async (_client, _libId, path) => {
       if (path === 'Sci-Fi') {
@@ -269,9 +268,18 @@ describe('FolderBrowserModal', () => {
       return mockNestedFolderResponse;
     });
 
-    render(
+    let currentTrap: string | null = null;
+    function TrapObserver() {
+      const { activeTrap } = useFocusContext();
+      currentTrap = activeTrap;
+      return null;
+    }
+
+    const { rerender } = render(
       <FocusProvider>
+        <TrapObserver />
         <FolderBrowserModal
+          isOpen={true}
           client={client}
           serverUrl={serverUrl}
           libraryId={libraryId}
@@ -288,6 +296,8 @@ describe('FolderBrowserModal', () => {
       expect(screen.getByText('Dune: Part One')).toBeInTheDocument();
     });
 
+    expect(currentTrap).toBe('folder-browser-modal');
+
     // Press Escape in Sci-Fi/Dune -> moves to parent 'Sci-Fi'
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.BACK_WEB, key: 'Escape' }));
@@ -297,6 +307,8 @@ describe('FolderBrowserModal', () => {
       expect(foldersApi.fetchLibraryFolders).toHaveBeenCalledWith(client, libraryId, 'Sci-Fi');
     });
     expect(onClose).not.toHaveBeenCalled();
+    // Focus trap must remain intact while navigating within subdirectories
+    expect(currentTrap).toBe('folder-browser-modal');
 
     // Press Tizen Back (10009) in Sci-Fi -> moves to parent ''
     await act(async () => {
@@ -307,6 +319,7 @@ describe('FolderBrowserModal', () => {
       expect(foldersApi.fetchLibraryFolders).toHaveBeenCalledWith(client, libraryId, '');
     });
     expect(onClose).not.toHaveBeenCalled();
+    expect(currentTrap).toBe('folder-browser-modal');
 
     // Now at root ('') -> pressing Escape closes modal
     await act(async () => {
@@ -314,6 +327,69 @@ describe('FolderBrowserModal', () => {
     });
 
     expect(onClose).toHaveBeenCalledTimes(1);
+
+    // Closing / unmounting modal clears the focus trap
+    rerender(
+      <FocusProvider>
+        <TrapObserver />
+        <FolderBrowserModal
+          isOpen={false}
+          client={client}
+          serverUrl={serverUrl}
+          libraryId={libraryId}
+          initialPath="Sci-Fi/Dune"
+          onClose={onClose}
+          onSelectItem={vi.fn()}
+          onSelectImage={vi.fn()}
+          onStartSlideshow={vi.fn()}
+        />
+      </FocusProvider>
+    );
+    expect(currentTrap).toBeNull();
+  });
+
+  it('synchronizes currentPath when initialPath prop changes', async () => {
+    vi.mocked(foldersApi.fetchLibraryFolders).mockResolvedValue(mockRootFolderResponse);
+
+    const { rerender } = render(
+      <FocusProvider>
+        <FolderBrowserModal
+          client={client}
+          serverUrl={serverUrl}
+          libraryId={libraryId}
+          initialPath=""
+          onClose={vi.fn()}
+          onSelectItem={vi.fn()}
+          onSelectImage={vi.fn()}
+          onStartSlideshow={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(foldersApi.fetchLibraryFolders).toHaveBeenCalledWith(client, libraryId, '');
+    });
+
+    vi.mocked(foldersApi.fetchLibraryFolders).mockResolvedValue(mockNestedFolderResponse);
+
+    rerender(
+      <FocusProvider>
+        <FolderBrowserModal
+          client={client}
+          serverUrl={serverUrl}
+          libraryId={libraryId}
+          initialPath="Sci-Fi/Dune"
+          onClose={vi.fn()}
+          onSelectItem={vi.fn()}
+          onSelectImage={vi.fn()}
+          onStartSlideshow={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(foldersApi.fetchLibraryFolders).toHaveBeenCalledWith(client, libraryId, 'Sci-Fi/Dune');
+    });
   });
 
   it('invokes onSelectItem when media card is selected', async () => {
