@@ -16,6 +16,7 @@ export interface PinPadModalProps {
   errorMessage?: string;
   onErrorClear?: () => void;
   onLockoutEnd?: () => void;
+  backdropClassName?: string;
 }
 
 export function PinPadModal({
@@ -30,6 +31,7 @@ export function PinPadModal({
   errorMessage,
   onErrorClear,
   onLockoutEnd,
+  backdropClassName,
 }: PinPadModalProps) {
   const submitFn = onSubmitPin || onSubmit;
   const modalTitle = title || (username ? `Enter PIN for ${username}` : 'Enter PIN');
@@ -158,6 +160,7 @@ export function PinPadModal({
       onClose={onClose}
       trapGroupId="pin-pad-modal"
       className="w-[540px]"
+      backdropClassName={backdropClassName || 'z-[80]'}
     >
       <h3 className="text-3xl font-bold text-zinc-100">{modalTitle}</h3>
       <p className="text-zinc-400 mt-2 text-lg">{modalSubtitle}</p>

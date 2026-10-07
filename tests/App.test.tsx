@@ -488,12 +488,14 @@ describe('App State Machine & Router', () => {
       expect(screen.getByText('dune_poster.jpg')).toBeInTheDocument();
     });
 
-    // Select media item inside folder browser -> opens ItemDetailModal again
+    // Select media item inside folder browser -> opens ItemDetailModal on top with z-[60]
     const folderItem = screen.getByText('Dune: Part Two');
     fireEvent.click(folderItem);
 
     await waitFor(() => {
       expect(screen.getByText('Paul Atreides unites with Chani and the Fremen.')).toBeInTheDocument();
+      const detailModal = screen.getByRole('dialog', { name: 'Dune: Part Two' });
+      expect(detailModal).toHaveClass('z-[60]');
     });
   });
 
@@ -642,6 +644,33 @@ describe('App State Machine & Router', () => {
 
     await waitFor(() => {
       expect(screensApi.fetchScreenLayout).toHaveBeenCalledTimes(2);
+    });
+
+    // Open item detail and click "Browse Folder" to open FolderBrowserModal
+    fireEvent.click(screen.getByText('Trending Dune Part Two'));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Browse Folder/i })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Browse Folder/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Movies Library' })).toBeInTheDocument();
+    });
+    expect(foldersApi.fetchLibraryFolders).toHaveBeenCalledTimes(1);
+
+    // Trigger library:updated SSE event -> verifies folder re-fetch
+    act(() => {
+      eventCallback!('library:updated', { library_id: 'lib-movies' });
+    });
+
+    await waitFor(() => {
+      expect(foldersApi.fetchLibraryFolders).toHaveBeenCalledTimes(2);
+    });
+
+    // Close folder browser modal
+    fireEvent.click(screen.getByRole('button', { name: /Close/i }));
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: 'Movies Library' })).not.toBeInTheDocument();
     });
 
     // Switch profile to trigger logout and cleanup

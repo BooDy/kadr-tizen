@@ -171,7 +171,7 @@ export function ItemDetailModal({
       role="dialog"
       aria-modal="true"
       aria-label={item.title}
-      className="fixed inset-0 bg-black/90 backdrop-blur-xl flex items-center justify-center z-50 p-16"
+      className="fixed inset-0 bg-black/90 backdrop-blur-xl flex items-center justify-center z-[60] p-16"
     >
       {backdrop && (
         <img

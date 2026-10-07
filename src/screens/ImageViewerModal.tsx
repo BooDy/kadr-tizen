@@ -147,7 +147,7 @@ export function ImageViewerModal({
   const imageUrl = formatImageUrl(serverUrl, currentImage?.url || currentImage?.path);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black flex items-center justify-center select-none overflow-hidden">
+    <div className="fixed inset-0 z-[70] bg-black flex items-center justify-center select-none overflow-hidden">
       {/* Centered Image */}
       {imageUrl && (
         <img

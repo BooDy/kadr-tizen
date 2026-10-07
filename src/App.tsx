@@ -210,17 +210,6 @@ export default function App() {
               }}
               refreshKey={screenRefreshKey}
             />
-            <ItemDetailModal
-              isOpen={Boolean(activeItem)}
-              item={activeItem}
-              serverUrl={serverUrl || ''}
-              onPlay={handlePlayItem}
-              onClose={() => setActiveItem(null)}
-              onBrowseFolder={(libraryId, folderPath) => {
-                setActiveItem(null);
-                setFolderBrowserState({ libraryId, path: folderPath });
-              }}
-            />
             {folderBrowserState && (
               <FolderBrowserModal
                 key={`${folderBrowserState.libraryId}-${folderBrowserState.path}`}
@@ -244,6 +233,17 @@ export default function App() {
                 }}
               />
             )}
+            <ItemDetailModal
+              isOpen={Boolean(activeItem)}
+              item={activeItem}
+              serverUrl={serverUrl || ''}
+              onPlay={handlePlayItem}
+              onClose={() => setActiveItem(null)}
+              onBrowseFolder={(libraryId, folderPath) => {
+                setActiveItem(null);
+                setFolderBrowserState({ libraryId, path: folderPath });
+              }}
+            />
             {imageViewerState && (
               <ImageViewerModal
                 images={imageViewerState.images}

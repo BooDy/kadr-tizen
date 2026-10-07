@@ -60,7 +60,7 @@ export function TVModal({
       role={role}
       aria-modal="true"
       aria-label={ariaLabel}
-      className={`fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 ${backdropClassName}`}
+      className={`fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center ${backdropClassName?.includes('z-') ? '' : 'z-50'} ${backdropClassName}`.trim()}
     >
       <div
         className={`bg-zinc-900 border border-zinc-800 rounded-3xl p-10 flex flex-col items-center ${className}`}
