@@ -23,6 +23,15 @@ export interface FocusContextType {
 
 export const FocusContext = createContext<FocusContextType | null>(null);
 
+function isNodeInTrap(nodeGroupId: string, activeTrap: string | null): boolean {
+  if (!activeTrap) return true;
+  if (nodeGroupId === activeTrap) return true;
+  if (activeTrap === 'item-detail-modal') {
+    return nodeGroupId === 'season-tabs' || nodeGroupId.startsWith('season-episodes-');
+  }
+  return false;
+}
+
 export function FocusProvider({ children }: { children: React.ReactNode }) {
   const [focusedId, setFocusedIdState] = useState<string | null>(null);
   const [activeTrapState, setActiveTrapState] = useState<string | null>(null);
@@ -52,10 +61,10 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   const registerNode = useCallback((node: FocusNode) => {
     nodesRef.current.set(node.id, node);
     const activeTrap = trapStackRef.current[trapStackRef.current.length - 1];
-    if (activeTrap && node.groupId === activeTrap) {
+    if (activeTrap && isNodeInTrap(node.groupId, activeTrap)) {
       setFocusedIdState((current) => {
         const currentNode = current ? nodesRef.current.get(current) : null;
-        if (!currentNode || currentNode.groupId !== activeTrap) {
+        if (!currentNode || !isNodeInTrap(currentNode.groupId, activeTrap)) {
           focusedIdRef.current = node.id;
           return node.id;
         }
@@ -84,7 +93,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       trapStackRef.current.push(trapGroupId);
       setActiveTrapState(trapGroupId);
       for (const node of nodesRef.current.values()) {
-        if (node.groupId === trapGroupId) {
+        if (isNodeInTrap(node.groupId, trapGroupId)) {
           setFocusedId(node.id);
           break;
         }
@@ -103,7 +112,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       setFocusedId(prev);
     } else {
       for (const node of nodesRef.current.values()) {
-        if (!activeTrap || node.groupId === activeTrap) {
+        if (!activeTrap || isNodeInTrap(node.groupId, activeTrap)) {
           setFocusedId(node.id);
           break;
         }
@@ -118,7 +127,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
 
       if (!currentId) {
         for (const node of nodesRef.current.values()) {
-          if (!activeTrap || node.groupId === activeTrap) {
+          if (!activeTrap || isNodeInTrap(node.groupId, activeTrap)) {
             setFocusedId(node.id);
             return;
           }
@@ -136,7 +145,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       );
 
       if (activeTrap) {
-        candidates = candidates.filter((n) => n.groupId === activeTrap);
+        candidates = candidates.filter((n) => isNodeInTrap(n.groupId, activeTrap));
       }
 
       let bestNode: FocusNode | null = null;
@@ -170,7 +179,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       // Linear fallback within group if geometric layout yields no candidate (e.g. JSDOM/headless)
       if (!bestNode) {
         const allGroupNodes = Array.from(nodesRef.current.values()).filter(
-          (n) => n.groupId === currentNode.groupId && (!activeTrap || n.groupId === activeTrap)
+          (n) => n.groupId === currentNode.groupId && isNodeInTrap(n.groupId, activeTrap)
         );
         allGroupNodes.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
         const currentIndex = allGroupNodes.findIndex((n) => n.id === currentId);
