@@ -356,4 +356,193 @@ describe('PlayerScreen', () => {
     );
     expect(mockDriver.destroy).toHaveBeenCalled();
   });
+
+  describe('Canonical Playback Session Manager Integration', () => {
+    it('starts canonical session on mount with numeric itemId and seeks to resume position', async () => {
+      const startSessionSpy = vi.spyOn(playbackApi, 'startPlaybackSession').mockResolvedValue({
+        session_id: 'sess-abc',
+        media_item_id: 101,
+        duration_seconds: 3600,
+        resume_position_seconds: 45,
+      });
+
+      render(
+        <PlayerScreen
+          itemId={101}
+          title="Sample Movie"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          onExit={vi.fn()}
+        />
+      );
+
+      // Flush microtasks
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(startSessionSpy).toHaveBeenCalledWith(expect.anything(), 101);
+      expect(mockDriver.seekTo).toHaveBeenCalledWith(45000);
+    });
+
+    it('does not seek to session resume position if manual initialTimeMs was forced', async () => {
+      vi.spyOn(playbackApi, 'startPlaybackSession').mockResolvedValue({
+        session_id: 'sess-abc',
+        media_item_id: 101,
+        duration_seconds: 3600,
+        resume_position_seconds: 45,
+      });
+
+      render(
+        <PlayerScreen
+          itemId={101}
+          title="Sample Movie"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          initialTimeMs={12000}
+          onExit={vi.fn()}
+        />
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      // driver.init is called with initialTimeMs (12000), but seekTo should NOT be called with 45000
+      expect(mockDriver.seekTo).not.toHaveBeenCalledWith(45000);
+    });
+
+    it('sends 10-second heartbeats to reportSessionProgress during active session', async () => {
+      vi.spyOn(playbackApi, 'startPlaybackSession').mockResolvedValue({
+        session_id: 'sess-abc',
+        media_item_id: 101,
+        duration_seconds: 3600,
+        resume_position_seconds: 0,
+      });
+      const progressSpy = vi.spyOn(playbackApi, 'reportSessionProgress').mockResolvedValue();
+
+      render(
+        <PlayerScreen
+          itemId={101}
+          title="Sample Movie"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          onExit={vi.fn()}
+        />
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      act(() => {
+        mockDriver.timeCallback?.(32000, 100000);
+      });
+
+      // Advance 10s
+      act(() => {
+        vi.advanceTimersByTime(10000);
+      });
+
+      expect(progressSpy).toHaveBeenCalledWith(expect.anything(), 'sess-abc', 32);
+      // Fallback reportPlaybackProgress should not be called when session is active
+      expect(reportPlaybackSpy).not.toHaveBeenCalled();
+    });
+
+    it('cleans up session via endPlaybackSession on unmount', async () => {
+      vi.spyOn(playbackApi, 'startPlaybackSession').mockResolvedValue({
+        session_id: 'sess-abc',
+        media_item_id: 101,
+        duration_seconds: 3600,
+        resume_position_seconds: 0,
+      });
+      const endSpy = vi.spyOn(playbackApi, 'endPlaybackSession').mockResolvedValue();
+
+      const { unmount } = render(
+        <PlayerScreen
+          itemId={101}
+          title="Sample Movie"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          onExit={vi.fn()}
+        />
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      unmount();
+
+      expect(endSpy).toHaveBeenCalledWith(expect.anything(), 'sess-abc');
+      expect(mockDriver.destroy).toHaveBeenCalled();
+    });
+
+    it('cleans up session via endPlaybackSession on exit keydown', async () => {
+      vi.spyOn(playbackApi, 'startPlaybackSession').mockResolvedValue({
+        session_id: 'sess-abc',
+        media_item_id: 101,
+        duration_seconds: 3600,
+        resume_position_seconds: 0,
+      });
+      const endSpy = vi.spyOn(playbackApi, 'endPlaybackSession').mockResolvedValue();
+      const onExit = vi.fn();
+
+      render(
+        <PlayerScreen
+          itemId={101}
+          title="Sample Movie"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          onExit={onExit}
+        />
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      act(() => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.BACK_TIZEN }));
+      });
+
+      expect(onExit).toHaveBeenCalledTimes(1);
+      expect(endSpy).toHaveBeenCalledWith(expect.anything(), 'sess-abc');
+    });
+
+    it('falls back to reportPlaybackProgress if session fails to start', async () => {
+      vi.spyOn(playbackApi, 'startPlaybackSession').mockRejectedValue(new Error('500 Server Error'));
+
+      render(
+        <PlayerScreen
+          itemId={101}
+          title="Sample Movie"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          onExit={vi.fn()}
+        />
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      act(() => {
+        mockDriver.timeCallback?.(25000, 100000);
+      });
+
+      // Advance 10s
+      act(() => {
+        vi.advanceTimersByTime(10000);
+      });
+
+      expect(reportPlaybackSpy).toHaveBeenCalledWith(
+        'http://localhost:8492',
+        'test-token',
+        101,
+        25000,
+        false
+      );
+    });
+  });
 });

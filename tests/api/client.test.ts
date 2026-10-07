@@ -75,4 +75,15 @@ describe('ApiClient', () => {
 
     await expect(client.fetch('/secret')).rejects.toThrow('HTTP error 403: Forbidden');
   });
+
+  it('clears library unlock tokens when clearLibraryUnlockTokens is called', () => {
+    const client = new ApiClient('http://192.168.1.50:8492');
+    client.setLibraryUnlockToken('lib-1', 'token-1');
+    client.setLibraryUnlockToken('lib-2', 'token-2');
+    expect(client.getLibraryUnlockToken('lib-1')).toBe('token-1');
+
+    client.clearLibraryUnlockTokens();
+    expect(client.getLibraryUnlockToken('lib-1')).toBeUndefined();
+    expect(client.getLibraryUnlockToken('lib-2')).toBeUndefined();
+  });
 });

@@ -165,6 +165,7 @@ export default function App() {
 
         {view === 'player' && playerItem && (
           <PlayerScreen
+            client={client}
             itemId={playerItem.id}
             title={playerItem.title}
             serverUrl={serverUrl || ''}

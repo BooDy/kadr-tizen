@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { createPlayerDriver } from '../player/avplay-driver';
 import { PlayerDriver, PlayerState } from '../player/driver';
 import { reportPlaybackProgress } from '../api/playback';
+import { ApiClient } from '../api/client';
+import { PlaybackSessionManager } from '../player/session';
 import { TVKeys } from '../navigation/keys';
 import { PlayerOSD } from '../components/osd/PlayerOSD';
 
@@ -11,6 +13,8 @@ export interface PlayerScreenProps {
   serverUrl: string;
   token: string;
   initialTimeMs?: number;
+  initialResumeMs?: number;
+  client?: ApiClient;
   onExit: () => void;
 }
 
@@ -20,14 +24,27 @@ export function PlayerScreen({
   serverUrl,
   token,
   initialTimeMs = 0,
+  initialResumeMs,
+  client,
   onExit,
 }: PlayerScreenProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const driverRef = useRef<PlayerDriver | null>(null);
+  const initialResume = initialResumeMs ?? initialTimeMs ?? 0;
   const [playerState, setPlayerState] = useState<PlayerState>('buffering');
-  const [positionMs, setPositionMs] = useState(initialTimeMs);
+  const [positionMs, setPositionMs] = useState(initialResume);
   const [durationMs, setDurationMs] = useState(0);
   const [showOSD, setShowOSD] = useState(true);
+
+  const apiClient = useMemo(() => {
+    if (client) return client;
+    const c = new ApiClient(serverUrl);
+    if (token) c.setToken(token);
+    return c;
+  }, [client, serverUrl, token]);
+
+  const sessionManager = useMemo(() => new PlaybackSessionManager(apiClient), [apiClient]);
+  const hasActiveSessionRef = useRef(false);
 
   const positionMsRef = useRef(positionMs);
   positionMsRef.current = positionMs;
@@ -82,27 +99,52 @@ export function PlayerScreen({
       playerStateRef.current = state;
     });
 
-    driver.init(containerRef.current, streamUrl, initialTimeMs);
+    driver.init(containerRef.current, streamUrl, initialResume);
+
+    const numericItemId = typeof itemId === 'number' ? itemId : parseInt(itemId, 10);
+    if (!isNaN(numericItemId)) {
+      sessionManager.start(numericItemId).then((session) => {
+        if (session) {
+          hasActiveSessionRef.current = true;
+          if (session.resume_position_seconds > 0 && initialResume === 0) {
+            const resumeMs = session.resume_position_seconds * 1000;
+            driver.seekTo(resumeMs);
+            setPositionMs(resumeMs);
+            positionMsRef.current = resumeMs;
+          }
+        }
+      });
+    }
 
     // 10s Scrobble interval
     const scrobbleInterval = setInterval(() => {
-      reportPlaybackProgress(
-        serverUrl,
-        token,
-        itemId,
-        positionMsRef.current,
-        playerStateRef.current === 'paused'
-      );
+      if (hasActiveSessionRef.current) {
+        sessionManager.updateProgress(Math.floor(positionMsRef.current / 1000));
+      } else {
+        reportPlaybackProgress(
+          serverUrl,
+          token,
+          itemId,
+          positionMsRef.current,
+          playerStateRef.current === 'paused'
+        );
+      }
     }, 10000);
 
     return () => {
       clearInterval(scrobbleInterval);
       if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
       // Final scrobble sync before teardown
-      reportPlaybackProgress(serverUrl, token, itemId, positionMsRef.current, true);
+      if (hasActiveSessionRef.current) {
+        sessionManager.updateProgress(Math.floor(positionMsRef.current / 1000));
+        sessionManager.destroy();
+      } else {
+        reportPlaybackProgress(serverUrl, token, itemId, positionMsRef.current, true);
+        sessionManager.destroy();
+      }
       driver.destroy();
     };
-  }, [itemId, serverUrl, token, initialTimeMs]);
+  }, [itemId, serverUrl, token, initialResume, sessionManager]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -138,13 +180,14 @@ export function PlayerScreen({
         e.key === 'Escape'
       ) {
         e.preventDefault();
+        sessionManager.destroy();
         onExit();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onExit, resetOsdTimer]);
+  }, [onExit, resetOsdTimer, sessionManager]);
 
   return (
     <div className="relative w-full h-full bg-transparent overflow-hidden select-none">

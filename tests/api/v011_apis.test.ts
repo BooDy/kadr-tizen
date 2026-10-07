@@ -151,6 +151,22 @@ describe('Kadr v0.1.1-alpha API Clients & Data Contracts', () => {
       await endPlaybackSession(client, 'sess-42');
       expect(fetchSpy).toHaveBeenCalledTimes(3);
     });
+
+    it('encodes special characters in sessionId for progress and end calls', async () => {
+      const fetchSpy = vi.spyOn(client, 'fetch').mockImplementation(async (path) => {
+        if (path === '/api/v1/playback/sess%2Fspecial%20id/progress') {
+          return { status: 'ok' };
+        }
+        if (path === '/api/v1/playback/sessions/sess%2Fspecial%20id') {
+          return undefined;
+        }
+        throw new Error(`Unexpected path: ${path}`);
+      });
+
+      await reportSessionProgress(client, 'sess/special id', 200);
+      await endPlaybackSession(client, 'sess/special id');
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe('Folders API', () => {

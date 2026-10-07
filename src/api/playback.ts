@@ -41,7 +41,7 @@ export async function reportSessionProgress(
   sessionId: string,
   positionSeconds: number
 ): Promise<void> {
-  await client.fetch<void>(`/api/v1/playback/${sessionId}/progress`, {
+  await client.fetch<void>(`/api/v1/playback/${encodeURIComponent(sessionId)}/progress`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -54,7 +54,7 @@ export async function endPlaybackSession(
   client: ApiClient,
   sessionId: string
 ): Promise<void> {
-  await client.fetch<void>(`/api/v1/playback/sessions/${sessionId}`, {
+  await client.fetch<void>(`/api/v1/playback/sessions/${encodeURIComponent(sessionId)}`, {
     method: 'DELETE',
   });
 }
