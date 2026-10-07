@@ -1,48 +1,73 @@
-export interface ASTBadge {
-  text: string;
-  variant?: 'primary' | 'accent' | 'muted';
-}
-
-export interface ASTHeroWidget {
+export interface ScreenSummary {
   id: string;
-  type: 'hero_spotlight';
-  item_id: string;
   title: string;
-  backdrop_url?: string;
-  synopsis?: string;
-  badges?: string[];
-  resume_position_ms?: number;
 }
 
-export interface ASTCarouselItem {
-  id: string;
-  item_id: string;
+export interface CardViewModel {
+  id: number;
   title: string;
   subtitle?: string;
   poster_url?: string;
-  progress_percent?: number;
+  backdrop_url?: string;
+  media_type: string;
+  playback_progress?: number; // 0.0 - 1.0 (float)
+  rating?: number;
+  release_year?: number;
   badge?: string;
-  resume_position_ms?: number;
+  season?: number;
+  episode?: number;
 }
 
-export interface ASTCarouselWidget {
+export interface HeroBannerWidgetNode {
+  type: 'hero_banner';
   id: string;
-  type: 'card_carousel';
-  title: string;
-  items: ASTCarouselItem[];
+  binding?: {
+    macro_type: string | Record<string, unknown>;
+    limit?: number;
+  };
+  data?: CardViewModel;
 }
 
-export interface ASTGridWidget {
+export interface CarouselWidgetNode {
+  type: 'carousel';
   id: string;
-  type: 'catalog_grid';
   title: string;
-  items: ASTCarouselItem[];
+  binding?: {
+    macro_type: string | Record<string, unknown>;
+    limit?: number;
+  };
+  items?: CardViewModel[];
+  next_cursor?: string;
 }
 
-export type ASTWidget = ASTHeroWidget | ASTCarouselWidget | ASTGridWidget;
+export interface GridWidgetNode {
+  type: 'grid';
+  id: string;
+  title: string;
+  columns: number;
+  binding?: {
+    macro_type: string | Record<string, unknown>;
+    limit?: number;
+  };
+  items?: CardViewModel[];
+  next_cursor?: string;
+  total_count?: number;
+}
+
+export type WidgetNode =
+  | HeroBannerWidgetNode
+  | CarouselWidgetNode
+  | GridWidgetNode;
 
 export interface ScreenLayout {
-  screen_id: string;
+  id: string;
   title: string;
-  widgets: ASTWidget[];
+  widgets: WidgetNode[];
+}
+
+export interface WidgetDataResponse {
+  widget_id: string;
+  items: CardViewModel[];
+  next_cursor?: string;
+  total_count?: number;
 }
