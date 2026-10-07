@@ -32,6 +32,9 @@ export function PlayerScreen({
   const positionMsRef = useRef(positionMs);
   positionMsRef.current = positionMs;
 
+  const durationMsRef = useRef(durationMs);
+  durationMsRef.current = durationMs;
+
   const playerStateRef = useRef(playerState);
   playerStateRef.current = playerState;
 
@@ -71,6 +74,7 @@ export function PlayerScreen({
       setPositionMs(pos);
       setDurationMs(dur);
       positionMsRef.current = pos;
+      durationMsRef.current = dur;
     });
 
     driver.onStateChange((state) => {
@@ -117,15 +121,23 @@ export function PlayerScreen({
           driverRef.current?.play();
         }
       } else if (code === TVKeys.LEFT) {
-        driverRef.current?.seekTo(Math.max(0, positionMsRef.current - 10000));
+        const newPos = Math.max(0, positionMsRef.current - 10000);
+        positionMsRef.current = newPos;
+        setPositionMs(newPos);
+        driverRef.current?.seekTo(newPos);
       } else if (code === TVKeys.RIGHT) {
-        driverRef.current?.seekTo(positionMsRef.current + 10000);
+        const maxPos = durationMsRef.current > 0 ? durationMsRef.current : Infinity;
+        const newPos = Math.min(maxPos, positionMsRef.current + 10000);
+        positionMsRef.current = newPos;
+        setPositionMs(newPos);
+        driverRef.current?.seekTo(newPos);
       } else if (
         code === TVKeys.BACK_TIZEN ||
         code === TVKeys.BACK_WEB ||
         code === TVKeys.BACKSPACE ||
         e.key === 'Escape'
       ) {
+        e.preventDefault();
         onExit();
       }
     };
@@ -135,8 +147,8 @@ export function PlayerScreen({
   }, [onExit, resetOsdTimer]);
 
   return (
-    <div className="relative w-full h-full bg-black overflow-hidden select-none">
-      <div ref={containerRef} className="w-full h-full" />
+    <div className="relative w-full h-full bg-transparent overflow-hidden select-none">
+      <div ref={containerRef} className="w-full h-full bg-transparent" />
       <PlayerOSD
         title={title}
         playerState={playerState}

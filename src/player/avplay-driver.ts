@@ -5,6 +5,7 @@ export class TizenAvplayDriver implements PlayerDriver {
   private timeCallback?: (posMs: number, durationMs: number) => void;
   private stateCallback?: (state: PlayerState) => void;
   private errorCallback?: (error: string) => void;
+  private isDestroyed = false;
 
   async init(_container: HTMLElement, streamUrl: string, startMs: number): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -24,30 +25,42 @@ export class TizenAvplayDriver implements PlayerDriver {
         this.timeCallback?.(ms, duration);
       },
       onerror: () => this.errorCallback?.('AVPlay Hardware Error'),
+      onstreamcompleted: () => this.stateCallback?.('ended'),
     });
 
-    avplay.prepareAsync(() => {
-      if (startMs > 0) {
-        avplay.seekTo(startMs);
+    avplay.prepareAsync(
+      () => {
+        if (this.isDestroyed) return;
+        if (startMs > 0) {
+          avplay.seekTo(startMs);
+        }
+        avplay.play();
+        this.stateCallback?.('playing');
+      },
+      () => {
+        if (!this.isDestroyed) {
+          this.errorCallback?.('AVPlay Prepare Error');
+        }
       }
-      avplay.play();
-      this.stateCallback?.('playing');
-    });
+    );
   }
 
   play(): void {
+    if (this.isDestroyed) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (window as any).webapis?.avplay?.play();
     this.stateCallback?.('playing');
   }
 
   pause(): void {
+    if (this.isDestroyed) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (window as any).webapis?.avplay?.pause();
     this.stateCallback?.('paused');
   }
 
   seekTo(ms: number): void {
+    if (this.isDestroyed) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (window as any).webapis?.avplay?.seekTo(ms);
   }
@@ -57,6 +70,11 @@ export class TizenAvplayDriver implements PlayerDriver {
   }
 
   destroy(): void {
+    this.isDestroyed = true;
+    this.timeCallback = undefined;
+    this.stateCallback = undefined;
+    this.errorCallback = undefined;
+
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const avplay = (window as any).webapis?.avplay;

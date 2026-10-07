@@ -212,11 +212,11 @@ describe('PlayerScreen', () => {
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.RIGHT }));
     });
-    expect(mockDriver.seekTo).toHaveBeenCalledWith(35000);
+    expect(mockDriver.seekTo).toHaveBeenCalledWith(25000); // 15000 + 10000
   });
 
-  it('prevents seeking below 0', () => {
-    render(
+  it('prevents seeking below 0 and clamps seeking to durationMs', () => {
+    const { getByText, getAllByText } = render(
       <PlayerScreen
         itemId="item-123"
         title="Sample Movie"
@@ -227,7 +227,7 @@ describe('PlayerScreen', () => {
     );
 
     act(() => {
-      mockDriver.timeCallback?.(4000, 100000);
+      mockDriver.timeCallback?.(4000, 20000);
     });
 
     // Press Left with pos 4s -> should seek to 0, not -6s
@@ -235,9 +235,19 @@ describe('PlayerScreen', () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.LEFT }));
     });
     expect(mockDriver.seekTo).toHaveBeenCalledWith(0);
+    expect(getByText('0:00')).toBeInTheDocument();
+
+    // Press Right repeatedly past duration (20s) -> should clamp to 20000
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.RIGHT })); // to 10s
+      window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.RIGHT })); // to 20s
+      window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.RIGHT })); // clamped at 20s
+    });
+    expect(mockDriver.seekTo).toHaveBeenLastCalledWith(20000);
+    expect(getAllByText('0:20')).toHaveLength(2);
   });
 
-  it('handles remote Back button to trigger onExit', () => {
+  it('handles remote Back button, calls preventDefault, and triggers onExit', () => {
     const onExit = vi.fn();
     render(
       <PlayerScreen
@@ -249,15 +259,37 @@ describe('PlayerScreen', () => {
       />
     );
 
+    const eventTizen = new KeyboardEvent('keydown', { keyCode: TVKeys.BACK_TIZEN, cancelable: true });
+    const preventDefaultSpy1 = vi.spyOn(eventTizen, 'preventDefault');
     act(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.BACK_TIZEN }));
+      window.dispatchEvent(eventTizen);
     });
-    expect(onExit).toHaveBeenCalled();
+    expect(preventDefaultSpy1).toHaveBeenCalled();
+    expect(onExit).toHaveBeenCalledTimes(1);
 
+    const eventWeb = new KeyboardEvent('keydown', { keyCode: TVKeys.BACK_WEB, cancelable: true });
+    const preventDefaultSpy2 = vi.spyOn(eventWeb, 'preventDefault');
     act(() => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.BACK_WEB }));
+      window.dispatchEvent(eventWeb);
     });
+    expect(preventDefaultSpy2).toHaveBeenCalled();
     expect(onExit).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses transparent backgrounds to avoid occluding hardware video plane', () => {
+    const { container } = render(
+      <PlayerScreen
+        itemId="item-123"
+        title="Sample Movie"
+        serverUrl="http://localhost:8492"
+        token="test-token"
+        onExit={vi.fn()}
+      />
+    );
+
+    const rootElement = container.firstChild as HTMLElement;
+    expect(rootElement).toHaveClass('bg-transparent');
+    expect(rootElement).not.toHaveClass('bg-black');
   });
 
   it('sends periodic scrobble heartbeat every 10 seconds', () => {

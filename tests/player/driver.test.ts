@@ -187,6 +187,51 @@ describe('TizenAvplayDriver', () => {
 
     listener.onerror();
     expect(errorSpy).toHaveBeenCalledWith('AVPlay Hardware Error');
+
+    listener.onstreamcompleted();
+    expect(stateSpy).toHaveBeenCalledWith('ended');
+  });
+
+  it('guards against asynchronous race if destroy is called before prepareAsync completes', async () => {
+    let prepareSuccessCb: (() => void) | undefined;
+    mockAvplay.prepareAsync = vi.fn((successCb) => {
+      prepareSuccessCb = successCb;
+    });
+
+    const driver = new TizenAvplayDriver();
+    const container = document.createElement('div');
+    const stateSpy = vi.fn();
+    driver.onStateChange(stateSpy);
+
+    await driver.init(container, 'http://stream.m3u8', 15000);
+
+    // Call destroy before prepareAsync callback finishes
+    driver.destroy();
+
+    // Now invoke the pending callback
+    prepareSuccessCb?.();
+
+    expect(mockAvplay.seekTo).not.toHaveBeenCalled();
+    expect(mockAvplay.play).not.toHaveBeenCalled();
+    expect(stateSpy).not.toHaveBeenCalled();
+  });
+
+  it('handles prepareAsync error callback', async () => {
+    let prepareErrorCb: ((err: unknown) => void) | undefined;
+    mockAvplay.prepareAsync = vi.fn((_successCb, errorCb) => {
+      prepareErrorCb = errorCb;
+    });
+
+    const driver = new TizenAvplayDriver();
+    const container = document.createElement('div');
+    const errorSpy = vi.fn();
+    driver.onError(errorSpy);
+
+    await driver.init(container, 'http://stream.m3u8', 0);
+
+    prepareErrorCb?.(new Error('Prepare failed'));
+
+    expect(errorSpy).toHaveBeenCalledWith('AVPlay Prepare Error');
   });
 
   it('handles play, pause, seekTo, and destroy', () => {
@@ -208,6 +253,14 @@ describe('TizenAvplayDriver', () => {
     driver.destroy();
     expect(mockAvplay.stop).toHaveBeenCalled();
     expect(mockAvplay.close).toHaveBeenCalled();
+
+    // After destroy, play/pause/seek should be no-ops
+    driver.play();
+    expect(mockAvplay.play).toHaveBeenCalledTimes(1);
+    driver.pause();
+    expect(mockAvplay.pause).toHaveBeenCalledTimes(1);
+    driver.seekTo(1000);
+    expect(mockAvplay.seekTo).toHaveBeenCalledTimes(1);
   });
 });
 

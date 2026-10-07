@@ -80,6 +80,9 @@ export class Html5PlayerDriver implements PlayerDriver {
       this.video.remove();
       this.video = null;
     }
+    this.timeCallback = undefined;
+    this.stateCallback = undefined;
+    this.errorCallback = undefined;
   }
 
   onTimeUpdate(callback: (posMs: number, durationMs: number) => void): void {
