@@ -6,8 +6,11 @@ import { TVKeys } from '../../navigation/keys';
 
 export interface PinPadModalProps {
   isOpen: boolean;
-  username: string;
-  onSubmit: (pin: string) => void | Promise<unknown>;
+  username?: string;
+  title?: string;
+  subtitle?: string;
+  onSubmit?: (pin: string) => void | Promise<unknown>;
+  onSubmitPin?: (pin: string) => void | Promise<unknown>;
   onClose: () => void;
   lockedOutSecs?: number;
   errorMessage?: string;
@@ -18,13 +21,20 @@ export interface PinPadModalProps {
 export function PinPadModal({
   isOpen,
   username,
+  title,
+  subtitle,
   onSubmit,
+  onSubmitPin,
   onClose,
   lockedOutSecs = 0,
   errorMessage,
   onErrorClear,
   onLockoutEnd,
 }: PinPadModalProps) {
+  const submitFn = onSubmitPin || onSubmit;
+  const modalTitle = title || (username ? `Enter PIN for ${username}` : 'Enter PIN');
+  const modalSubtitle = subtitle || 'Use your TV remote number buttons';
+
   const [pin, setPin] = useState('');
   const pinRef = useRef(pin);
   pinRef.current = pin;
@@ -83,8 +93,8 @@ export function PinPadModal({
     pinRef.current = next;
     setPin(next);
 
-    if (next.length === 4) {
-      Promise.resolve(onSubmit(next)).finally(() => {
+    if (next.length === 4 && submitFn) {
+      Promise.resolve(submitFn(next)).finally(() => {
         if (pinRef.current === next) {
           pinRef.current = '';
           setPin('');
@@ -149,8 +159,8 @@ export function PinPadModal({
       trapGroupId="pin-pad-modal"
       className="w-[540px]"
     >
-      <h3 className="text-3xl font-bold text-zinc-100">Enter PIN for {username}</h3>
-      <p className="text-zinc-400 mt-2 text-lg">Use your TV remote number buttons</p>
+      <h3 className="text-3xl font-bold text-zinc-100">{modalTitle}</h3>
+      <p className="text-zinc-400 mt-2 text-lg">{modalSubtitle}</p>
 
       {countdown > 0 ? (
         <div className="mt-8 text-rose-400 font-semibold text-xl">

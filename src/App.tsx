@@ -3,11 +3,16 @@ import { FocusProvider } from './navigation/FocusContext';
 import { ApiClient } from './api/client';
 import { listProfiles, authenticatePin } from './api/auth';
 import { fetchMediaItem, MediaItemDetail } from './api/items';
-import { ProfileCard } from './types/kadr';
+import { unlockLibrary } from './api/libraries';
+import { subscribeEvents } from './api/events';
+import { ProfileCard, FolderImage } from './types/kadr';
 import { ServerConnectScreen } from './screens/ServerConnectScreen';
 import { ProfileSelectScreen } from './screens/ProfileSelectScreen';
 import { BrowseScreen } from './screens/BrowseScreen';
 import { ItemDetailModal } from './screens/ItemDetailModal';
+import { FolderBrowserModal } from './screens/FolderBrowserModal';
+import { ImageViewerModal } from './screens/ImageViewerModal';
+import { PinPadModal } from './components/pin/PinPadModal';
 import { PlayerScreen } from './screens/PlayerScreen';
 import { WifiOff } from 'lucide-react';
 
@@ -21,6 +26,17 @@ export default function App() {
   const [profiles, setProfiles] = useState<ProfileCard[]>([]);
   const [activeItem, setActiveItem] = useState<MediaItemDetail | null>(null);
   const [playerItem, setPlayerItem] = useState<{ id: number | string; title: string; startMs: number } | null>(null);
+  const [folderBrowserState, setFolderBrowserState] = useState<{ libraryId: string; path: string } | null>(null);
+  const [imageViewerState, setImageViewerState] = useState<{
+    images: FolderImage[];
+    initialIndex: number;
+    autoPlay: boolean;
+  } | null>(null);
+  const [unlockLibraryId, setUnlockLibraryId] = useState<string | null>(null);
+  const [unlockError, setUnlockError] = useState<string | undefined>();
+  const [unlockLockoutSecs, setUnlockLockoutSecs] = useState<number>(0);
+  const [screenRefreshKey, setScreenRefreshKey] = useState<number>(0);
+  const [folderRefreshKey, setFolderRefreshKey] = useState<number>(0);
   const [isOffline, setIsOffline] = useState(
     typeof navigator !== 'undefined' ? !navigator.onLine : false
   );
@@ -68,6 +84,21 @@ export default function App() {
     }
   }, [serverUrl, token]);
 
+  // Real-time SSE subscription
+  useEffect(() => {
+    if (!serverUrl || !token) return;
+    const unsubscribe = subscribeEvents(serverUrl, token, (type) => {
+      if (type === 'layout:changed') {
+        setScreenRefreshKey((k) => k + 1);
+      } else if (type === 'library:updated') {
+        setFolderRefreshKey((k) => k + 1);
+      }
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [serverUrl, token]);
+
   const handleServerSelected = async (url: string, name: string) => {
     localStorage.setItem('kadr_server_url', url);
     localStorage.setItem('kadr_server_name', name);
@@ -110,6 +141,26 @@ export default function App() {
     setView('player');
   };
 
+  const handleUnlockPin = async (pin: string) => {
+    if (!unlockLibraryId) return;
+    try {
+      const res = await unlockLibrary(client, unlockLibraryId, pin);
+      const unlockToken = res.unlock_token || res.token;
+      client.setLibraryUnlockToken(unlockLibraryId, unlockToken);
+      setUnlockLibraryId(null);
+      setUnlockError(undefined);
+      setUnlockLockoutSecs(0);
+      setFolderRefreshKey((k) => k + 1);
+    } catch (err: any) {
+      const status = err?.status;
+      const msg = err?.message || 'Incorrect PIN';
+      if (status === 429 || msg.includes('429')) {
+        setUnlockLockoutSecs(err?.retryAfterSecs || 30);
+      }
+      setUnlockError(msg);
+    }
+  };
+
   return (
     <FocusProvider>
       <div className="w-[1920px] h-[1080px] bg-zinc-950 overflow-hidden relative font-sans text-zinc-100">
@@ -150,8 +201,14 @@ export default function App() {
               onSwitchProfile={() => {
                 localStorage.removeItem('kadr_token');
                 setToken(null);
+                setActiveItem(null);
+                setFolderBrowserState(null);
+                setImageViewerState(null);
+                setUnlockLibraryId(null);
+                client.clearLibraryUnlockTokens();
                 setView('profiles');
               }}
+              refreshKey={screenRefreshKey}
             />
             <ItemDetailModal
               isOpen={Boolean(activeItem)}
@@ -159,7 +216,61 @@ export default function App() {
               serverUrl={serverUrl || ''}
               onPlay={handlePlayItem}
               onClose={() => setActiveItem(null)}
+              onBrowseFolder={(libraryId, folderPath) => {
+                setActiveItem(null);
+                setFolderBrowserState({ libraryId, path: folderPath });
+              }}
             />
+            {folderBrowserState && (
+              <FolderBrowserModal
+                key={`${folderBrowserState.libraryId}-${folderBrowserState.path}`}
+                client={client}
+                serverUrl={serverUrl || ''}
+                libraryId={folderBrowserState.libraryId}
+                initialPath={folderBrowserState.path}
+                refreshKey={folderRefreshKey}
+                onClose={() => setFolderBrowserState(null)}
+                onSelectItem={(itemId) => {
+                  handleOpenDetail(itemId);
+                }}
+                onSelectImage={(images, initialIndex) => {
+                  setImageViewerState({ images, initialIndex, autoPlay: false });
+                }}
+                onStartSlideshow={(images) => {
+                  setImageViewerState({ images, initialIndex: 0, autoPlay: true });
+                }}
+                onLockedLibrary={(libraryId) => {
+                  setUnlockLibraryId(libraryId);
+                }}
+              />
+            )}
+            {imageViewerState && (
+              <ImageViewerModal
+                images={imageViewerState.images}
+                initialIndex={imageViewerState.initialIndex}
+                autoPlay={imageViewerState.autoPlay}
+                serverUrl={serverUrl || ''}
+                onClose={() => setImageViewerState(null)}
+              />
+            )}
+            {unlockLibraryId && (
+              <PinPadModal
+                isOpen={Boolean(unlockLibraryId)}
+                title="Unlock Private Library"
+                subtitle="Enter 4-digit PIN to access this library"
+                onSubmitPin={handleUnlockPin}
+                onSubmit={handleUnlockPin}
+                onClose={() => {
+                  setUnlockLibraryId(null);
+                  setUnlockError(undefined);
+                  setUnlockLockoutSecs(0);
+                }}
+                errorMessage={unlockError}
+                lockedOutSecs={unlockLockoutSecs}
+                onErrorClear={() => setUnlockError(undefined)}
+                onLockoutEnd={() => setUnlockLockoutSecs(0)}
+              />
+            )}
           </>
         )}
 

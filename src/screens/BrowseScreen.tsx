@@ -15,6 +15,7 @@ export interface BrowseScreenProps {
   onPlayItem: (itemId: number | string, resumeMs?: number) => void;
   onSwitchProfile: () => void;
   initialTab?: string;
+  refreshKey?: number;
 }
 
 const defaultScreens: ScreenSummary[] = [
@@ -110,6 +111,7 @@ export function BrowseScreen({
   onPlayItem,
   onSwitchProfile,
   initialTab,
+  refreshKey,
 }: BrowseScreenProps) {
   const [screens, setScreens] = useState<ScreenSummary[]>([]);
   const [activeTab, setActiveTab] = useState<string>(initialTab || 'home');
@@ -150,7 +152,7 @@ export function BrowseScreen({
     return () => {
       cancelled = true;
     };
-  }, [client, initialTab]);
+  }, [client, initialTab, refreshKey]);
 
   useEffect(() => {
     lastContentFocusedIdRef.current = null;
@@ -192,7 +194,7 @@ export function BrowseScreen({
     return () => {
       cancelled = true;
     };
-  }, [client, activeTab, setFocusedId]);
+  }, [client, activeTab, setFocusedId, refreshKey]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

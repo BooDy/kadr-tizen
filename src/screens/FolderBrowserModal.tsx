@@ -20,6 +20,7 @@ export interface FolderBrowserModalProps {
   onStartSlideshow: (images: FolderImage[]) => void;
   onLockedLibrary?: (libraryId: string) => void;
   isOpen?: boolean;
+  refreshKey?: number;
 }
 
 function formatBytes(bytes?: number): string {
@@ -103,6 +104,7 @@ export function FolderBrowserModal({
   onStartSlideshow,
   onLockedLibrary,
   isOpen = true,
+  refreshKey,
 }: FolderBrowserModalProps) {
   const [currentPath, setCurrentPath] = useState<string>(initialPath);
   const [folderData, setFolderData] = useState<LibraryFolderResponse | null>(null);
@@ -110,7 +112,7 @@ export function FolderBrowserModal({
   const [error, setError] = useState<string | null>(null);
   const [isLocked, setIsLocked] = useState<boolean>(false);
 
-  const { pushTrap, popTrap } = useFocusContext();
+  const { pushTrap, popTrap, activeTrap } = useFocusContext();
 
   useEffect(() => {
     if (!isOpen) return;
@@ -152,7 +154,7 @@ export function FolderBrowserModal({
     return () => {
       isMounted = false;
     };
-  }, [client, libraryId, currentPath, isOpen, onLockedLibrary]);
+  }, [client, libraryId, currentPath, isOpen, onLockedLibrary, refreshKey]);
 
   useEffect(() => {
     setCurrentPath(initialPath || '');
@@ -162,6 +164,11 @@ export function FolderBrowserModal({
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // If another modal or focus trap is active above this modal, do not intercept keys
+      if (activeTrap && activeTrap !== 'folder-browser-modal') {
+        return;
+      }
+
       const code = e.keyCode || e.which;
       if (
         code === TVKeys.BACK_TIZEN ||
@@ -187,7 +194,7 @@ export function FolderBrowserModal({
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [isOpen, currentPath, folderData?.parent_path, onClose]);
+  }, [isOpen, currentPath, folderData?.parent_path, onClose, activeTrap]);
 
   if (!isOpen) return null;
 
