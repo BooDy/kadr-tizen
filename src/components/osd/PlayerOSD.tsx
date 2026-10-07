@@ -14,6 +14,7 @@ export interface PlayerOSDProps {
   subtitles?: SubtitleTrack[];
   selectedSubtitleId?: number | null;
   onSelectSubtitle?: (id: number | null) => void;
+  onPopupOpenChange?: (isOpen: boolean) => void;
 }
 
 export function formatTime(ms: number): string {
@@ -32,9 +33,14 @@ export function PlayerOSD({
   subtitles,
   selectedSubtitleId,
   onSelectSubtitle,
+  onPopupOpenChange,
 }: PlayerOSDProps) {
   const [isPopupOpen, setIsPopupOpen] = useState(false);
   const focusCtx = useContext(FocusContext);
+
+  useEffect(() => {
+    onPopupOpenChange?.(isPopupOpen);
+  }, [isPopupOpen, onPopupOpenChange]);
 
   const hasSubtitles = Boolean(subtitles && subtitles.length > 0);
 
@@ -123,7 +129,7 @@ export function PlayerOSD({
     return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [isPopupOpen, focusedIndex, options, onSelectSubtitle]);
 
-  if (!visible) return null;
+  if (!visible && !isPopupOpen) return null;
 
   const progressPercent =
     durationMs > 0 ? Math.min(100, Math.max(0, (positionMs / durationMs) * 100)) : 0;

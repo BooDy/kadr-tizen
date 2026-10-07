@@ -75,6 +75,26 @@ export class Html5PlayerDriver implements PlayerDriver {
       track.kind = 'subtitles';
       track.src = trackUrl;
       track.default = true;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        if ((track as any).track) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (track as any).track.mode = 'showing';
+        }
+      } catch {
+        // Ignored
+      }
+      track.addEventListener('load', () => {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          if ((track as any).track) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (track as any).track.mode = 'showing';
+          }
+        } catch {
+          // Ignored
+        }
+      });
       this.video.appendChild(track);
     }
   }

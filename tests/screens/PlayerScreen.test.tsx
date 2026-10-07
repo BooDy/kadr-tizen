@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, act } from '@testing-library/react';
+import { render, act, screen } from '@testing-library/react';
 import { PlayerScreen } from '../../src/screens/PlayerScreen';
 import * as playbackApi from '../../src/api/playback';
 import * as subtitlesApi from '../../src/api/subtitles';
@@ -758,6 +758,83 @@ describe('PlayerScreen', () => {
 
       expect(queryByTestId('subtitles-button')).not.toBeInTheDocument();
       expect(getByText('Sample Movie')).toBeInTheDocument();
+    });
+
+    it('pauses OSD auto-hide while subtitle popup is open and playing', async () => {
+      vi.spyOn(subtitlesApi, 'fetchItemSubtitles').mockResolvedValue(mockTracks);
+
+      const { getByTestId, queryByTestId } = render(
+        <PlayerScreen
+          itemId={101}
+          title="Sample Movie"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          onExit={vi.fn()}
+        />
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      // Playing state
+      act(() => {
+        mockDriver.stateCallback?.('playing');
+      });
+
+      // Open subtitles popup
+      act(() => {
+        getByTestId('subtitles-button').click();
+      });
+      expect(getByTestId('subtitles-popup')).toBeInTheDocument();
+
+      // Advance 5 seconds (past the 4s auto-hide limit)
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
+
+      // Popup and OSD should still be visible
+      expect(getByTestId('subtitles-popup')).toBeInTheDocument();
+      expect(queryByTestId('player-osd')).toBeInTheDocument();
+    });
+
+    it('does not toggle play/pause when Enter key is pressed while subtitle popup is open', async () => {
+      vi.spyOn(subtitlesApi, 'fetchItemSubtitles').mockResolvedValue(mockTracks);
+
+      render(
+        <PlayerScreen
+          itemId={101}
+          title="Sample Movie"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          onExit={vi.fn()}
+        />
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      act(() => {
+        mockDriver.stateCallback?.('playing');
+      });
+
+      // Open popup
+      act(() => {
+        screen.getByTestId('subtitles-button').click();
+      });
+
+      mockDriver.pause.mockClear();
+      mockDriver.play.mockClear();
+
+      // Press Enter to select subtitle option
+      act(() => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.ENTER }));
+      });
+
+      // Should select subtitle, but NOT pause or play the video!
+      expect(mockDriver.pause).not.toHaveBeenCalled();
+      expect(mockDriver.play).not.toHaveBeenCalled();
     });
   });
 });

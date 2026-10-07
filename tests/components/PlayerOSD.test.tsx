@@ -284,5 +284,66 @@ describe('PlayerOSD', () => {
       expect(onSelect).toHaveBeenCalledWith(2);
       expect(queryByTestId('subtitles-popup')).not.toBeInTheDocument();
     });
+
+    it('notifies onPopupOpenChange when popup opens and closes', () => {
+      const onPopupOpenChange = vi.fn();
+      const { getByTestId } = render(
+        <PlayerOSD
+          title="Big Buck Bunny"
+          playerState="playing"
+          positionMs={0}
+          durationMs={100000}
+          visible={true}
+          subtitles={mockSubtitles}
+          selectedSubtitleId={1}
+          onPopupOpenChange={onPopupOpenChange}
+        />
+      );
+
+      expect(onPopupOpenChange).toHaveBeenCalledWith(false);
+
+      fireEvent.click(getByTestId('subtitles-button'));
+      expect(onPopupOpenChange).toHaveBeenCalledWith(true);
+
+      fireEvent.keyDown(window, { key: 'Escape' });
+      expect(onPopupOpenChange).toHaveBeenLastCalledWith(false);
+    });
+
+    it('keeps popup mounted even if visible prop becomes false while open', () => {
+      const { getByTestId, queryByTestId, rerender } = render(
+        <PlayerOSD
+          title="Big Buck Bunny"
+          playerState="playing"
+          positionMs={0}
+          durationMs={100000}
+          visible={true}
+          subtitles={mockSubtitles}
+          selectedSubtitleId={1}
+        />
+      );
+
+      fireEvent.click(getByTestId('subtitles-button'));
+      expect(getByTestId('subtitles-popup')).toBeInTheDocument();
+
+      // visible becomes false (e.g. OSD timer fires)
+      rerender(
+        <PlayerOSD
+          title="Big Buck Bunny"
+          playerState="playing"
+          positionMs={0}
+          durationMs={100000}
+          visible={false}
+          subtitles={mockSubtitles}
+          selectedSubtitleId={1}
+        />
+      );
+
+      // Popup must remain mounted!
+      expect(getByTestId('subtitles-popup')).toBeInTheDocument();
+
+      // Close popup
+      fireEvent.keyDown(window, { key: 'Escape' });
+      expect(queryByTestId('subtitles-popup')).not.toBeInTheDocument();
+    });
   });
 });

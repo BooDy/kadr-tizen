@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo, useContext } from 'react';
 import { createPlayerDriver } from '../player/avplay-driver';
 import { PlayerDriver, PlayerState } from '../player/driver';
 import { reportPlaybackProgress } from '../api/playback';
@@ -7,6 +7,7 @@ import { fetchItemSubtitles } from '../api/subtitles';
 import { SubtitleTrack } from '../types/kadr';
 import { PlaybackSessionManager } from '../player/session';
 import { TVKeys } from '../navigation/keys';
+import { FocusContext } from '../navigation/FocusContext';
 import { PlayerOSD } from '../components/osd/PlayerOSD';
 
 export interface PlayerScreenProps {
@@ -39,6 +40,14 @@ export function PlayerScreen({
   const [showOSD, setShowOSD] = useState(true);
   const [subtitles, setSubtitles] = useState<SubtitleTrack[]>([]);
   const [selectedSubtitleId, setSelectedSubtitleId] = useState<number | null>(null);
+
+  const focusCtx = useContext(FocusContext);
+  const focusCtxRef = useRef(focusCtx);
+  focusCtxRef.current = focusCtx;
+
+  const [isSubtitlePopupOpen, setIsSubtitlePopupOpen] = useState(false);
+  const isSubtitlePopupOpenRef = useRef(isSubtitlePopupOpen);
+  isSubtitlePopupOpenRef.current = isSubtitlePopupOpen;
 
   const cleanServerUrl = useMemo(() => serverUrl.replace(/\/+$/, ''), [serverUrl]);
 
@@ -105,7 +114,7 @@ export function PlayerScreen({
   const resetOsdTimer = useCallback(() => {
     setShowOSD(true);
     if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
-    if (playerStateRef.current === 'playing') {
+    if (playerStateRef.current === 'playing' && !isSubtitlePopupOpenRef.current) {
       osdTimerRef.current = setTimeout(() => {
         setShowOSD(false);
       }, 4000);
@@ -113,6 +122,11 @@ export function PlayerScreen({
   }, []);
 
   useEffect(() => {
+    if (isSubtitlePopupOpen) {
+      setShowOSD(true);
+      if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
+      return;
+    }
     if (playerState === 'playing') {
       if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
       osdTimerRef.current = setTimeout(() => {
@@ -122,7 +136,7 @@ export function PlayerScreen({
       setShowOSD(true);
       if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
     }
-  }, [playerState]);
+  }, [playerState, isSubtitlePopupOpen]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -206,11 +220,26 @@ export function PlayerScreen({
       resetOsdTimer();
 
       if (
-        code === TVKeys.ENTER ||
         code === TVKeys.PLAY_PAUSE ||
         code === TVKeys.PLAY ||
         code === TVKeys.PAUSE
       ) {
+        if (playerStateRef.current === 'playing') {
+          driverRef.current?.pause();
+        } else {
+          driverRef.current?.play();
+        }
+      } else if (code === TVKeys.ENTER || e.key === 'Enter') {
+        if (
+          e.defaultPrevented ||
+          isSubtitlePopupOpenRef.current ||
+          focusCtxRef.current?.focusedId ||
+          (document.activeElement &&
+            document.activeElement !== document.body &&
+            document.activeElement.tagName === 'BUTTON')
+        ) {
+          return;
+        }
         if (playerStateRef.current === 'playing') {
           driverRef.current?.pause();
         } else {
@@ -256,6 +285,7 @@ export function PlayerScreen({
         subtitles={subtitles}
         selectedSubtitleId={selectedSubtitleId}
         onSelectSubtitle={setSelectedSubtitleId}
+        onPopupOpenChange={setIsSubtitlePopupOpen}
       />
     </div>
   );
