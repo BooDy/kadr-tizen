@@ -1,36 +1,60 @@
+import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { FocusProvider } from '../../src/navigation/FocusContext';
 import { WidgetRenderer } from '../../src/components/widgets/WidgetRenderer';
 import { ScreenLayout } from '../../src/types/ast';
 
-describe('WidgetRenderer', () => {
-  it('renders HeroSpotlight and CardCarousel widgets from AST layout', () => {
+describe('WidgetRenderer with Server AST', () => {
+  it('renders hero_banner, carousel, and grid from server AST layout', () => {
     const mockLayout: ScreenLayout = {
-      screen_id: 'home',
+      id: 'home',
       title: 'Home',
       widgets: [
         {
-          id: 'hero-1',
-          type: 'hero_spotlight',
-          title: 'Featured Movie',
-          item_id: 'item-100',
-          backdrop_url: '/artwork/100/backdrop',
-          synopsis: 'An epic adventure awaits.',
-          badges: ['4K', 'HDR'],
+          type: 'hero_banner',
+          id: 'home_spotlight',
+          data: {
+            id: 101,
+            title: 'Interstellar',
+            subtitle: 'Mankind was born on Earth. It was never meant to die here.',
+            backdrop_url: '/api/v1/artwork/101/backdrop',
+            media_type: 'movie',
+            rating: 8.7,
+            release_year: 2014,
+            badge: '4K',
+            playback_progress: 0.65,
+          },
         },
         {
-          id: 'carousel-continue',
-          type: 'card_carousel',
+          type: 'carousel',
+          id: 'continue_watching',
           title: 'Continue Watching',
           items: [
             {
-              id: 'card-1',
-              item_id: 'item-101',
-              title: 'Breaking Bad S01E01',
-              poster_url: '/artwork/101/poster',
-              progress_percent: 45,
-              badge: 'RESUME',
+              id: 201,
+              title: 'Severance',
+              subtitle: 'Good news about hell',
+              poster_url: '/api/v1/artwork/201/poster',
+              media_type: 'episode',
+              season: 1,
+              episode: 1,
+              playback_progress: 0.45,
+            },
+          ],
+        },
+        {
+          type: 'grid',
+          id: 'all_movies',
+          title: 'All Movies',
+          columns: 6,
+          total_count: 42,
+          items: [
+            {
+              id: 301,
+              title: 'The Dark Knight',
+              media_type: 'movie',
+              release_year: 2008,
             },
           ],
         },
@@ -48,69 +72,25 @@ describe('WidgetRenderer', () => {
       </FocusProvider>
     );
 
-    expect(screen.getByText('Featured Movie')).toBeInTheDocument();
-    expect(screen.getByText('An epic adventure awaits.')).toBeInTheDocument();
-    expect(screen.getByText('4K')).toBeInTheDocument();
-    expect(screen.getByText('HDR')).toBeInTheDocument();
-    expect(screen.getByText('Continue Watching')).toBeInTheDocument();
-    expect(screen.getByText('Breaking Bad S01E01')).toBeInTheDocument();
-
-    const img = screen.getByAltText('Featured Movie') as HTMLImageElement;
-    expect(img.src).toBe('http://localhost:8492/artwork/100/backdrop');
-  });
-
-  it('renders CatalogGrid widget from AST layout', () => {
-    const mockLayout: ScreenLayout = {
-      screen_id: 'movies',
-      title: 'Movies',
-      widgets: [
-        {
-          id: 'grid-all-movies',
-          type: 'catalog_grid',
-          title: 'All Movies',
-          items: [
-            {
-              id: 'movie-1',
-              item_id: 'item-201',
-              title: 'Inception',
-              subtitle: '2010',
-              poster_url: '/artwork/201/poster',
-              badge: '4K',
-            },
-            {
-              id: 'movie-2',
-              item_id: 'item-202',
-              title: 'Interstellar',
-              subtitle: '2014',
-              poster_url: 'https://cdn.example.com/interstellar.jpg',
-            },
-          ],
-        },
-      ],
-    };
-
-    render(
-      <FocusProvider>
-        <WidgetRenderer
-          layout={mockLayout}
-          serverUrl="http://localhost:8492/"
-          onSelectItem={vi.fn()}
-          onPlayItem={vi.fn()}
-        />
-      </FocusProvider>
-    );
-
-    expect(screen.getByText('All Movies')).toBeInTheDocument();
-    expect(screen.getByText('Inception')).toBeInTheDocument();
-    expect(screen.getByText('2010')).toBeInTheDocument();
     expect(screen.getByText('Interstellar')).toBeInTheDocument();
+    expect(screen.getByText('Mankind was born on Earth. It was never meant to die here.')).toBeInTheDocument();
+    expect(screen.getByText('4K')).toBeInTheDocument();
+    expect(screen.getByText('8.7')).toBeInTheDocument();
     expect(screen.getByText('2014')).toBeInTheDocument();
+    expect(screen.getByText(/Resume/i)).toBeInTheDocument();
+    expect(screen.getByText('Continue Watching')).toBeInTheDocument();
+    expect(screen.getByText('Severance')).toBeInTheDocument();
+    expect(screen.getByText('S01E01')).toBeInTheDocument();
+    expect(screen.getByText('All Movies')).toBeInTheDocument();
+    expect(screen.getByText('The Dark Knight')).toBeInTheDocument();
+    expect(screen.getByText('2008')).toBeInTheDocument();
+    expect(screen.getByText('1 of 42 items')).toBeInTheDocument();
 
-    const inceptionImg = screen.getByAltText('Inception') as HTMLImageElement;
-    expect(inceptionImg.src).toBe('http://localhost:8492/artwork/201/poster');
+    const backdropImg = screen.getByAltText('Interstellar') as HTMLImageElement;
+    expect(backdropImg.src).toBe('http://localhost:8492/api/v1/artwork/101/backdrop');
 
-    const interstellarImg = screen.getByAltText('Interstellar') as HTMLImageElement;
-    expect(interstellarImg.src).toBe('https://cdn.example.com/interstellar.jpg');
+    const posterImg = screen.getByAltText('Severance') as HTMLImageElement;
+    expect(posterImg.src).toBe('http://localhost:8492/api/v1/artwork/201/poster');
   });
 
   it('triggers onPlayItem and onSelectItem when Hero buttons are clicked', () => {
@@ -118,15 +98,18 @@ describe('WidgetRenderer', () => {
     const onDetails = vi.fn();
 
     const mockLayout: ScreenLayout = {
-      screen_id: 'home',
+      id: 'home',
       title: 'Home',
       widgets: [
         {
+          type: 'hero_banner',
           id: 'hero-1',
-          type: 'hero_spotlight',
-          title: 'Dune Part Two',
-          item_id: 'item-300',
-          resume_position_ms: 125000,
+          data: {
+            id: 101,
+            title: 'Dune Part Two',
+            media_type: 'movie',
+            playback_progress: 0.65,
+          },
         },
       ],
     };
@@ -142,30 +125,32 @@ describe('WidgetRenderer', () => {
       </FocusProvider>
     );
 
-    // Resume button when resume_position_ms > 0
-    const resumeBtn = screen.getByText('Resume');
+    const resumeBtn = screen.getByText(/Resume/i);
     expect(resumeBtn).toBeInTheDocument();
     fireEvent.click(resumeBtn);
-    expect(onPlay).toHaveBeenCalledWith('item-300', 125000);
+    expect(onPlay).toHaveBeenCalledWith(101, 65);
 
-    const detailsBtn = screen.getByText('Details');
+    const detailsBtn = screen.getByText(/Details/i);
     fireEvent.click(detailsBtn);
-    expect(onDetails).toHaveBeenCalledWith('item-300');
+    expect(onDetails).toHaveBeenCalledWith(101);
   });
 
-  it('renders Play instead of Resume when resume_position_ms is 0 or undefined', () => {
+  it('renders Play instead of Resume when playback_progress is 0 or undefined', () => {
     const onPlay = vi.fn();
 
     const mockLayout: ScreenLayout = {
-      screen_id: 'home',
+      id: 'home',
       title: 'Home',
       widgets: [
         {
+          type: 'hero_banner',
           id: 'hero-2',
-          type: 'hero_spotlight',
-          title: 'The Dark Knight',
-          item_id: 'item-301',
-          resume_position_ms: 0,
+          data: {
+            id: 102,
+            title: 'The Dark Knight',
+            media_type: 'movie',
+            playback_progress: 0,
+          },
         },
       ],
     };
@@ -181,40 +166,41 @@ describe('WidgetRenderer', () => {
       </FocusProvider>
     );
 
-    const playBtn = screen.getByText('Play');
+    const playBtn = screen.getByText(/Play/i);
     expect(playBtn).toBeInTheDocument();
     fireEvent.click(playBtn);
-    expect(onPlay).toHaveBeenCalledWith('item-301', 0);
+    expect(onPlay).toHaveBeenCalledWith(102, 0);
   });
 
   it('triggers onSelectItem when clicking carousel or grid item', () => {
     const onSelect = vi.fn();
 
     const mockLayout: ScreenLayout = {
-      screen_id: 'home',
+      id: 'home',
       title: 'Home',
       widgets: [
         {
+          type: 'carousel',
           id: 'carousel-1',
-          type: 'card_carousel',
           title: 'Trending',
           items: [
             {
-              id: 'c-1',
-              item_id: 'item-401',
+              id: 201,
               title: 'Severance',
+              media_type: 'show',
             },
           ],
         },
         {
+          type: 'grid',
           id: 'grid-1',
-          type: 'catalog_grid',
           title: 'Recommended',
+          columns: 6,
           items: [
             {
-              id: 'g-1',
-              item_id: 'item-501',
+              id: 301,
               title: 'Succession',
+              media_type: 'show',
             },
           ],
         },
@@ -233,15 +219,114 @@ describe('WidgetRenderer', () => {
     );
 
     fireEvent.click(screen.getByText('Severance'));
-    expect(onSelect).toHaveBeenCalledWith('item-401');
+    expect(onSelect).toHaveBeenCalledWith(201);
 
     fireEvent.click(screen.getByText('Succession'));
-    expect(onSelect).toHaveBeenCalledWith('item-501');
+    expect(onSelect).toHaveBeenCalledWith(301);
+  });
+
+  it('formats subtitle for episodes as SxxExx and movies as release_year or custom subtitle', () => {
+    const mockLayout: ScreenLayout = {
+      id: 'home',
+      title: 'Home',
+      widgets: [
+        {
+          type: 'carousel',
+          id: 'c-test',
+          title: 'Mixed Items',
+          items: [
+            {
+              id: 1,
+              title: 'Episode Item',
+              media_type: 'episode',
+              season: 2,
+              episode: 5,
+            },
+            {
+              id: 2,
+              title: 'Movie Item With Year',
+              media_type: 'movie',
+              release_year: 2023,
+            },
+            {
+              id: 3,
+              title: 'Custom Subtitle Item',
+              media_type: 'movie',
+              subtitle: 'Custom Description',
+            },
+          ],
+        },
+      ],
+    };
+
+    render(
+      <FocusProvider>
+        <WidgetRenderer
+          layout={mockLayout}
+          serverUrl="http://localhost:8492"
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    expect(screen.getByText('S02E05')).toBeInTheDocument();
+    expect(screen.getByText('2023')).toBeInTheDocument();
+    expect(screen.getByText('Custom Description')).toBeInTheDocument();
+  });
+
+  it('handles absolute and relative image urls', () => {
+    const mockLayout: ScreenLayout = {
+      id: 'home',
+      title: 'Home',
+      widgets: [
+        {
+          type: 'hero_banner',
+          id: 'h-abs',
+          data: {
+            id: 1,
+            title: 'Absolute Image Movie',
+            media_type: 'movie',
+            backdrop_url: 'https://images.example.com/backdrop.jpg',
+          },
+        },
+        {
+          type: 'carousel',
+          id: 'c-abs',
+          title: 'Absolute Carousel',
+          items: [
+            {
+              id: 2,
+              title: 'Absolute Poster',
+              media_type: 'movie',
+              poster_url: 'https://images.example.com/poster.jpg',
+            },
+          ],
+        },
+      ],
+    };
+
+    render(
+      <FocusProvider>
+        <WidgetRenderer
+          layout={mockLayout}
+          serverUrl="http://localhost:8492/"
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    const backdrop = screen.getByAltText('Absolute Image Movie') as HTMLImageElement;
+    expect(backdrop.src).toBe('https://images.example.com/backdrop.jpg');
+
+    const poster = screen.getByAltText('Absolute Poster') as HTMLImageElement;
+    expect(poster.src).toBe('https://images.example.com/poster.jpg');
   });
 
   it('gracefully handles empty widgets array', () => {
     const mockLayout: ScreenLayout = {
-      screen_id: 'empty',
+      id: 'empty',
       title: 'Empty Screen',
       widgets: [],
     };
@@ -262,13 +347,12 @@ describe('WidgetRenderer', () => {
 
   it('gracefully ignores unknown widget types', () => {
     const mockLayout: ScreenLayout = {
-      screen_id: 'home',
+      id: 'home',
       title: 'Home',
       widgets: [
         {
           id: 'unknown-1',
-          type: 'unsupported_type' as unknown as 'hero_spotlight',
-          title: 'Unsupported',
+          type: 'unsupported_type' as unknown as 'hero_banner',
         } as unknown as ScreenLayout['widgets'][0],
       ],
     };
@@ -284,7 +368,134 @@ describe('WidgetRenderer', () => {
       </FocusProvider>
     );
 
-    expect(screen.queryByText('Unsupported')).not.toBeInTheDocument();
     expect(container).toBeInTheDocument();
   });
+
+  it('gracefully handles hero_banner without data and carousel/grid with empty items', () => {
+    const mockLayout: ScreenLayout = {
+      id: 'home',
+      title: 'Home',
+      widgets: [
+        {
+          type: 'hero_banner',
+          id: 'empty-hero',
+        },
+        {
+          type: 'carousel',
+          id: 'empty-carousel',
+          title: 'Empty Carousel',
+          items: [],
+        },
+        {
+          type: 'grid',
+          id: 'empty-grid',
+          title: 'Empty Grid',
+          columns: 6,
+          items: [],
+        },
+      ],
+    };
+
+    render(
+      <FocusProvider>
+        <WidgetRenderer
+          layout={mockLayout}
+          serverUrl="http://localhost:8492"
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    expect(screen.queryByText('Empty Carousel')).not.toBeInTheDocument();
+    expect(screen.queryByText('Empty Grid')).not.toBeInTheDocument();
+  });
+
+  it('autofocuses first item of first widget when hero_banner is absent', () => {
+    const mockLayout: ScreenLayout = {
+      id: 'movies',
+      title: 'Movies',
+      widgets: [
+        {
+          type: 'carousel',
+          id: 'popular_movies',
+          title: 'Popular',
+          items: [
+            {
+              id: 501,
+              title: 'Movie One',
+              media_type: 'movie',
+            },
+            {
+              id: 502,
+              title: 'Movie Two',
+              media_type: 'movie',
+            },
+          ],
+        },
+      ],
+    };
+
+    render(
+      <FocusProvider>
+        <WidgetRenderer
+          layout={mockLayout}
+          serverUrl="http://localhost:8492"
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    const firstCard = document.getElementById('card-popular_movies-501');
+    expect(firstCard).toHaveClass('tv-focus-ring');
+  });
+
+  it('autofocuses hero play button when hero_banner is present with data', () => {
+    const mockLayout: ScreenLayout = {
+      id: 'home',
+      title: 'Home',
+      widgets: [
+        {
+          type: 'hero_banner',
+          id: 'hero_spotlight',
+          data: {
+            id: 601,
+            title: 'Featured Spotlight',
+            media_type: 'movie',
+          },
+        },
+        {
+          type: 'carousel',
+          id: 'popular',
+          title: 'Popular',
+          items: [
+            {
+              id: 602,
+              title: 'Carousel Item',
+              media_type: 'movie',
+            },
+          ],
+        },
+      ],
+    };
+
+    render(
+      <FocusProvider>
+        <WidgetRenderer
+          layout={mockLayout}
+          serverUrl="http://localhost:8492"
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    const heroPlayBtn = document.getElementById('hero-play-hero_spotlight');
+    expect(heroPlayBtn).toHaveClass('tv-focus-ring');
+
+    const firstCard = document.getElementById('card-popular-602');
+    expect(firstCard).not.toHaveClass('tv-focus-ring');
+  });
 });
+

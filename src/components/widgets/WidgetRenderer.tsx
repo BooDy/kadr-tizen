@@ -6,8 +6,8 @@ import { CatalogGridWidget } from './CatalogGridWidget';
 export interface WidgetRendererProps {
   layout: ScreenLayout;
   serverUrl: string;
-  onSelectItem: (itemId: string) => void;
-  onPlayItem: (itemId: string, resumeMs?: number) => void;
+  onSelectItem: (itemId: number) => void;
+  onPlayItem: (itemId: number, resumeMs?: number) => void;
 }
 
 export function WidgetRenderer({
@@ -16,13 +16,13 @@ export function WidgetRenderer({
   onSelectItem,
   onPlayItem,
 }: WidgetRendererProps) {
-  const hasHero = layout.widgets.some((w) => w.type === 'hero_spotlight');
+  const hasHero = layout.widgets.some((w) => w.type === 'hero_banner' && Boolean(w.data));
   const firstWidgetId = layout.widgets[0]?.id;
 
   return (
     <div className="flex flex-col w-full pb-16">
       {layout.widgets.map((widget) => {
-        if (widget.type === 'hero_spotlight') {
+        if (widget.type === 'hero_banner') {
           return (
             <HeroSpotlightWidget
               key={widget.id}
@@ -33,25 +33,25 @@ export function WidgetRenderer({
             />
           );
         }
-        if (widget.type === 'card_carousel') {
+        if (widget.type === 'carousel') {
           return (
             <CardCarouselWidget
               key={widget.id}
               widget={widget}
               serverUrl={serverUrl}
-              autoFocusFirstItem={!hasHero && widget.id === firstWidgetId}
               onSelectItem={onSelectItem}
+              autoFocusFirstItem={!hasHero && widget.id === firstWidgetId}
             />
           );
         }
-        if (widget.type === 'catalog_grid') {
+        if (widget.type === 'grid') {
           return (
             <CatalogGridWidget
               key={widget.id}
               widget={widget}
               serverUrl={serverUrl}
-              autoFocusFirstItem={!hasHero && widget.id === firstWidgetId}
               onSelectItem={onSelectItem}
+              autoFocusFirstItem={!hasHero && widget.id === firstWidgetId}
             />
           );
         }
