@@ -1,0 +1,163 @@
+import { useState, useEffect, useMemo } from 'react';
+import { FocusProvider } from './navigation/FocusContext';
+import { ApiClient } from './api/client';
+import { listProfiles, authenticatePin } from './api/auth';
+import { fetchMediaItem, MediaItemDetail } from './api/items';
+import { ProfileCard } from './types/kadr';
+import { ServerConnectScreen } from './screens/ServerConnectScreen';
+import { ProfileSelectScreen } from './screens/ProfileSelectScreen';
+import { BrowseScreen } from './screens/BrowseScreen';
+import { ItemDetailModal } from './screens/ItemDetailModal';
+import { PlayerScreen } from './screens/PlayerScreen';
+import { WifiOff } from 'lucide-react';
+
+export type AppView = 'connect' | 'profiles' | 'browse' | 'player';
+
+export default function App() {
+  const [view, setView] = useState<AppView>('connect');
+  const [serverUrl, setServerUrl] = useState<string | null>(() => localStorage.getItem('kadr_server_url'));
+  const [serverName, setServerName] = useState<string>(() => localStorage.getItem('kadr_server_name') || 'Kadr');
+  const [token, setToken] = useState<string | null>(() => localStorage.getItem('kadr_token'));
+  const [profiles, setProfiles] = useState<ProfileCard[]>([]);
+  const [activeItem, setActiveItem] = useState<MediaItemDetail | null>(null);
+  const [playerItem, setPlayerItem] = useState<{ id: string; title: string; startMs: number } | null>(null);
+  const [isOffline, setIsOffline] = useState(
+    typeof navigator !== 'undefined' ? !navigator.onLine : false
+  );
+
+  const client = useMemo(() => {
+    const c = new ApiClient(serverUrl || 'http://localhost:8492');
+    if (token) c.setToken(token);
+    return c;
+  }, [serverUrl, token]);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (serverUrl && !token) {
+      listProfiles(serverUrl)
+        .then((p) => {
+          setProfiles(p);
+          setView('profiles');
+        })
+        .catch(() => setView('connect'));
+    } else if (serverUrl && token) {
+      setView('browse');
+    }
+  }, [serverUrl, token]);
+
+  const handleServerSelected = async (url: string, name: string) => {
+    localStorage.setItem('kadr_server_url', url);
+    localStorage.setItem('kadr_server_name', name);
+    setServerUrl(url);
+    setServerName(name);
+    try {
+      const p = await listProfiles(url);
+      setProfiles(p);
+      setView('profiles');
+    } catch {
+      setView('connect');
+    }
+  };
+
+  const handleLogin = async (userId: string, pin: string) => {
+    if (!serverUrl) return { success: false };
+    const res = await authenticatePin(serverUrl, userId, pin);
+    if (res.success && res.data) {
+      localStorage.setItem('kadr_token', res.data.token);
+      setToken(res.data.token);
+      setView('browse');
+      return { success: true };
+    }
+    return { success: false, error: res.error, lockedOutSecs: res.retryAfterSecs };
+  };
+
+  const handleOpenDetail = async (itemId: string) => {
+    try {
+      const item = await fetchMediaItem(client, itemId);
+      setActiveItem(item);
+    } catch {
+      // Ignored
+    }
+  };
+
+  const handlePlayItem = (itemId: string, resumeMs = 0) => {
+    const title = activeItem?.title || 'Playing';
+    setActiveItem(null);
+    setPlayerItem({ id: itemId, title, startMs: resumeMs });
+    setView('player');
+  };
+
+  return (
+    <FocusProvider>
+      <div className="w-[1920px] h-[1080px] bg-zinc-950 overflow-hidden relative font-sans text-zinc-100">
+        {isOffline && (
+          <div
+            data-testid="reconnection-overlay"
+            className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex flex-col items-center justify-center gap-4 select-none"
+          >
+            <WifiOff className="w-16 h-16 text-rose-500 animate-pulse" />
+            <h2 className="text-3xl font-bold text-white">Connection Lost</h2>
+            <p className="text-xl text-zinc-400">Waiting for network connection to restore...</p>
+          </div>
+        )}
+
+        {view === 'connect' && (
+          <ServerConnectScreen onServerSelected={handleServerSelected} />
+        )}
+
+        {view === 'profiles' && (
+          <ProfileSelectScreen
+            profiles={profiles}
+            serverName={serverName}
+            onLogin={handleLogin}
+            onBackToServerConnect={() => setView('connect')}
+          />
+        )}
+
+        {view === 'browse' && (
+          <>
+            <BrowseScreen
+              client={client}
+              serverUrl={serverUrl || ''}
+              onSelectItem={handleOpenDetail}
+              onPlayItem={handlePlayItem}
+              onSwitchProfile={() => {
+                localStorage.removeItem('kadr_token');
+                setToken(null);
+                setView('profiles');
+              }}
+            />
+            <ItemDetailModal
+              isOpen={Boolean(activeItem)}
+              item={activeItem}
+              serverUrl={serverUrl || ''}
+              onPlay={handlePlayItem}
+              onClose={() => setActiveItem(null)}
+            />
+          </>
+        )}
+
+        {view === 'player' && playerItem && (
+          <PlayerScreen
+            itemId={playerItem.id}
+            title={playerItem.title}
+            serverUrl={serverUrl || ''}
+            token={token || ''}
+            initialTimeMs={playerItem.startMs}
+            onExit={() => setView('browse')}
+          />
+        )}
+      </div>
+    </FocusProvider>
+  );
+}
