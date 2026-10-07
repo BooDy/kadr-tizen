@@ -43,6 +43,19 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!isOffline) return;
+    const suppressKeys = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+    };
+    window.addEventListener('keydown', suppressKeys, true);
+    return () => {
+      window.removeEventListener('keydown', suppressKeys, true);
+    };
+  }, [isOffline]);
+
+  useEffect(() => {
     if (serverUrl && !token) {
       listProfiles(serverUrl)
         .then((p) => {
@@ -103,6 +116,9 @@ export default function App() {
         {isOffline && (
           <div
             data-testid="reconnection-overlay"
+            role="alertdialog"
+            aria-modal="true"
+            aria-label="Connection Lost"
             className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex flex-col items-center justify-center gap-4 select-none"
           >
             <WifiOff className="w-16 h-16 text-rose-500 animate-pulse" />

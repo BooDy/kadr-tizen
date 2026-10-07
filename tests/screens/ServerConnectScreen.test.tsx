@@ -185,6 +185,72 @@ describe('ServerConnectScreen', () => {
     });
   });
 
+  it('handles manual connection with custom port without appending redundant :8492', async () => {
+    const onServerSelected = vi.fn();
+    mockDiscover.mockResolvedValue([]);
+    mockVerify.mockResolvedValue({
+      app: 'kadr',
+      server_id: 'srv-custom-port',
+      name: 'Custom Port Server',
+      status: 'online',
+      version: '1.0.0',
+      port: 9999,
+      setup_completed: true,
+      protocol_version: 1,
+    });
+
+    render(
+      <FocusProvider>
+        <ServerConnectScreen onServerSelected={onServerSelected} />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('e.g. 192.168.1.100')).toBeInTheDocument();
+    });
+
+    const input = screen.getByPlaceholderText('e.g. 192.168.1.100');
+    fireEvent.change(input, { target: { value: '192.168.1.77:9999' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /Connect/i }));
+
+    await waitFor(() => {
+      expect(mockVerify).toHaveBeenCalledWith('http://192.168.1.77:9999');
+      expect(onServerSelected).toHaveBeenCalledWith(
+        'http://192.168.1.77:9999',
+        'Custom Port Server'
+      );
+    });
+  });
+
+  it('navigates with D-pad between manual IP input and connect button', async () => {
+    mockDiscover.mockResolvedValue([]);
+
+    render(
+      <FocusProvider>
+        <ServerConnectScreen onServerSelected={vi.fn()} />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('e.g. 192.168.1.100')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Connect/i })).toHaveClass('tv-focus-ring');
+    });
+
+    const input = screen.getByPlaceholderText('e.g. 192.168.1.100');
+    const connectBtn = screen.getByRole('button', { name: /Connect/i });
+
+    // ArrowLeft should move focus to manual-ip-input (order: 1)
+    fireEvent.keyDown(window, { key: 'ArrowLeft', code: 'ArrowLeft' });
+
+    expect(input).toHaveClass('border-sky-400');
+
+    // ArrowRight should move focus back to connect button (order: 2)
+    fireEvent.keyDown(window, { key: 'ArrowRight', code: 'ArrowRight' });
+
+    expect(connectBtn).toHaveClass('tv-focus-ring');
+  });
+
   it('shows error message when manual connect verification fails', async () => {
     const onServerSelected = vi.fn();
     mockDiscover.mockResolvedValue([]);

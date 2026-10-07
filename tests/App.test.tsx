@@ -356,4 +356,37 @@ describe('App State Machine & Router', () => {
 
     expect(screen.queryByTestId('reconnection-overlay')).not.toBeInTheDocument();
   });
+
+  it('suppresses remote key events when reconnection overlay is displayed', async () => {
+    localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
+    localStorage.setItem('kadr_token', 'valid-test-token');
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Home')).toBeInTheDocument();
+    });
+
+    act(() => {
+      window.dispatchEvent(new Event('offline'));
+    });
+
+    expect(screen.getByTestId('reconnection-overlay')).toBeInTheDocument();
+
+    const bubbleListener = vi.fn();
+    window.addEventListener('keydown', bubbleListener);
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'ArrowRight',
+      code: 'ArrowRight',
+      bubbles: true,
+      cancelable: true,
+    });
+    window.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(bubbleListener).not.toHaveBeenCalled();
+
+    window.removeEventListener('keydown', bubbleListener);
+  });
 });

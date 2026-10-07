@@ -3,10 +3,30 @@ import { discoverLocalServers, verifyServer } from '../api/discovery';
 import { DiscoveredServer } from '../types/kadr';
 import { TVButton } from '../components/tv/TVButton';
 import { TVCard } from '../components/tv/TVCard';
+import { useFocusable } from '../navigation/useFocusable';
 import { Server, Wifi, RefreshCw } from 'lucide-react';
 
 export interface ServerConnectScreenProps {
   onServerSelected: (url: string, name: string) => void;
+}
+
+export function formatServerUrl(input: string): string {
+  const trimmed = input.trim();
+  const withProtocol = trimmed.startsWith('http://') || trimmed.startsWith('https://')
+    ? trimmed
+    : `http://${trimmed}`;
+
+  try {
+    const parsed = new URL(withProtocol);
+    if (!parsed.port) {
+      parsed.port = '8492';
+    }
+    return parsed.pathname === '/' || !parsed.pathname
+      ? `${parsed.protocol}//${parsed.host}`
+      : `${parsed.protocol}//${parsed.host}${parsed.pathname}`.replace(/\/$/, '');
+  } catch {
+    return withProtocol;
+  }
 }
 
 export function ServerConnectScreen({ onServerSelected }: ServerConnectScreenProps) {
@@ -14,6 +34,13 @@ export function ServerConnectScreen({ onServerSelected }: ServerConnectScreenPro
   const [servers, setServers] = useState<DiscoveredServer[]>([]);
   const [manualIp, setManualIp] = useState('192.168.1.');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const { ref: inputRef, isFocused: isInputFocused } = useFocusable<HTMLInputElement>({
+    id: 'manual-ip-input',
+    groupId: 'manual',
+    order: 1,
+    onEnter: () => handleManualConnect(),
+  });
 
   const runDiscovery = async () => {
     setScanning(true);
@@ -37,7 +64,7 @@ export function ServerConnectScreen({ onServerSelected }: ServerConnectScreenPro
 
   const handleManualConnect = async () => {
     setErrorMsg(null);
-    const url = manualIp.startsWith('http') ? manualIp : `http://${manualIp}:8492`;
+    const url = formatServerUrl(manualIp);
     const verified = await verifyServer(url);
     if (verified) {
       onServerSelected(url, verified.name);
@@ -80,6 +107,8 @@ export function ServerConnectScreen({ onServerSelected }: ServerConnectScreenPro
           <p className="text-xl text-zinc-400">No servers discovered on the local network.</p>
           <div className="flex items-center gap-4 mt-4">
             <input
+              ref={inputRef}
+              id="manual-ip-input"
               type="text"
               value={manualIp}
               onChange={(e) => setManualIp(e.target.value)}
@@ -87,11 +116,16 @@ export function ServerConnectScreen({ onServerSelected }: ServerConnectScreenPro
                 if (e.key === 'Enter') handleManualConnect();
               }}
               placeholder="e.g. 192.168.1.100"
-              className="bg-zinc-900 border border-zinc-700 px-6 py-4 rounded-xl text-xl text-white outline-none w-96 text-center focus:border-sky-500"
+              className={`bg-zinc-900 border px-6 py-4 rounded-xl text-xl text-white outline-none w-96 text-center transition-all ${
+                isInputFocused
+                  ? 'border-sky-400 ring-4 ring-sky-400/30'
+                  : 'border-zinc-700 focus:border-sky-500'
+              }`}
             />
             <TVButton
               id="manual-connect-btn"
               groupId="manual"
+              order={2}
               onEnter={handleManualConnect}
               onClick={handleManualConnect}
               autoFocus
