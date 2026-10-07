@@ -1,6 +1,7 @@
 export class ApiClient {
   private baseUrl: string;
   private token: string | null = null;
+  private libraryUnlockTokens: Map<string, string> = new Map();
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl.replace(/\/+$/, '');
@@ -8,6 +9,14 @@ export class ApiClient {
 
   setToken(token: string | null) {
     this.token = token;
+  }
+
+  setLibraryUnlockToken(libraryId: string, token: string): void {
+    this.libraryUnlockTokens.set(libraryId, token);
+  }
+
+  getLibraryUnlockToken(libraryId: string): string | undefined {
+    return this.libraryUnlockTokens.get(libraryId);
   }
 
   getBaseUrl(): string {
@@ -21,12 +30,30 @@ export class ApiClient {
     }
     headers.set('Accept', 'application/json');
 
+    if (this.libraryUnlockTokens.size === 1) {
+      const [token] = Array.from(this.libraryUnlockTokens.values());
+      headers.set('X-Library-Unlock-Token', token);
+    } else if (this.libraryUnlockTokens.size > 1) {
+      const tokens = Array.from(this.libraryUnlockTokens.values());
+      headers.set('X-Kadr-Unlocked', tokens.join(','));
+    }
+
     const url = `${this.baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
     const res = await fetch(url, { ...options, headers });
 
     if (!res.ok) {
       throw new Error(`HTTP error ${res.status}: ${res.statusText}`);
     }
-    return res.json();
+    if (res.status === 204) {
+      return undefined as T;
+    }
+    if (typeof res.json === 'function') {
+      try {
+        return await res.json();
+      } catch {
+        return undefined as T;
+      }
+    }
+    return undefined as T;
   }
 }
