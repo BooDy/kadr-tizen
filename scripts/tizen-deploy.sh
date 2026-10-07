@@ -18,6 +18,11 @@ fi
 if [[ "$TV_TARGET" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+ ]]; then
   echo "Connecting to $TV_TARGET..."
   sdb connect "$TV_TARGET" || sdb connect "${TV_TARGET}:26101" || true
+  RESOLVED_TARGET=$(sdb devices | grep "$TV_TARGET" | awk '{print $3}' | head -n 1)
+  if [ -n "$RESOLVED_TARGET" ]; then
+    TV_TARGET="$RESOLVED_TARGET"
+    echo "Resolved target name: $TV_TARGET"
+  fi
 fi
 
 echo "Building and signing kadr.wgt..."
