@@ -4,7 +4,7 @@ import { DiscoveredServer } from '../types/kadr';
 import { TVButton } from '../components/tv/TVButton';
 import { TVCard } from '../components/tv/TVCard';
 import { useFocusable } from '../navigation/useFocusable';
-import { Server, Wifi, RefreshCw } from 'lucide-react';
+import { Wifi, RefreshCw } from 'lucide-react';
 
 export interface ServerConnectScreenProps {
   onServerSelected: (url: string, name: string) => void;
@@ -74,20 +74,20 @@ export function ServerConnectScreen({ onServerSelected }: ServerConnectScreenPro
   };
 
   return (
-    <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-950 p-16 select-none">
-      <div className="flex items-center gap-4 mb-4">
-        <Server className="w-12 h-12 text-sky-400" />
-        <h1 className="text-5xl font-black text-white">Connect to Kadr</h1>
+    <div className="w-full h-full flex flex-col items-center justify-center bg-[#2A0A0A] p-16 select-none">
+      <div className="flex flex-col items-center gap-2 mb-6">
+        <img src="./kadr-logo.png" alt="Kadr" className="h-20 w-auto mb-4" />
+        <h1 className="text-5xl font-black text-[#F5E5E5]">Connect to Kadr</h1>
       </div>
 
       {scanning ? (
         <div className="flex flex-col items-center gap-4 my-12">
-          <Wifi className="w-16 h-16 text-sky-400 animate-pulse" />
-          <p className="text-2xl text-zinc-300">Searching your Wi-Fi/LAN for Kadr servers...</p>
+          <Wifi className="w-16 h-16 text-[#FF6B00] animate-pulse" />
+          <p className="text-2xl text-[#F5E5E5]/90">Searching your Wi-Fi/LAN for Kadr servers...</p>
         </div>
       ) : servers.length > 0 ? (
         <div className="flex flex-col items-center gap-6 my-8">
-          <h2 className="text-2xl text-zinc-300">Select Discovered Server:</h2>
+          <h2 className="text-2xl text-[#F5E5E5]/90">Select Discovered Server:</h2>
           <div className="flex gap-6">
             {servers.map((s, idx) => (
               <TVCard
@@ -104,7 +104,7 @@ export function ServerConnectScreen({ onServerSelected }: ServerConnectScreenPro
         </div>
       ) : (
         <div className="flex flex-col items-center gap-4 my-8">
-          <p className="text-xl text-zinc-400">No servers discovered on the local network.</p>
+          <p className="text-xl text-[#5C3C3C]">No servers discovered on the local network.</p>
           <div className="flex items-center gap-4 mt-4">
             <input
               ref={inputRef}
@@ -116,10 +116,10 @@ export function ServerConnectScreen({ onServerSelected }: ServerConnectScreenPro
                 if (e.key === 'Enter') handleManualConnect();
               }}
               placeholder="e.g. 192.168.1.100"
-              className={`bg-zinc-900 border px-6 py-4 rounded-xl text-xl text-white outline-none w-96 text-center transition-all ${
+              className={`bg-[#3B1111] border px-6 py-4 rounded-xl text-xl text-[#F5E5E5] outline-none w-96 text-center transition-all ${
                 isInputFocused
-                  ? 'border-sky-400 ring-4 ring-sky-400/30'
-                  : 'border-zinc-700 focus:border-sky-500'
+                  ? 'border-[#FFB800] ring-4 ring-[#FFB800]/30'
+                  : 'border-[rgba(245,229,229,0.08)] focus:border-[#FF6B00]'
               }`}
             />
             <TVButton
@@ -133,7 +133,7 @@ export function ServerConnectScreen({ onServerSelected }: ServerConnectScreenPro
               Connect
             </TVButton>
           </div>
-          {errorMsg && <p className="text-rose-400 mt-2 text-lg">{errorMsg}</p>}
+          {errorMsg && <p className="text-[#D43F15] mt-2 text-lg">{errorMsg}</p>}
         </div>
       )}
 

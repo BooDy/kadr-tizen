@@ -161,21 +161,21 @@ export function ImageViewerModal({
       {/* Top HUD Bar */}
       <div
         data-testid="hud-header"
-        className={`absolute top-0 left-0 right-0 p-8 bg-gradient-to-b from-black/85 via-black/40 to-transparent flex items-center justify-between z-10 transition-opacity duration-300 ${
+        className={`absolute top-0 left-0 right-0 p-8 bg-gradient-to-b from-[#2A0A0A]/90 via-[#2A0A0A]/40 to-transparent flex items-center justify-between z-10 transition-opacity duration-300 ${
           showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
         <div className="flex flex-col gap-1 max-w-2xl">
-          <h2 className="text-2xl font-bold text-white tracking-tight truncate">
+          <h2 className="text-2xl font-bold text-[#F5E5E5] tracking-tight truncate">
             {currentImage?.name}
           </h2>
-          <div className="text-sm font-medium text-zinc-300 flex items-center gap-3">
+          <div className="text-sm font-medium text-[#F5E5E5]/80 flex items-center gap-3">
             <span>
               {currentIndex + 1} / {images.length}
             </span>
             {currentImage?.size_bytes ? (
               <>
-                <span className="text-zinc-500">•</span>
+                <span className="text-[#5C3C3C]">•</span>
                 <span>{formatBytes(currentImage.size_bytes)}</span>
               </>
             ) : null}
@@ -186,7 +186,7 @@ export function ImageViewerModal({
           onClick={onClose}
           tabIndex={-1}
           aria-label="Close"
-          className="p-3 rounded-full bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white transition-colors"
+          className="p-3 rounded-full bg-[#3B1111] hover:bg-[#4A1616] text-[#F5E5E5] border border-[rgba(245,229,229,0.08)] transition-colors cursor-pointer"
         >
           <X className="w-6 h-6" />
         </button>
@@ -195,29 +195,29 @@ export function ImageViewerModal({
       {/* Bottom HUD Bar */}
       <div
         data-testid="hud-footer"
-        className={`absolute bottom-0 left-0 right-0 p-8 bg-gradient-to-t from-black/85 via-black/40 to-transparent flex items-center justify-between z-10 transition-opacity duration-300 ${
+        className={`absolute bottom-0 left-0 right-0 p-8 bg-gradient-to-t from-[#2A0A0A]/90 via-[#2A0A0A]/40 to-transparent flex items-center justify-between z-10 transition-opacity duration-300 ${
           showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
         {/* Status Indicator */}
-        <div className="flex items-center gap-3 bg-zinc-900/80 backdrop-blur px-4 py-2 rounded-full border border-zinc-700/50">
+        <div className="flex items-center gap-3 bg-[#3B1111]/90 backdrop-blur px-4 py-2 rounded-full border border-[rgba(245,229,229,0.08)]">
           {isPlaying ? (
             <>
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-              <Play className="w-4 h-4 fill-emerald-400 text-emerald-400" />
-              <span className="text-sm font-semibold text-emerald-300">Playing Slideshow (4s)</span>
+              <span className="w-2.5 h-2.5 rounded-full bg-[#FF6B00] animate-pulse" />
+              <Play className="w-4 h-4 fill-[#FF6B00] text-[#FF6B00]" />
+              <span className="text-sm font-semibold text-[#FFB800]">Playing Slideshow (4s)</span>
             </>
           ) : (
             <>
-              <span className="w-2.5 h-2.5 rounded-full bg-zinc-500" />
-              <Pause className="w-4 h-4 fill-zinc-400 text-zinc-400" />
-              <span className="text-sm font-medium text-zinc-300">Paused</span>
+              <span className="w-2.5 h-2.5 rounded-full bg-[#5C3C3C]" />
+              <Pause className="w-4 h-4 fill-[#5C3C3C] text-[#5C3C3C]" />
+              <span className="text-sm font-medium text-[#F5E5E5]/70">Paused</span>
             </>
           )}
         </div>
 
         {/* Remote Control Hints */}
-        <div className="text-sm font-medium text-zinc-400 bg-zinc-900/80 backdrop-blur px-5 py-2 rounded-full border border-zinc-700/50">
+        <div className="text-sm font-medium text-[#F5E5E5]/70 bg-[#3B1111]/90 backdrop-blur px-5 py-2 rounded-full border border-[rgba(245,229,229,0.08)]">
           ◄ / ► Navigate • Enter / ⏯ Play/Pause • Back Exit
         </div>
       </div>

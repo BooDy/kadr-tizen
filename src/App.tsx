@@ -163,18 +163,18 @@ export default function App() {
 
   return (
     <FocusProvider>
-      <div className="w-[1920px] h-[1080px] bg-zinc-950 overflow-hidden relative font-sans text-zinc-100">
+      <div className="w-[1920px] h-[1080px] bg-[#2A0A0A] overflow-hidden relative font-sans text-[#F5E5E5]">
         {isOffline && (
           <div
             data-testid="reconnection-overlay"
             role="alertdialog"
             aria-modal="true"
             aria-label="Connection Lost"
-            className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex flex-col items-center justify-center gap-4 select-none"
+            className="fixed inset-0 bg-[#2A0A0A]/90 backdrop-blur-md z-50 flex flex-col items-center justify-center gap-4 select-none"
           >
-            <WifiOff className="w-16 h-16 text-rose-500 animate-pulse" />
-            <h2 className="text-3xl font-bold text-white">Connection Lost</h2>
-            <p className="text-xl text-zinc-400">Waiting for network connection to restore...</p>
+            <WifiOff className="w-16 h-16 text-[#D43F15] animate-pulse" />
+            <h2 className="text-3xl font-bold text-[#F5E5E5]">Connection Lost</h2>
+            <p className="text-xl text-[#5C3C3C]">Waiting for network connection to restore...</p>
           </div>
         )}
 

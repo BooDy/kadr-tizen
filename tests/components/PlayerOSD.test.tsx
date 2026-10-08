@@ -36,7 +36,7 @@ describe('PlayerOSD', () => {
     expect(queryByText('Big Buck Bunny')).not.toBeInTheDocument();
   });
 
-  it('correctly calculates progress bar percentage', () => {
+  it('correctly calculates progress bar percentage and renders cinema thumb', () => {
     const { container } = render(
       <PlayerOSD
         title="Big Buck Bunny"
@@ -47,8 +47,12 @@ describe('PlayerOSD', () => {
       />
     );
 
-    const progressBar = container.querySelector('.bg-sky-400');
+    const progressBar = container.querySelector('.bg-\\[\\#FF6B00\\]');
+    expect(progressBar).toBeInTheDocument();
     expect(progressBar).toHaveStyle({ width: '25%' });
+
+    const thumb = container.querySelector('.bg-\\[\\#FFB800\\]');
+    expect(thumb).toBeInTheDocument();
   });
 
   it('handles 0 duration gracefully without division by zero NaN', () => {
@@ -62,7 +66,7 @@ describe('PlayerOSD', () => {
       />
     );
 
-    const progressBar = container.querySelector('.bg-sky-400');
+    const progressBar = container.querySelector('.bg-\\[\\#FF6B00\\]');
     expect(progressBar).toHaveStyle({ width: '0%' });
     expect(getAllByText('0:00')).toHaveLength(2);
   });
@@ -155,7 +159,12 @@ describe('PlayerOSD', () => {
 
       fireEvent.click(getByTestId('subtitles-button'));
 
-      expect(getByTestId('subtitles-popup')).toBeInTheDocument();
+      const popup = getByTestId('subtitles-popup');
+      expect(popup).toBeInTheDocument();
+      const panel = popup.querySelector('.bg-\\[\\#3B1111\\]');
+      expect(panel).toBeInTheDocument();
+      expect(panel?.className).toContain('border-[rgba(245,229,229,0.08)]');
+
       expect(getByText('Off')).toBeInTheDocument();
       expect(getByText('English (Full)')).toBeInTheDocument();
       expect(getByText('Spanish')).toBeInTheDocument();

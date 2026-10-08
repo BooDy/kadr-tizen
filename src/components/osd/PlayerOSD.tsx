@@ -166,8 +166,8 @@ export function PlayerOSD({
                 onClick={() => setIsPopupOpen(true)}
                 className={`pointer-events-auto px-5 py-2.5 rounded-xl font-semibold text-lg flex items-center gap-2 cursor-pointer transition-all duration-150 outline-none ${
                   selectedSubtitleId
-                    ? 'bg-sky-500 text-white'
-                    : 'bg-zinc-800 text-zinc-100 hover:bg-zinc-700 focus:ring-4 focus:ring-sky-400/50'
+                    ? 'bg-[#D43F15] text-[#F5E5E5]'
+                    : 'bg-[#3B1111] text-[#F5E5E5] border border-[rgba(245,229,229,0.08)] hover:bg-[#4A1616] focus:ring-4 focus:ring-[#FFB800]/50'
                 }`}
               >
                 <span className="font-bold border border-current px-1.5 py-0.5 rounded text-xs">CC</span>
@@ -175,18 +175,22 @@ export function PlayerOSD({
               </button>
             )
           )}
-          <div className="text-zinc-400 text-lg uppercase tracking-widest">{playerState}</div>
+          <div className="text-[#5C3C3C] text-lg uppercase tracking-widest">{playerState}</div>
         </div>
       </div>
 
       <div className="flex flex-col gap-3">
-        <div className="w-full h-3 bg-zinc-700/60 rounded-full overflow-hidden">
+        <div className="relative w-full h-3 bg-[#3B1111]/80 rounded-full">
           <div
-            className="h-full bg-sky-400 transition-all duration-200"
+            className="h-full bg-[#FF6B00] rounded-full transition-all duration-200"
             style={{ width: `${progressPercent}%` }}
           />
+          <div
+            className="absolute top-1/2 -translate-y-1/2 w-5 h-5 bg-[#FFB800] rounded-full shadow-md transition-all duration-200 -ml-2.5"
+            style={{ left: `${progressPercent}%` }}
+          />
         </div>
-        <div className="flex justify-between text-zinc-300 font-mono text-lg">
+        <div className="flex justify-between text-[#F5E5E5]/80 font-mono text-lg">
           <span>{formatTime(positionMs)}</span>
           <span>{formatTime(durationMs)}</span>
         </div>
@@ -197,19 +201,19 @@ export function PlayerOSD({
           data-testid="subtitles-popup"
           role="dialog"
           aria-label="Subtitles Menu"
-          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center pointer-events-auto"
+          className="fixed inset-0 z-50 bg-[#2A0A0A]/85 backdrop-blur-sm flex items-center justify-center pointer-events-auto"
           onClick={(e) => {
             if (e.target === e.currentTarget) setIsPopupOpen(false);
           }}
         >
-          <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-8 w-96 max-h-[80vh] flex flex-col shadow-2xl">
+          <div className="bg-[#3B1111] border border-[rgba(245,229,229,0.08)] rounded-3xl p-8 w-96 max-h-[80vh] flex flex-col shadow-2xl">
             <div className="flex justify-between items-center mb-6">
-              <h3 className="text-2xl font-bold text-white tracking-wide">Subtitles</h3>
+              <h3 className="text-2xl font-bold text-[#F5E5E5] tracking-wide">Subtitles</h3>
               <button
                 type="button"
                 data-testid="close-subtitles-popup"
                 onClick={() => setIsPopupOpen(false)}
-                className="text-zinc-400 hover:text-white text-xl p-2 rounded-lg cursor-pointer"
+                className="text-[#5C3C3C] hover:text-[#F5E5E5] text-xl p-2 rounded-lg cursor-pointer"
                 aria-label="Close"
               >
                 ✕
@@ -231,15 +235,15 @@ export function PlayerOSD({
                     onMouseEnter={() => setFocusedIndex(index)}
                     className={`w-full px-5 py-3 rounded-xl font-semibold text-lg flex items-center justify-between text-left transition-all duration-150 cursor-pointer select-none outline-none ${
                       isFocused
-                        ? 'bg-sky-500 text-white tv-focus-ring ring-4 ring-sky-300'
+                        ? 'bg-[#FF6B00] text-white tv-focus-ring ring-4 ring-[#FFB800]/50'
                         : isSelected
-                        ? 'bg-zinc-800 text-sky-400 border border-sky-500/40'
-                        : 'bg-zinc-900 text-zinc-300 hover:bg-zinc-800 hover:text-white'
+                        ? 'bg-[#FF6B00]/20 text-[#FF6B00] border border-[#FF6B00]/40'
+                        : 'bg-[#2A0A0A] text-[#F5E5E5]/80 hover:bg-[#4A1616] hover:text-white'
                     }`}
                   >
                     <span>{option.label}</span>
                     {isSelected && (
-                      <span className="text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-sky-950 text-sky-300 border border-sky-600/30">
+                      <span className="text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-[#FF6B00]/30 text-[#FFB800] border border-[#FF6B00]/40">
                         Active
                       </span>
                     )}

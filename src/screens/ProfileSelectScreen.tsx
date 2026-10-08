@@ -59,10 +59,11 @@ export function ProfileSelectScreen({
   }, [selectedUser, onBackToServerConnect]);
 
   return (
-    <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-950 p-16 select-none">
-      <div className="text-center mb-12">
-        <h1 className="text-5xl font-extrabold tracking-tight text-white mb-3">Who's watching?</h1>
-        <p className="text-zinc-400 text-xl">{serverName}</p>
+    <div className="w-full h-full flex flex-col items-center justify-center bg-[#2A0A0A] p-16 select-none">
+      <div className="text-center mb-12 flex flex-col items-center">
+        <img src="./kadr-logo.png" alt="Kadr" className="h-16 w-auto mb-4" />
+        <h1 className="text-5xl font-extrabold tracking-tight text-[#F5E5E5] mb-3">Who's watching?</h1>
+        <p className="text-[#5C3C3C] text-xl">{serverName}</p>
       </div>
 
       <div className="flex gap-8 justify-center items-center">

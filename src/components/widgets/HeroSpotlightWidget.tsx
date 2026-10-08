@@ -24,7 +24,7 @@ export function HeroSpotlightWidget({ widget, serverUrl, onPlay, onDetails }: He
   const resumeMs = hasResume ? Math.round(item.playback_progress! * 100) : 0;
 
   return (
-    <div className="relative w-full h-[520px] rounded-3xl overflow-hidden mb-10 bg-zinc-900 border border-zinc-800">
+    <div className="relative w-full h-[520px] rounded-3xl overflow-hidden mb-10 bg-[#3B1111] border border-[rgba(245,229,229,0.08)]">
       {backdrop && (
         <img
           src={backdrop}
@@ -32,28 +32,28 @@ export function HeroSpotlightWidget({ widget, serverUrl, onPlay, onDetails }: He
           className="absolute inset-0 w-full h-full object-cover opacity-40"
         />
       )}
-      <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/60 to-transparent p-12 flex flex-col justify-end">
+      <div className="absolute inset-0 bg-gradient-to-t from-[#2A0A0A] via-[#2A0A0A]/60 to-transparent p-12 flex flex-col justify-end">
         <div className="flex items-center gap-3 mb-3">
           {item.badge && (
-            <span className="px-2.5 py-1 bg-sky-500/20 text-sky-400 border border-sky-500/30 text-xs font-bold rounded">
+            <span className="px-2.5 py-1 bg-[#FFB800]/20 text-[#FFB800] border border-[#FFB800]/30 text-xs font-bold rounded">
               {item.badge}
             </span>
           )}
           {item.rating && (
-            <span className="flex items-center gap-1 text-amber-400 text-sm font-semibold bg-zinc-900/80 px-2 py-0.5 rounded border border-zinc-700">
+            <span className="flex items-center gap-1 text-[#FFB800] text-sm font-semibold bg-[#2A0A0A]/80 px-2 py-0.5 rounded border border-[rgba(245,229,229,0.08)]">
               <Star className="w-3.5 h-3.5 fill-current" /> {item.rating.toFixed(1)}
             </span>
           )}
           {item.release_year && (
-            <span className="text-zinc-400 text-sm font-medium">{item.release_year}</span>
+            <span className="text-[#F5E5E5]/70 text-sm font-medium">{item.release_year}</span>
           )}
         </div>
 
-        <h2 className="text-5xl font-black text-white max-w-3xl mb-4 tracking-tight drop-shadow-md">
+        <h2 className="text-5xl font-black text-[#F5E5E5] max-w-3xl mb-4 tracking-tight drop-shadow-md">
           {item.title}
         </h2>
         {item.subtitle && (
-          <p className="text-zinc-300 text-lg max-w-2xl line-clamp-3 mb-6 leading-relaxed">
+          <p className="text-[#F5E5E5]/80 text-lg max-w-2xl line-clamp-3 mb-6 leading-relaxed">
             {item.subtitle}
           </p>
         )}

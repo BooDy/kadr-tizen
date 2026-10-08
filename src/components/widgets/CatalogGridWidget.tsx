@@ -21,9 +21,9 @@ export function CatalogGridWidget({
   return (
     <div className="mb-10">
       <div className="flex justify-between items-baseline mb-4 px-2">
-        <h3 className="text-2xl font-bold text-zinc-100">{widget.title}</h3>
+        <h3 className="text-2xl font-bold text-[#F5E5E5]">{widget.title}</h3>
         {widget.total_count !== undefined && (
-          <span className="text-zinc-500 text-sm font-semibold">
+          <span className="text-[#5C3C3C] text-sm font-semibold">
             {items.length} of {widget.total_count} items
           </span>
         )}

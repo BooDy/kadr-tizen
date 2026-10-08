@@ -32,6 +32,16 @@ describe('ServerConnectScreen', () => {
       </FocusProvider>
     );
 
+    const logo = screen.getByAltText('Kadr');
+    expect(logo).toBeInTheDocument();
+    expect(logo).toHaveAttribute('src', './kadr-logo.png');
+
+    const container = logo.closest('.bg-\\[\\#2A0A0A\\]');
+    expect(container).toBeInTheDocument();
+
+    const wifiIcon = document.querySelector('.text-\\[\\#FF6B00\\].animate-pulse');
+    expect(wifiIcon).toBeInTheDocument();
+
     expect(screen.getByText(/Searching your Wi-Fi\/LAN for Kadr servers.../i)).toBeInTheDocument();
     expect(screen.getByText(/Connect to Kadr/i)).toBeInTheDocument();
 
@@ -243,7 +253,7 @@ describe('ServerConnectScreen', () => {
     // ArrowLeft should move focus to manual-ip-input (order: 1)
     fireEvent.keyDown(window, { key: 'ArrowLeft', code: 'ArrowLeft' });
 
-    expect(input).toHaveClass('border-sky-400');
+    expect(input).toHaveClass('border-[#FFB800]');
 
     // ArrowRight should move focus back to connect button (order: 2)
     fireEvent.keyDown(window, { key: 'ArrowRight', code: 'ArrowRight' });

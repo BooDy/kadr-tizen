@@ -167,6 +167,7 @@ describe('BrowseScreen', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Anime')).toBeInTheDocument();
+      expect(screen.getByText('Home Featured Movie')).toBeInTheDocument();
     });
 
     // Move to sidebar and down to anime
@@ -257,11 +258,25 @@ describe('BrowseScreen', () => {
       </FocusProvider>
     );
 
-    expect(screen.getByText('KADR')).toBeInTheDocument();
+    const logo = screen.getByAltText('Kadr');
+    expect(logo).toBeInTheDocument();
+    expect(logo).toHaveAttribute('src', './kadr-logo.png');
+
+    const sidebar = screen.getByTestId('tv-sidebar');
+    expect(sidebar).toHaveClass('bg-[#3B1111]');
+    expect(sidebar.className).toContain('border-[rgba(245,229,229,0.08)]');
+
     expect(screen.getByText('Home')).toBeInTheDocument();
     expect(screen.getByText('Movies')).toBeInTheDocument();
     expect(screen.getByText('Shows')).toBeInTheDocument();
     expect(screen.getByText('Profiles')).toBeInTheDocument();
+
+    const homeBtn = document.getElementById('nav-screen-home');
+    expect(homeBtn?.className).toContain('bg-[#FF6B00]/15');
+    expect(homeBtn?.className).toContain('text-[#F5E5E5]');
+
+    const moviesBtn = document.getElementById('nav-screen-movies');
+    expect(moviesBtn?.className).toContain('text-[#5C3C3C]');
 
     await waitFor(() => {
       expect(screen.getByText('Home Featured Movie')).toBeInTheDocument();

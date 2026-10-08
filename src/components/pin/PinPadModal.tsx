@@ -162,11 +162,11 @@ export function PinPadModal({
       className="w-[540px]"
       backdropClassName={backdropClassName || 'z-[80]'}
     >
-      <h3 className="text-3xl font-bold text-zinc-100">{modalTitle}</h3>
-      <p className="text-zinc-400 mt-2 text-lg">{modalSubtitle}</p>
+      <h3 className="text-3xl font-bold text-[#F5E5E5]">{modalTitle}</h3>
+      <p className="text-[#5C3C3C] mt-2 text-lg">{modalSubtitle}</p>
 
       {countdown > 0 ? (
-        <div className="mt-8 text-rose-400 font-semibold text-xl">
+        <div className="mt-8 text-[#D43F15] font-semibold text-xl">
           Too many attempts. Locked out for {countdown}s
         </div>
       ) : (
@@ -176,7 +176,9 @@ export function PinPadModal({
               <div
                 key={idx}
                 className={`w-6 h-6 rounded-full border-2 transition-all ${
-                  pin.length > idx ? 'bg-sky-400 border-sky-400 scale-125' : 'border-zinc-600'
+                  pin.length > idx
+                    ? 'bg-[#FF6B00] border-[#FF6B00] scale-125'
+                    : 'border-[#5C3C3C]'
                 }`}
               />
             ))}
@@ -191,7 +193,7 @@ export function PinPadModal({
         </>
       )}
 
-      {errorMessage && <p className="text-rose-400 text-sm mb-4">{errorMessage}</p>}
+      {errorMessage && <p className="text-[#D43F15] text-sm mb-4">{errorMessage}</p>}
 
       <TVButton
         id="pin-cancel-btn"

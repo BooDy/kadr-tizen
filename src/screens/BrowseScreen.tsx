@@ -276,17 +276,17 @@ export function BrowseScreen({
   const displayScreens = screens.length > 0 ? screens : defaultScreens;
 
   return (
-    <div className="w-full h-full flex bg-zinc-950 overflow-hidden">
+    <div className="w-full h-full flex bg-[#2A0A0A] overflow-hidden">
       {/* Collapsible Left TV Sidebar */}
       <nav
         data-testid="tv-sidebar"
         className={`${
           isSidebarFocused ? 'w-64' : 'w-28'
-        } hover:w-64 focus-within:w-64 transition-all duration-200 bg-zinc-900/90 border-r border-zinc-800/80 p-4 flex flex-col justify-between z-40 group`}
+        } hover:w-64 focus-within:w-64 transition-all duration-200 bg-[#3B1111] border-r border-[rgba(245,229,229,0.08)] p-4 flex flex-col justify-between z-40 group`}
       >
         <div className="flex flex-col gap-4">
-          <div className="h-16 flex items-center justify-center font-black text-2xl text-sky-400">
-            KADR
+          <div className="h-16 flex items-center justify-center">
+            <img src="./kadr-logo.png" alt="Kadr" className="h-10 w-auto object-contain" />
           </div>
           {displayScreens.map((screenItem, index) => {
             const IconComponent = getScreenIcon(screenItem.id);
@@ -297,7 +297,7 @@ export function BrowseScreen({
                 id={`nav-screen-${screenItem.id}`}
                 groupId="sidebar"
                 order={index + 1}
-                variant={isActive ? 'primary' : 'secondary'}
+                variant={isActive ? 'nav-active' : 'nav-inactive'}
                 onEnter={() => setActiveTab(screenItem.id)}
                 onClick={() => setActiveTab(screenItem.id)}
                 className="w-full justify-start px-4"
@@ -319,7 +319,7 @@ export function BrowseScreen({
           id="nav-switch-profile"
           groupId="sidebar"
           order={displayScreens.length + 1}
-          variant="secondary"
+          variant="nav-inactive"
           onEnter={onSwitchProfile}
           onClick={onSwitchProfile}
           className="w-full justify-start px-4"
@@ -338,7 +338,7 @@ export function BrowseScreen({
       {/* Main Content Area */}
       <main className="flex-1 h-full overflow-y-auto p-12 scrollbar-none">
         {loading ? (
-          <div className="w-full h-full flex items-center justify-center text-zinc-500 text-2xl">
+          <div className="w-full h-full flex items-center justify-center text-[#5C3C3C] text-2xl">
             Loading {activeTab}...
           </div>
         ) : layout ? (
@@ -349,7 +349,7 @@ export function BrowseScreen({
             onPlayItem={onPlayItem}
           />
         ) : (
-          <div className="w-full h-full flex items-center justify-center text-rose-400 text-2xl">
+          <div className="w-full h-full flex items-center justify-center text-[#D43F15] text-2xl">
             Failed to load screen layout.
           </div>
         )}

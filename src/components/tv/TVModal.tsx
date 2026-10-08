@@ -60,10 +60,10 @@ export function TVModal({
       role={role}
       aria-modal="true"
       aria-label={ariaLabel}
-      className={`fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center ${backdropClassName?.includes('z-') ? '' : 'z-50'} ${backdropClassName}`.trim()}
+      className={`fixed inset-0 bg-[#2A0A0A]/85 backdrop-blur-md flex items-center justify-center ${backdropClassName?.includes('z-') ? '' : 'z-50'} ${backdropClassName}`.trim()}
     >
       <div
-        className={`bg-zinc-900 border border-zinc-800 rounded-3xl p-10 flex flex-col items-center ${className}`}
+        className={`bg-[#3B1111] border border-[rgba(245,229,229,0.08)] rounded-3xl p-10 flex flex-col items-center ${className}`}
       >
         {children}
       </div>

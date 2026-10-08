@@ -68,11 +68,11 @@ function FolderImageCard({
       tabIndex={-1}
       role="button"
       onClick={() => onSelect(index)}
-      className={`relative flex flex-col rounded-xl overflow-hidden bg-zinc-900 cursor-pointer transition-all duration-200 ${
+      className={`relative flex flex-col rounded-xl overflow-hidden bg-[#3B1111] border border-[rgba(245,229,229,0.08)] cursor-pointer transition-all duration-200 ${
         isFocused ? 'tv-focus-ring scale-105 z-10' : 'scale-100 opacity-90'
       }`}
     >
-      <div className="w-full h-36 bg-zinc-800 relative overflow-hidden flex items-center justify-center">
+      <div className="w-full h-36 bg-[#2A0A0A] relative overflow-hidden flex items-center justify-center">
         {image.url ? (
           <img
             src={formatImageUrl(serverUrl, image.url)}
@@ -80,14 +80,14 @@ function FolderImageCard({
             className="w-full h-full object-cover"
           />
         ) : (
-          <span className="text-zinc-600 font-bold text-2xl">{image.name.slice(0, 1)}</span>
+          <span className="text-[#5C3C3C] font-bold text-2xl">{image.name.slice(0, 1)}</span>
         )}
       </div>
       <div className="p-3">
-        <div className="text-sm font-semibold text-white truncate" title={image.name}>
+        <div className="text-sm font-semibold text-[#F5E5E5] truncate" title={image.name}>
           {image.name}
         </div>
-        <div className="text-xs text-zinc-400 mt-1">{formatBytes(image.size_bytes)}</div>
+        <div className="text-xs text-[#5C3C3C] mt-1">{formatBytes(image.size_bytes)}</div>
       </div>
     </div>
   );
@@ -207,11 +207,11 @@ export function FolderBrowserModal({
     (!folderData?.images || folderData.images.length === 0);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md p-12 flex flex-col text-white overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-[#2A0A0A]/90 backdrop-blur-md p-12 flex flex-col text-[#F5E5E5] overflow-hidden">
       {/* Header */}
-      <div className="flex flex-col gap-4 border-b border-zinc-800 pb-6 shrink-0">
+      <div className="flex flex-col gap-4 border-b border-[rgba(245,229,229,0.08)] pb-6 shrink-0">
         <div className="flex items-center justify-between">
-          <h2 className="text-3xl font-extrabold tracking-tight text-white">{title}</h2>
+          <h2 className="text-3xl font-extrabold tracking-tight text-[#F5E5E5]">{title}</h2>
           <TVButton
             id="folder-browser-close-btn"
             groupId="folder-browser-modal"
@@ -232,7 +232,7 @@ export function FolderBrowserModal({
               const isLast = idx === folderData.breadcrumbs.length - 1;
               return (
                 <div key={crumb.path || `root-${idx}`} className="flex items-center gap-2">
-                  {idx > 0 && <span className="text-zinc-500 font-bold">&gt;</span>}
+                  {idx > 0 && <span className="text-[#5C3C3C] font-bold">&gt;</span>}
                   <TVButton
                     id={`folder-breadcrumb-${idx}`}
                     groupId="folder-browser-modal"
@@ -247,7 +247,7 @@ export function FolderBrowserModal({
               );
             })
           ) : (
-            <span className="text-zinc-400 font-medium">{title}</span>
+            <span className="text-[#5C3C3C] font-medium">{title}</span>
           )}
         </div>
       </div>
@@ -255,8 +255,8 @@ export function FolderBrowserModal({
       {/* Content Area */}
       <div className="flex-1 overflow-y-auto mt-6 pr-4 space-y-8 scrollbar-thin">
         {loading && (
-          <div className="flex flex-col items-center justify-center h-64 text-zinc-400 gap-3">
-            <Loader2 className="w-8 h-8 animate-spin text-sky-400" />
+          <div className="flex flex-col items-center justify-center h-64 text-[#5C3C3C] gap-3">
+            <Loader2 className="w-8 h-8 animate-spin text-[#FF6B00]" />
             <span className="text-lg">Loading folder contents...</span>
           </div>
         )}
@@ -301,7 +301,7 @@ export function FolderBrowserModal({
             {/* Subdirectories Section */}
             {folderData.directories && folderData.directories.length > 0 && (
               <div className="space-y-4">
-                <h3 className="text-2xl font-bold text-zinc-200">Folders</h3>
+                <h3 className="text-2xl font-bold text-[#F5E5E5]">Folders</h3>
                 <div className="flex flex-wrap gap-4">
                   {folderData.directories.map((dir, idx) => (
                     <TVButton
@@ -313,12 +313,12 @@ export function FolderBrowserModal({
                       onClick={() => setCurrentPath(dir.path)}
                       onEnter={() => setCurrentPath(dir.path)}
                     >
-                      <Folder className="w-8 h-8 text-sky-400 shrink-0" />
+                      <Folder className="w-8 h-8 text-[#FF6B00] shrink-0" />
                       <div className="flex flex-col truncate">
-                        <span className="font-semibold text-lg text-white truncate">
+                        <span className="font-semibold text-lg text-[#F5E5E5] truncate">
                           {dir.name}
                         </span>
-                        <span className="text-sm text-zinc-400">{dir.item_count} items</span>
+                        <span className="text-sm text-[#5C3C3C]">{dir.item_count} items</span>
                       </div>
                     </TVButton>
                   ))}

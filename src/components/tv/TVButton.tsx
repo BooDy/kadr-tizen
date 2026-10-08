@@ -8,7 +8,7 @@ export interface TVButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   onBack?: () => void;
   autoFocus?: boolean;
   order?: number;
-  variant?: 'primary' | 'secondary' | 'danger';
+  variant?: 'primary' | 'secondary' | 'danger' | 'nav-active' | 'nav-inactive';
 }
 
 export function TVButton({
@@ -50,6 +50,12 @@ export function TVButton({
     danger: isFocused
       ? 'bg-[#D43F15] text-white tv-focus-ring'
       : 'bg-[#3B1111] text-[#D43F15] border border-[#D43F15]/30',
+    'nav-active': isFocused
+      ? 'bg-[#FF6B00] text-white tv-focus-ring'
+      : 'bg-[#FF6B00]/15 text-[#F5E5E5]',
+    'nav-inactive': isFocused
+      ? 'bg-[#FF6B00] text-white tv-focus-ring'
+      : 'text-[#5C3C3C] bg-transparent',
   };
 
   const handleClick = (e: MouseEvent<HTMLButtonElement>) => {

@@ -171,7 +171,7 @@ export function ItemDetailModal({
       role="dialog"
       aria-modal="true"
       aria-label={item.title}
-      className="fixed inset-0 bg-black/90 backdrop-blur-xl flex items-center justify-center z-[60] p-16"
+      className="fixed inset-0 bg-[#2A0A0A]/85 backdrop-blur-xl flex items-center justify-center z-[60] p-16"
     >
       {backdrop && (
         <img
@@ -180,29 +180,29 @@ export function ItemDetailModal({
           className="absolute inset-0 w-full h-full object-cover opacity-25"
         />
       )}
-      <div className="relative w-full max-w-6xl max-h-[90vh] flex flex-col gap-6 bg-zinc-900/90 border border-zinc-800 rounded-3xl p-10 shadow-2xl overflow-y-auto">
+      <div className="relative w-full max-w-6xl max-h-[90vh] flex flex-col gap-6 bg-[#3B1111] border border-[rgba(245,229,229,0.08)] rounded-3xl p-10 shadow-2xl overflow-y-auto">
         <div className="flex gap-10">
           {poster && (
             <img
               src={poster}
               alt={item.title}
-              className="w-72 h-[420px] object-cover rounded-2xl shadow-xl border border-zinc-700/50 shrink-0"
+              className="w-72 h-[420px] object-cover rounded-2xl shadow-xl border border-[rgba(245,229,229,0.08)] shrink-0"
             />
           )}
           <div className="flex flex-col justify-between flex-1">
             <div>
-              <div className="flex items-center gap-3 mb-2 text-zinc-400 font-semibold text-lg">
+              <div className="flex items-center gap-3 mb-2 text-[#F5E5E5]/70 font-semibold text-lg">
                 {item.release_year && <span>{item.release_year}</span>}
                 {durationMins && <span>• {durationMins}m</span>}
                 {item.resolution && (
-                  <span className="px-2 py-0.5 bg-zinc-800 border border-zinc-700 rounded text-xs text-sky-400">
+                  <span className="px-2 py-0.5 bg-[#FFB800]/20 border border-[#FFB800]/30 rounded text-xs text-[#FFB800] font-bold">
                     {item.resolution}
                   </span>
                 )}
               </div>
-              <h2 className="text-5xl font-black text-white mb-4 leading-tight">{item.title}</h2>
+              <h2 className="text-5xl font-black text-[#F5E5E5] mb-4 leading-tight">{item.title}</h2>
               {item.overview && (
-                <p className="text-zinc-300 text-lg leading-relaxed max-w-2xl line-clamp-4">
+                <p className="text-[#F5E5E5]/80 text-lg leading-relaxed max-w-2xl line-clamp-4">
                   {item.overview}
                 </p>
               )}

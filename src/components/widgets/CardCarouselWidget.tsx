@@ -20,7 +20,7 @@ export function CardCarouselWidget({
 
   return (
     <div className="mb-10">
-      <h3 className="text-2xl font-bold text-zinc-100 mb-4 px-2">{widget.title}</h3>
+      <h3 className="text-2xl font-bold text-[#F5E5E5] mb-4 px-2">{widget.title}</h3>
       <div className="flex gap-6 overflow-x-auto scrollbar-none py-2 px-2">
         {items.map((item, idx) => {
           const imgUrl = item.poster_url

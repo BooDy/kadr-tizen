@@ -30,6 +30,13 @@ describe('ProfileSelectScreen', () => {
       </FocusProvider>
     );
 
+    const logo = screen.getByAltText('Kadr');
+    expect(logo).toBeInTheDocument();
+    expect(logo).toHaveAttribute('src', './kadr-logo.png');
+
+    const container = logo.closest('.bg-\\[\\#2A0A0A\\]');
+    expect(container).toBeInTheDocument();
+
     expect(screen.getByText("Who's watching?")).toBeInTheDocument();
     expect(screen.getByText('Living Room Server')).toBeInTheDocument();
     expect(screen.getByText('Boody')).toBeInTheDocument();
