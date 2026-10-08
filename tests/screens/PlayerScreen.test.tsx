@@ -5,6 +5,7 @@ import * as playbackApi from '../../src/api/playback';
 import * as subtitlesApi from '../../src/api/subtitles';
 import { TVKeys } from '../../src/navigation/keys';
 import { PlayerDriver, PlayerState } from '../../src/player/driver';
+import { ApiClient } from '../../src/api/client';
 
 // Mock driver instance
 let mockDriver: {
@@ -75,10 +76,52 @@ describe('PlayerScreen', () => {
 
     expect(mockDriver.init).toHaveBeenCalledWith(
       expect.any(HTMLElement),
-      'http://localhost:8492/api/v1/streaming/item-123',
+      'http://localhost:8492/api/v1/stream/item-123?token=test-token',
       15000
     );
     expect(getByText('Sample Movie')).toBeInTheDocument();
+  });
+
+  it('initializes driver with unlocked token query param when private library token exists on client', () => {
+    const onExit = vi.fn();
+    const client = new ApiClient('http://localhost:8492');
+    client.setToken('test-token');
+    client.setLibraryUnlockToken('vault-1', 'secret-unlock-xyz');
+
+    render(
+      <PlayerScreen
+        client={client}
+        itemId="item-456"
+        title="Secret Video"
+        serverUrl="http://localhost:8492"
+        token="test-token"
+        onExit={onExit}
+      />
+    );
+
+    expect(mockDriver.init).toHaveBeenCalledWith(
+      expect.any(HTMLElement),
+      'http://localhost:8492/api/v1/stream/item-456?token=test-token&unlocked=secret-unlock-xyz',
+      0
+    );
+  });
+
+  it('handles driver onError callback by updating playerState to error', () => {
+    const { getByText } = render(
+      <PlayerScreen
+        itemId="item-123"
+        title="Sample Movie"
+        serverUrl="http://localhost:8492"
+        token="test-token"
+        onExit={vi.fn()}
+      />
+    );
+
+    act(() => {
+      mockDriver.errorCallback?.('Connection timed out');
+    });
+
+    expect(getByText(/error/i)).toBeInTheDocument();
   });
 
   it('updates timecodes and progress bar when time updates', () => {

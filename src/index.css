@@ -32,3 +32,11 @@
   z-index: 30;
   transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.15s ease-out;
 }
+
+/* Button icon spacing fallback for Chromium 69 */
+button svg {
+  margin-right: 0.75rem;
+}
+button svg:only-child {
+  margin-right: 0;
+}

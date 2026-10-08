@@ -180,22 +180,22 @@ export function ItemDetailModal({
           className="absolute inset-0 w-full h-full object-cover opacity-25"
         />
       )}
-      <div className="relative w-full max-w-6xl max-h-[90vh] flex flex-col gap-6 bg-[#3B1111] border border-[rgba(245,229,229,0.08)] rounded-3xl p-10 shadow-2xl overflow-y-auto">
-        <div className="flex gap-10">
+      <div className="relative w-full max-w-6xl max-h-[90vh] flex flex-col bg-[#3B1111] border border-[rgba(245,229,229,0.08)] rounded-3xl p-10 shadow-2xl overflow-y-auto">
+        <div className="flex">
           {poster && (
             <img
               src={poster}
               alt={item.title}
-              className="w-72 h-[420px] object-cover rounded-2xl shadow-xl border border-[rgba(245,229,229,0.08)] shrink-0"
+              className="w-72 h-[420px] object-cover rounded-2xl shadow-xl border border-[rgba(245,229,229,0.08)] shrink-0 mr-10"
             />
           )}
-          <div className="flex flex-col justify-between flex-1">
+          <div className="flex flex-col justify-between flex-1 min-h-[420px]">
             <div>
-              <div className="flex items-center gap-3 mb-2 text-[#F5E5E5]/70 font-semibold text-lg">
-                {item.release_year && <span>{item.release_year}</span>}
-                {durationMins && <span>• {durationMins}m</span>}
+              <div className="flex items-center mb-2 text-[#F5E5E5]/70 font-semibold text-lg">
+                {item.release_year && <span className="mr-3">{item.release_year}</span>}
+                {durationMins && <span className="mr-3">• {durationMins}m</span>}
                 {item.resolution && (
-                  <span className="px-2 py-0.5 bg-[#FFB800]/20 border border-[#FFB800]/30 rounded text-xs text-[#FFB800] font-bold">
+                  <span className="mr-3 px-2 py-0.5 bg-[#FFB800]/20 border border-[#FFB800]/30 rounded text-xs text-[#FFB800] font-bold">
                     {item.resolution}
                   </span>
                 )}
@@ -208,7 +208,7 @@ export function ItemDetailModal({
               )}
             </div>
 
-            <div className="flex gap-4 mt-6">
+            <div className="flex mt-6 flex-wrap">
               {isShow && nextEpisode ? (
                 isEpisodeResume ? (
                   <TVButton
@@ -218,9 +218,10 @@ export function ItemDetailModal({
                     variant="primary"
                     onEnter={() => onPlay(nextEpisode.id, nextEpisodeResumeMs)}
                     onClick={() => onPlay(nextEpisode.id, nextEpisodeResumeMs)}
+                    className="mr-4 mb-2"
                     autoFocus
                   >
-                    <Play className="w-6 h-6 fill-current" />
+                    <Play className="w-6 h-6 fill-current mr-3" />
                     Resume Next
                   </TVButton>
                 ) : (
@@ -231,9 +232,10 @@ export function ItemDetailModal({
                     variant="primary"
                     onEnter={() => onPlay(nextEpisode.id, 0)}
                     onClick={() => onPlay(nextEpisode.id, 0)}
+                    className="mr-4 mb-2"
                     autoFocus
                   >
-                    <Play className="w-6 h-6 fill-current" />
+                    <Play className="w-6 h-6 fill-current mr-3" />
                     Play
                   </TVButton>
                 )
@@ -246,9 +248,10 @@ export function ItemDetailModal({
                     variant="primary"
                     onEnter={() => onPlay(item.id, item.resume_position_ms)}
                     onClick={() => onPlay(item.id, item.resume_position_ms)}
+                    className="mr-4 mb-2"
                     autoFocus
                   >
-                    <Play className="w-6 h-6 fill-current" />
+                    <Play className="w-6 h-6 fill-current mr-3" />
                     Resume ({resumeMins}m)
                   </TVButton>
                   <TVButton
@@ -258,8 +261,9 @@ export function ItemDetailModal({
                     variant="secondary"
                     onEnter={() => onPlay(item.id, 0)}
                     onClick={() => onPlay(item.id, 0)}
+                    className="mr-4 mb-2"
                   >
-                    <RotateCcw className="w-6 h-6" /> Play from Beginning
+                    <RotateCcw className="w-6 h-6 mr-3" /> Play from Beginning
                   </TVButton>
                 </>
               ) : (
@@ -270,9 +274,10 @@ export function ItemDetailModal({
                   variant="primary"
                   onEnter={() => onPlay(item.id, 0)}
                   onClick={() => onPlay(item.id, 0)}
+                  className="mr-4 mb-2"
                   autoFocus
                 >
-                  <Play className="w-6 h-6 fill-current" /> Play
+                  <Play className="w-6 h-6 fill-current mr-3" /> Play
                 </TVButton>
               )}
 
@@ -286,8 +291,9 @@ export function ItemDetailModal({
                   variant="secondary"
                   onEnter={() => onBrowseFolder?.(item.library_id!, item.folder_path!)}
                   onClick={() => onBrowseFolder?.(item.library_id!, item.folder_path!)}
+                  className="mr-4 mb-2"
                 >
-                  <Folder className="w-6 h-6" /> Browse Folder
+                  <Folder className="w-6 h-6 mr-3" /> Browse Folder
                 </TVButton>
               )}
 
@@ -306,16 +312,17 @@ export function ItemDetailModal({
                 variant="secondary"
                 onEnter={onClose}
                 onClick={onClose}
+                className="mr-4 mb-2"
               >
-                <X className="w-6 h-6" /> Back
+                <X className="w-6 h-6 mr-3" /> Back
               </TVButton>
             </div>
           </div>
         </div>
 
         {seasons.length > 0 && (
-          <div className="flex flex-col gap-4 mt-4">
-            <div className="flex items-center gap-3 overflow-x-auto pb-1">
+          <div className="flex flex-col mt-8 pt-6 border-t border-[rgba(245,229,229,0.08)]">
+            <div className="flex items-center overflow-x-auto pb-2 mb-4 scrollbar-none">
               {seasons.map((season, idx) => (
                 <TVButton
                   key={season}
@@ -325,14 +332,14 @@ export function ItemDetailModal({
                   variant={selectedSeason === season ? 'primary' : 'secondary'}
                   onClick={() => setSelectedSeason(season)}
                   onEnter={() => setSelectedSeason(season)}
-                  className="!px-6 !py-2.5 !text-base rounded-full"
+                  className="!px-6 !py-2.5 !text-base rounded-full mr-3 shrink-0"
                 >
                   Season {season}
                 </TVButton>
               ))}
             </div>
 
-            <div className="flex gap-5 overflow-x-auto pb-4 pt-1">
+            <div className="flex overflow-x-auto pb-4 pt-1 scrollbar-none">
               {episodes
                 .filter((ep) => ep.season === selectedSeason)
                 .map((ep, idx) => (

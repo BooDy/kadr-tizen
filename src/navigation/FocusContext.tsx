@@ -148,6 +148,13 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
         candidates = candidates.filter((n) => isNodeInTrap(n.groupId, activeTrap));
       }
 
+      // Sidebar isolation: Navigation within sidebar stays in sidebar; navigation within content never jumps to sidebar
+      if (currentNode.groupId === 'sidebar') {
+        candidates = candidates.filter((n) => n.groupId === 'sidebar');
+      } else {
+        candidates = candidates.filter((n) => n.groupId !== 'sidebar');
+      }
+
       let bestNode: FocusNode | null = null;
       let minDistance = Infinity;
 
@@ -157,22 +164,25 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
         const dy = rect.top + rect.height / 2 - (currentRect.top + currentRect.height / 2);
 
         let isAligned = false;
+        let dist = Infinity;
+
         if (dir === 'right' && dx > 15) {
           isAligned = Math.abs(dy) <= Math.max(currentRect.height * 1.5, 30);
+          dist = Math.hypot(dx, dy * 2.5);
         } else if (dir === 'left' && dx < -15) {
           isAligned = Math.abs(dy) <= Math.max(currentRect.height * 1.5, 30);
+          dist = Math.hypot(dx, dy * 2.5);
         } else if (dir === 'down' && dy > 15) {
           isAligned = Math.abs(dx) <= Math.max(currentRect.width * 1.5, 30);
+          dist = Math.hypot(dx * 2.5, dy);
         } else if (dir === 'up' && dy < -15) {
           isAligned = Math.abs(dx) <= Math.max(currentRect.width * 1.5, 30);
+          dist = Math.hypot(dx * 2.5, dy);
         }
 
-        if (isAligned) {
-          const dist = Math.hypot(dx, dy);
-          if (dist < minDistance) {
-            minDistance = dist;
-            bestNode = node;
-          }
+        if (isAligned && dist < minDistance) {
+          minDistance = dist;
+          bestNode = node;
         }
       }
 

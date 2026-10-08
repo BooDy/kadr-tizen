@@ -162,9 +162,12 @@ export function BrowseScreen({
       .then((data) => {
         if (!cancelled && data && data.length > 0) {
           setScreens(data);
-          if (!initialTab) {
-            setActiveTab(data[0].id);
-          }
+          setActiveTab((prev) => {
+            if (prev && data.some((s) => s.id === prev)) {
+              return prev;
+            }
+            return initialTab || data[0].id;
+          });
         }
       })
       .catch(() => {
@@ -330,17 +333,17 @@ export function BrowseScreen({
       <nav
         data-testid="tv-sidebar"
         className={`${
-          isSidebarFocused ? 'w-64' : 'w-28'
-        } hover:w-64 focus-within:w-64 transition-all duration-200 bg-[#3B1111] border-r border-[rgba(245,229,229,0.08)] p-4 flex flex-col justify-between z-40 group`}
+          isSidebarFocused ? 'w-80' : 'w-28'
+        } hover:w-80 focus-within:w-80 transition-all duration-200 bg-[#3B1111] border-r border-[rgba(245,229,229,0.08)] p-4 flex flex-col justify-between z-40 group`}
       >
-        <div className="flex flex-col gap-4">
-          <div className="h-16 flex items-center justify-center">
+        <div className="flex flex-col">
+          <div className="h-20 flex items-center justify-center mb-6">
             <img
               src="./kadr-logo.png"
               alt="Kadr"
-              className="h-10 w-auto object-contain"
-              style={{ height: '40px', width: 'auto', maxHeight: '40px' }}
-              height="40"
+              className="h-12 w-auto object-contain"
+              style={{ height: '48px', width: 'auto', maxHeight: '48px' }}
+              height="48"
             />
           </div>
           {displayScreens.map((screenItem, index) => {
@@ -357,21 +360,21 @@ export function BrowseScreen({
                 variant={isActive ? 'nav-active' : 'nav-inactive'}
                 onEnter={() => handleSelectScreen(screenItem.id)}
                 onClick={() => handleSelectScreen(screenItem.id)}
-                className="w-full justify-start px-4"
+                className="w-full justify-start px-4 py-4 mb-3"
               >
                 {info?.isPrivate ? (
                   info.isUnlocked ? (
-                    <Unlock className="w-6 h-6 shrink-0 text-[#FF6B00]" />
+                    <Unlock className="w-8 h-8 shrink-0 mr-3 text-[#FF6B00]" />
                   ) : (
-                    <Lock className="w-6 h-6 shrink-0 text-[#FFB800]" />
+                    <Lock className="w-8 h-8 shrink-0 mr-3 text-[#FFB800]" />
                   )
                 ) : (
-                  <IconComponent className="w-6 h-6 shrink-0" />
+                  <IconComponent className="w-8 h-8 shrink-0 mr-3" />
                 )}
                 <span
                   className={`${
                     isSidebarFocused ? 'inline' : 'hidden group-hover:inline group-focus-within:inline'
-                  } ml-2 text-lg truncate`}
+                  } text-2xl font-bold tracking-wide truncate`}
                 >
                   {screenItem.title}
                 </span>
@@ -379,7 +382,7 @@ export function BrowseScreen({
                   <span
                     className={`${
                       isSidebarFocused ? 'inline' : 'hidden group-hover:inline group-focus-within:inline'
-                    } ml-auto text-xs px-2 py-0.5 rounded bg-[#FFB800]/20 text-[#FFB800] border border-[#FFB800]/30 font-bold`}
+                    } ml-auto text-xs px-2.5 py-1 rounded bg-[#FFB800]/20 text-[#FFB800] border border-[#FFB800]/30 font-bold`}
                   >
                     Locked
                   </span>
@@ -396,13 +399,13 @@ export function BrowseScreen({
           variant="nav-inactive"
           onEnter={onSwitchProfile}
           onClick={onSwitchProfile}
-          className="w-full justify-start px-4"
+          className="w-full justify-start px-4 py-4 mt-auto"
         >
-          <Users className="w-6 h-6 shrink-0" />
+          <Users className="w-8 h-8 shrink-0 mr-3" />
           <span
             className={`${
               isSidebarFocused ? 'inline' : 'hidden group-hover:inline group-focus-within:inline'
-            } ml-2 text-lg`}
+            } text-2xl font-bold tracking-wide truncate`}
           >
             Profiles
           </span>

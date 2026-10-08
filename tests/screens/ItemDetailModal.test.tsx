@@ -682,6 +682,36 @@ describe('ItemDetailModal', () => {
       });
       expect(screen.getByTestId('focused-id').textContent).toBe('detail-resume-btn');
     });
+
+    it('renders with Chromium 69 compatible margin spacing for poster, buttons, and seasons', () => {
+      render(
+        <FocusProvider>
+          <ItemDetailModal
+            isOpen={true}
+            item={{
+              ...mockShowDetail,
+              poster_url: '/images/severance-poster.jpg',
+            }}
+            serverUrl="http://localhost:8492"
+            onPlay={vi.fn()}
+            onClose={vi.fn()}
+          />
+        </FocusProvider>
+      );
+
+      // Poster has mr-10
+      const posterImg = screen.getAllByAltText('Severance').find((img) => img.getAttribute('src')?.includes('poster'));
+      expect(posterImg?.className).toContain('mr-10');
+
+      // Action button has mr-4
+      const resumeBtn = screen.getByRole('button', { name: /Resume Next/i });
+      expect(resumeBtn.className).toContain('mr-4');
+
+      // Season tab has mr-3
+      const seasonTab1 = screen.getByRole('button', { name: /Season 1/i });
+      expect(seasonTab1.className).toContain('mr-3');
+    });
   });
 });
+
 

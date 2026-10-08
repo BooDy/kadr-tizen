@@ -24,7 +24,11 @@ export class TizenAvplayDriver implements PlayerDriver {
         const duration = avplay.getDuration();
         this.timeCallback?.(ms, duration);
       },
-      onerror: () => this.errorCallback?.('AVPlay Hardware Error'),
+      onerror: (err: any) => {
+        console.error('[AVPlay] Hardware error:', err);
+        this.stateCallback?.('error');
+        this.errorCallback?.('AVPlay Hardware Error');
+      },
       onstreamcompleted: () => this.stateCallback?.('ended'),
     });
 
@@ -32,13 +36,23 @@ export class TizenAvplayDriver implements PlayerDriver {
       () => {
         if (this.isDestroyed) return;
         if (startMs > 0) {
-          avplay.seekTo(startMs);
+          try {
+            avplay.seekTo(startMs);
+          } catch (e) {
+            console.warn('[AVPlay] seekTo on start failed:', e);
+          }
         }
-        avplay.play();
+        try {
+          avplay.play();
+        } catch (e) {
+          console.error('[AVPlay] play failed:', e);
+        }
         this.stateCallback?.('playing');
       },
-      () => {
+      (err: any) => {
         if (!this.isDestroyed) {
+          console.error('[AVPlay] prepareAsync failed:', err);
+          this.stateCallback?.('error');
           this.errorCallback?.('AVPlay Prepare Error');
         }
       }

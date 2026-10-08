@@ -139,11 +139,29 @@ export function PlayerScreen({
   }, [playerState, isSubtitlePopupOpen]);
 
   useEffect(() => {
+    // For AVPlay hardware video plane on Samsung Tizen, body background must be transparent
+    const prevBg = document.body.style.backgroundColor;
+    document.body.style.backgroundColor = 'transparent';
+    return () => {
+      document.body.style.backgroundColor = prevBg;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!containerRef.current) return;
     let isMounted = true;
 
     const cleanServerUrl = serverUrl.replace(/\/+$/, '');
-    const streamUrl = `${cleanServerUrl}/api/v1/streaming/${itemId}`;
+    const queryParams = new URLSearchParams();
+    if (token) {
+      queryParams.set('token', token);
+    }
+    const unlockTokens = apiClient.getUnlockTokens ? apiClient.getUnlockTokens() : [];
+    if (unlockTokens.length > 0) {
+      queryParams.set('unlocked', unlockTokens.join(','));
+    }
+    const queryString = queryParams.toString() ? `?${queryParams.toString()}` : '';
+    const streamUrl = `${cleanServerUrl}/api/v1/stream/${itemId}${queryString}`;
     const driver = createPlayerDriver();
     driverRef.current = driver;
 
@@ -157,6 +175,12 @@ export function PlayerScreen({
     driver.onStateChange((state) => {
       setPlayerState(state);
       playerStateRef.current = state;
+    });
+
+    driver.onError((err) => {
+      console.error('[PlayerScreen] Playback error:', err);
+      setPlayerState('error');
+      playerStateRef.current = 'error';
     });
 
     driver.init(containerRef.current, streamUrl, initialResume);

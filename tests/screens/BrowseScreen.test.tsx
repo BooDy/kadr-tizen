@@ -478,18 +478,19 @@ describe('BrowseScreen', () => {
 
     // Initially, Hero Play button has focus, so sidebar is collapsed
     expect(sidebar.classList.contains('w-28')).toBe(true);
-    expect(sidebar.classList.contains('w-64')).toBe(false);
+    expect(sidebar.classList.contains('w-80')).toBe(false);
 
     // Press ArrowLeft from leftmost content element (hero play button) to bridge to sidebar
     fireEvent.keyDown(window, { key: 'ArrowLeft', keyCode: TVKeys.LEFT });
 
     // Focus transitioned to nav-screen-home; sidebar should now be expanded
-    expect(sidebar.classList.contains('w-64')).toBe(true);
+    expect(sidebar.classList.contains('w-80')).toBe(true);
     expect(sidebar.classList.contains('w-28')).toBe(false);
 
-    // Label for Home button should be 'inline'
+    // Label for Home button should be 'inline' and large text-2xl
     const homeLabel = screen.getByText('Home');
     expect(homeLabel.className).toContain('inline');
+    expect(homeLabel.className).toContain('text-2xl');
     expect(homeLabel.className).not.toContain('hidden');
 
     // Press ArrowRight to return to content
@@ -497,7 +498,7 @@ describe('BrowseScreen', () => {
 
     // Sidebar should collapse back to w-28
     expect(sidebar.classList.contains('w-28')).toBe(true);
-    expect(sidebar.classList.contains('w-64')).toBe(false);
+    expect(sidebar.classList.contains('w-80')).toBe(false);
   });
 
   it('transitions focus between content and sidebar via ArrowLeft and ArrowRight', async () => {
@@ -592,11 +593,15 @@ describe('BrowseScreen', () => {
 
     // Move to sidebar
     fireEvent.keyDown(window, { key: 'ArrowLeft', keyCode: TVKeys.LEFT });
-    expect(document.activeElement?.id).toBe('nav-screen-home');
+    await waitFor(() => {
+      expect(document.activeElement?.id).toBe('nav-screen-home');
+    });
 
     // Move down to 'nav-screen-movies'
     fireEvent.keyDown(window, { key: 'ArrowDown', keyCode: TVKeys.DOWN });
-    expect(document.activeElement?.id).toBe('nav-screen-movies');
+    await waitFor(() => {
+      expect(document.activeElement?.id).toBe('nav-screen-movies');
+    });
 
     // Press Enter to activate Movies tab
     fireEvent.keyDown(window, { key: 'Enter', keyCode: TVKeys.ENTER });
@@ -863,5 +868,82 @@ describe('BrowseScreen', () => {
     expect(unlockBtn).toBeInTheDocument();
     fireEvent.click(unlockBtn);
     expect(onLockedLibrary).toHaveBeenCalledWith('vault-1');
+  });
+
+  it('preserves active library tab when refreshKey changes after unlocking without redirecting to home', async () => {
+    const mockScreens = [
+      { id: 'home', title: 'Home' },
+      { id: 'vault-1', title: 'Secret Vault' },
+    ];
+    const mockLibraries = [
+      { id: 'vault-1', name: 'Secret Vault', media_type: 'movie', is_private: true },
+    ];
+
+    vi.spyOn(screensApi, 'fetchScreens').mockResolvedValue(mockScreens);
+    vi.spyOn(screensApi, 'fetchScreenLayout').mockImplementation(async (_client, screenId) => ({
+      id: screenId,
+      title: screenId === 'vault-1' ? 'Secret Vault' : 'Home',
+      widgets: [
+        {
+          id: `widget-${screenId}`,
+          type: 'grid',
+          title: screenId === 'vault-1' ? 'Secret Vault Content' : 'Home Content',
+          columns: 6,
+          items: [
+            {
+              id: screenId === 'vault-1' ? 999 : 101,
+              title: screenId === 'vault-1' ? 'Secret Item' : 'Home Item',
+              media_type: 'movie',
+            },
+          ],
+        },
+      ],
+    }));
+
+    const { rerender } = render(
+      <FocusProvider>
+        <BrowseScreen
+          client={mockClient}
+          serverUrl="http://localhost:8492"
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+          onSwitchProfile={vi.fn()}
+          libraries={mockLibraries}
+          refreshKey={0}
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Secret Vault')).toBeInTheDocument();
+    });
+
+    // Select the Secret Vault library
+    const vaultBtn = screen.getByRole('button', { name: /Secret Vault/i });
+    fireEvent.click(vaultBtn);
+
+    // Now mock library as unlocked on the client
+    vi.spyOn(mockClient, 'isLibraryUnlocked').mockReturnValue(true);
+
+    // Simulate unlock completion triggering refreshKey increment from App.tsx
+    rerender(
+      <FocusProvider>
+        <BrowseScreen
+          client={mockClient}
+          serverUrl="http://localhost:8492"
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+          onSwitchProfile={vi.fn()}
+          libraries={mockLibraries}
+          refreshKey={1}
+        />
+      </FocusProvider>
+    );
+
+    // Should still display Secret Vault content, NOT redirect back to Home!
+    await waitFor(() => {
+      expect(screen.getByText('Secret Vault Content')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Home Content')).not.toBeInTheDocument();
   });
 });

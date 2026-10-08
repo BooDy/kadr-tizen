@@ -164,7 +164,11 @@ export default function App() {
 
   return (
     <FocusProvider>
-      <div className="w-[1920px] h-[1080px] bg-[#2A0A0A] overflow-hidden relative font-sans text-[#F5E5E5]">
+      <div
+        className={`w-[1920px] h-[1080px] ${
+          view === 'player' ? 'bg-transparent' : 'bg-[#2A0A0A]'
+        } overflow-hidden relative font-sans text-[#F5E5E5]`}
+      >
         {isOffline && (
           <div
             data-testid="reconnection-overlay"

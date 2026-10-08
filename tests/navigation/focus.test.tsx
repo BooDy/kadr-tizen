@@ -427,6 +427,66 @@ describe('Spatial Navigation', () => {
     expect(screen.getByTestId('current-focus').textContent).toBe('r1-c1');
   });
 
+  it('prevents ArrowDown from jumping across boundary into sidebar items', () => {
+    function SidebarAndContentComponent() {
+      const { focusedId } = useFocusContext();
+      const sbTop = useFocusable({ id: 'nav-home', groupId: 'sidebar' });
+      const sbBottom = useFocusable({ id: 'nav-switch-profile', groupId: 'sidebar' });
+      const card1 = useFocusable({ id: 'card-1', groupId: 'content', autoFocus: true });
+      const card2 = useFocusable({ id: 'card-2', groupId: 'content' });
+
+      return (
+        <div>
+          <div data-testid="current-focus">{focusedId}</div>
+          <button ref={sbTop.ref} tabIndex={-1} data-testid="nav-home">Home</button>
+          <button ref={sbBottom.ref} tabIndex={-1} data-testid="nav-switch-profile">Profiles</button>
+          <button ref={card1.ref} tabIndex={-1} data-testid="card-1">Card 1</button>
+          <button ref={card2.ref} tabIndex={-1} data-testid="card-2">Card 2</button>
+        </div>
+      );
+    }
+
+    render(
+      <FocusProvider>
+        <SidebarAndContentComponent />
+      </FocusProvider>
+    );
+
+    const sbTop = screen.getByTestId('nav-home');
+    const sbBottom = screen.getByTestId('nav-switch-profile');
+    const card1 = screen.getByTestId('card-1');
+    const card2 = screen.getByTestId('card-2');
+
+    // Sidebar: left: 0..100, Home: top: 0, Profiles: top: 900
+    vi.spyOn(sbTop, 'getBoundingClientRect').mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, width: 100, height: 50, right: 100, bottom: 50, toJSON: () => {},
+    });
+    vi.spyOn(sbBottom, 'getBoundingClientRect').mockReturnValue({
+      x: 0, y: 900, left: 0, top: 900, width: 100, height: 50, right: 100, bottom: 950, toJSON: () => {},
+    });
+    // Content: left: 150..350, Card 1: top: 100, Card 2: top: 500
+    vi.spyOn(card1, 'getBoundingClientRect').mockReturnValue({
+      x: 150, y: 100, left: 150, top: 100, width: 200, height: 300, right: 350, bottom: 400, toJSON: () => {},
+    });
+    vi.spyOn(card2, 'getBoundingClientRect').mockReturnValue({
+      x: 150, y: 500, left: 150, top: 500, width: 200, height: 300, right: 350, bottom: 800, toJSON: () => {},
+    });
+
+    expect(screen.getByTestId('current-focus').textContent).toBe('card-1');
+
+    // ArrowDown from card-1 should navigate to card-2, NOT jump to sbBottom (Profiles)
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowDown' });
+    });
+    expect(screen.getByTestId('current-focus').textContent).toBe('card-2');
+
+    // ArrowDown from card-2 (last content card) should stay on card-2, NOT jump to sbBottom
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowDown' });
+    });
+    expect(screen.getByTestId('current-focus').textContent).toBe('card-2');
+  });
+
   it('throws error when useFocusContext is used outside FocusProvider', () => {
     function InvalidComponent() {
       useFocusContext();

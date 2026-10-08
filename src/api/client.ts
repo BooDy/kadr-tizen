@@ -27,6 +27,10 @@ export class ApiClient {
     this.libraryUnlockTokens.clear();
   }
 
+  getUnlockTokens(): string[] {
+    return Array.from(this.libraryUnlockTokens.values());
+  }
+
   getBaseUrl(): string {
     return this.baseUrl;
   }
