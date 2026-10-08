@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { FocusProvider, useFocusContext } from '../../src/navigation/FocusContext';
@@ -21,6 +23,9 @@ describe('TVButton', () => {
           <TVButton id="btn-3" groupId="row" variant="danger">
             Danger
           </TVButton>
+          <TVButton id="btn-4" groupId="row" variant="primary">
+            Unfocused Primary
+          </TVButton>
         </div>
       );
     }
@@ -33,15 +38,20 @@ describe('TVButton', () => {
 
     const btn1 = screen.getByText('Click Me');
     expect(btn1).toHaveClass('tv-focus-ring');
-    expect(btn1).toHaveClass('bg-sky-500');
+    expect(btn1).toHaveClass('bg-[#FF6B00]');
 
     const btn2 = screen.getByText('Secondary');
     expect(btn2).not.toHaveClass('tv-focus-ring');
-    expect(btn2).toHaveClass('bg-zinc-900');
+    expect(btn2).toHaveClass('bg-[#3B1111]');
 
     const btn3 = screen.getByText('Danger');
     expect(btn3).not.toHaveClass('tv-focus-ring');
-    expect(btn3).toHaveClass('text-rose-400');
+    expect(btn3).toHaveClass('bg-[#3B1111]');
+    expect(btn3).toHaveClass('text-[#D43F15]');
+
+    const btn4 = screen.getByText('Unfocused Primary');
+    expect(btn4).not.toHaveClass('tv-focus-ring');
+    expect(btn4).toHaveClass('bg-[#D43F15]');
   });
 
   it('triggers onEnter when Enter key is pressed', () => {
@@ -88,7 +98,7 @@ describe('TVButton', () => {
 });
 
 describe('TVCard', () => {
-  it('renders initial letter when imageUrl is omitted', () => {
+  it('renders initial letter when imageUrl is omitted and applies warm cinema styling', () => {
     render(
       <FocusProvider>
         <TVCard
@@ -103,11 +113,20 @@ describe('TVCard', () => {
       </FocusProvider>
     );
 
+    const card = screen.getByRole('button');
+    expect(card).toHaveClass('tv-focus-ring');
+    expect(card).toHaveClass('bg-[#3B1111]');
+
     expect(screen.getByText('Inception')).toBeInTheDocument();
     expect(screen.getByText('Sci-Fi / 2010')).toBeInTheDocument();
     expect(screen.getByText('4K')).toBeInTheDocument();
     // First letter of "Inception" is "I"
-    expect(screen.getByText('I')).toBeInTheDocument();
+    const posterPlaceholder = screen.getByText('I');
+    expect(posterPlaceholder.parentElement).toHaveClass('bg-[#2A0A0A]');
+
+    const progressBar = card.querySelector('.bg-\\[\\#FF6B00\\]');
+    expect(progressBar).toBeInTheDocument();
+    expect(progressBar).toHaveStyle({ width: '65%' });
   });
 
   it('renders image when imageUrl is provided', () => {
@@ -246,5 +265,30 @@ describe('KeypadGrid', () => {
     expect(onDigit).not.toHaveBeenCalled();
     expect(onClear).not.toHaveBeenCalled();
     expect(onBackspace).not.toHaveBeenCalled();
+  });
+});
+
+describe('Theme Tokens and Focus Ring CSS', () => {
+  it('defines .tv-focus-ring with #FFB800 box-shadow and cinema color tokens in index.css', () => {
+    const cssPath = path.resolve(__dirname, '../../src/index.css');
+    const cssContent = fs.readFileSync(cssPath, 'utf-8');
+    expect(cssContent).toContain('--color-canvas: #2A0A0A');
+    expect(cssContent).toContain('--color-panel: #3B1111');
+    expect(cssContent).toContain('--color-panel-hover: #4A1616');
+    expect(cssContent).toContain('--color-accent: #FF6B00');
+    expect(cssContent).toContain('--color-highlight: #FFB800');
+    expect(cssContent).toContain('--color-cta: #D43F15');
+    expect(cssContent).toContain('--color-cta-hover: #B83410');
+    expect(cssContent).toContain('--color-text-main: #F5E5E5');
+    expect(cssContent).toContain('--color-muted: #5C3C3C');
+    expect(cssContent).toContain('--color-border-subtle: rgba(245, 229, 229, 0.08)');
+    expect(cssContent).toMatch(/box-shadow:\s*0\s+0\s+0\s+3px\s+#FFB800,\s*0\s+0\s+28px\s+rgba\(255,\s*184,\s*0,\s*0\.55\);/);
+  });
+
+  it('configures body styling in index.html with #2A0A0A and #F5E5E5', () => {
+    const htmlPath = path.resolve(__dirname, '../../index.html');
+    const htmlContent = fs.readFileSync(htmlPath, 'utf-8');
+    expect(htmlContent).toContain('bg-[#2A0A0A]');
+    expect(htmlContent).toContain('text-[#F5E5E5]');
   });
 });

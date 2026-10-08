@@ -42,14 +42,14 @@ export function TVButton({
     'px-8 py-4 rounded-xl font-semibold text-xl tracking-wide transition-all duration-150 outline-none flex items-center justify-center gap-3 cursor-pointer select-none';
   const variantStyles = {
     primary: isFocused
-      ? 'bg-sky-500 text-white tv-focus-ring'
-      : 'bg-zinc-800 text-zinc-100 hover:bg-zinc-700',
+      ? 'bg-[#FF6B00] text-white tv-focus-ring'
+      : 'bg-[#D43F15] text-[#F5E5E5]',
     secondary: isFocused
-      ? 'bg-zinc-700 text-white tv-focus-ring'
-      : 'bg-zinc-900 text-zinc-300 border border-zinc-700',
+      ? 'bg-[#4A1616] text-white tv-focus-ring'
+      : 'bg-[#3B1111] text-[#F5E5E5] border border-[rgba(245,229,229,0.08)]',
     danger: isFocused
-      ? 'bg-rose-600 text-white tv-focus-ring'
-      : 'bg-zinc-900 text-rose-400 border border-rose-900/50',
+      ? 'bg-[#D43F15] text-white tv-focus-ring'
+      : 'bg-[#3B1111] text-[#D43F15] border border-[#D43F15]/30',
   };
 
   const handleClick = (e: MouseEvent<HTMLButtonElement>) => {
