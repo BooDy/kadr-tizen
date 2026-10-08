@@ -34,6 +34,13 @@ if (!fs.existsSync(iconDist) && fs.existsSync(iconSrc)) {
   fs.copyFileSync(iconSrc, iconDist);
 }
 
+// Ensure kadr-logo.png is present in dist
+const logoSrc = path.resolve('public/kadr-logo.png');
+const logoDist = path.join(distDir, 'kadr-logo.png');
+if (!fs.existsSync(logoDist) && fs.existsSync(logoSrc)) {
+  fs.copyFileSync(logoSrc, logoDist);
+}
+
 console.log('Packaging into kadr.wgt...');
 if (fs.existsSync(outWgt)) {
   fs.unlinkSync(outWgt);

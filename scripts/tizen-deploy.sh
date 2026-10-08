@@ -29,6 +29,7 @@ echo "Building and signing kadr.wgt..."
 npm run build
 cp config.xml dist/config.xml
 cp public/icon.png dist/icon.png
+cp public/kadr-logo.png dist/kadr-logo.png 2>/dev/null || true
 
 if command -v tizen &> /dev/null; then
   rm -f kadr.wgt Kadr.wgt
