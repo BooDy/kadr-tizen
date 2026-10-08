@@ -30,8 +30,11 @@ export function TVButton({
     groupId,
     onEnter: () => {
       if (disabled) return;
-      onEnter?.();
-      onClick?.({} as MouseEvent<HTMLButtonElement>);
+      if (onEnter) {
+        onEnter();
+      } else if (onClick) {
+        onClick({} as MouseEvent<HTMLButtonElement>);
+      }
     },
     onBack,
     autoFocus,

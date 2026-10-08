@@ -224,6 +224,39 @@ describe('WidgetRenderer with Server AST', () => {
     expect(onSelect).toHaveBeenCalledWith(301);
   });
 
+  it('renders carousel items with mr-6 margin for Chromium 69 flex gap fallback', () => {
+    const mockLayout: ScreenLayout = {
+      id: 'home',
+      title: 'Home',
+      widgets: [
+        {
+          type: 'carousel',
+          id: 'test-carousel',
+          title: 'Carousel Test',
+          items: [
+            { id: 1, title: 'Item 1', media_type: 'movie' },
+            { id: 2, title: 'Item 2', media_type: 'movie' },
+          ],
+        },
+      ],
+    };
+
+    render(
+      <FocusProvider>
+        <WidgetRenderer
+          layout={mockLayout}
+          serverUrl="http://localhost:8492"
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    const card1 = document.getElementById('card-test-carousel-1');
+    expect(card1).toBeInTheDocument();
+    expect(card1?.parentElement).toHaveClass('mr-6');
+  });
+
   it('formats subtitle for episodes as SxxExx and movies as release_year or custom subtitle', () => {
     const mockLayout: ScreenLayout = {
       id: 'home',

@@ -771,4 +771,97 @@ describe('BrowseScreen', () => {
     expect(notCancelled).toBe(true);
     expect(document.activeElement).toBe(modalBtn);
   });
+
+  it('displays lock icon for locked private library and invokes onLockedLibrary when selected', async () => {
+    const onLockedLibrary = vi.fn();
+    const mockScreens = [
+      { id: 'home', title: 'Home' },
+      { id: 'vault-1', title: 'Secret Vault' },
+    ];
+    const mockLibraries = [
+      { id: 'vault-1', name: 'Secret Vault', media_type: 'movie', is_private: true },
+    ];
+
+    vi.spyOn(screensApi, 'fetchScreens').mockResolvedValue(mockScreens);
+    vi.spyOn(screensApi, 'fetchScreenLayout').mockResolvedValue(mockHomeLayout);
+
+    render(
+      <FocusProvider>
+        <BrowseScreen
+          client={mockClient}
+          serverUrl="http://localhost:8492"
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+          onSwitchProfile={vi.fn()}
+          onLockedLibrary={onLockedLibrary}
+          libraries={mockLibraries}
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Secret Vault')).toBeInTheDocument();
+    });
+
+    // Secret Vault tab has lock indicator
+    const vaultBtn = screen.getByRole('button', { name: /Secret Vault/i });
+    expect(vaultBtn).toBeInTheDocument();
+    expect(vaultBtn.querySelector('svg')).toBeInTheDocument();
+
+    // Click Secret Vault
+    fireEvent.click(vaultBtn);
+
+    // onLockedLibrary should be called with library id
+    expect(onLockedLibrary).toHaveBeenCalledWith('vault-1');
+  });
+
+  it('renders locked library state with Unlock button when active tab is a locked private library', async () => {
+    const onLockedLibrary = vi.fn();
+    const mockScreens = [
+      { id: 'home', title: 'Home' },
+      { id: 'vault-1', title: 'Secret Vault' },
+    ];
+    const mockLibraries = [
+      { id: 'vault-1', name: 'Secret Vault', media_type: 'movie', is_private: true },
+    ];
+
+    vi.spyOn(screensApi, 'fetchScreens').mockResolvedValue(mockScreens);
+    vi.spyOn(screensApi, 'fetchScreenLayout').mockResolvedValue({
+      id: 'vault-1',
+      title: 'Secret Vault',
+      widgets: [
+        {
+          id: 'grid-vault',
+          type: 'grid',
+          title: 'Secret Vault',
+          columns: 6,
+          items: [],
+        },
+      ],
+    });
+
+    render(
+      <FocusProvider>
+        <BrowseScreen
+          client={mockClient}
+          serverUrl="http://localhost:8492"
+          initialTab="vault-1"
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+          onSwitchProfile={vi.fn()}
+          onLockedLibrary={onLockedLibrary}
+          libraries={mockLibraries}
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Private Library Locked/i)).toBeInTheDocument();
+    });
+
+    const unlockBtn = screen.getByRole('button', { name: /Unlock with PIN/i });
+    expect(unlockBtn).toBeInTheDocument();
+    fireEvent.click(unlockBtn);
+    expect(onLockedLibrary).toHaveBeenCalledWith('vault-1');
+  });
 });

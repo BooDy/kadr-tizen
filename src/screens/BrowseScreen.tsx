@@ -2,9 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import { ScreenLayout, ScreenSummary } from '../types/ast';
 import { ApiClient } from '../api/client';
 import { fetchScreens, fetchScreenLayout } from '../api/screens';
+import { fetchLibraries, LibrarySummary } from '../api/libraries';
 import { WidgetRenderer } from '../components/widgets/WidgetRenderer';
 import { TVButton } from '../components/tv/TVButton';
-import { Home, Film, Tv, Layers, Users } from 'lucide-react';
+import { Home, Film, Tv, Layers, Users, Lock, Unlock, KeyRound } from 'lucide-react';
 import { useFocusContext } from '../navigation/FocusContext';
 import { TVKeys } from '../navigation/keys';
 
@@ -14,8 +15,10 @@ export interface BrowseScreenProps {
   onSelectItem: (itemId: number | string) => void;
   onPlayItem: (itemId: number | string, resumeMs?: number) => void;
   onSwitchProfile: () => void;
+  onLockedLibrary?: (libraryId: string) => void;
   initialTab?: string;
   refreshKey?: number;
+  libraries?: LibrarySummary[];
 }
 
 const defaultScreens: ScreenSummary[] = [
@@ -53,7 +56,9 @@ function getFirstFocusableId(layout: ScreenLayout): string | null {
 }
 
 function isLeftmostContentNode(id: string | null, layout: ScreenLayout | null): boolean {
-  if (!id || !layout) return false;
+  if (!id) return false;
+  if (id === 'unlock-library-btn') return true;
+  if (!layout) return false;
   for (const widget of layout.widgets) {
     if (widget.type === 'hero_banner') {
       if (id === `hero-play-${widget.id}`) return true;
@@ -81,7 +86,9 @@ function isLeftmostContentNode(id: string | null, layout: ScreenLayout | null): 
 }
 
 function isValidContentNode(id: string | null, layout: ScreenLayout | null): boolean {
-  if (!id || !layout) return false;
+  if (!id) return false;
+  if (id === 'unlock-library-btn') return true;
+  if (!layout) return false;
   for (const widget of layout.widgets) {
     if (widget.type === 'hero_banner' && widget.data) {
       if (id === `hero-play-${widget.id}` || id === `hero-details-${widget.id}`) return true;
@@ -110,15 +117,29 @@ export function BrowseScreen({
   onSelectItem,
   onPlayItem,
   onSwitchProfile,
+  onLockedLibrary,
   initialTab,
   refreshKey,
+  libraries: propLibraries,
 }: BrowseScreenProps) {
   const [screens, setScreens] = useState<ScreenSummary[]>([]);
+  const [internalLibraries, setInternalLibraries] = useState<LibrarySummary[]>([]);
+  const librariesList = propLibraries || internalLibraries;
   const [activeTab, setActiveTab] = useState<string>(initialTab || 'home');
   const [layout, setLayout] = useState<ScreenLayout | null>(null);
   const [loading, setLoading] = useState(true);
 
   const { focusedId, setFocusedId, activeTrap } = useFocusContext();
+
+  const getLibraryInfo = (screenId: string) => {
+    const lib = librariesList.find(
+      (l) => l.id === screenId || l.name.toLowerCase() === screenId.toLowerCase()
+    );
+    if (!lib) return null;
+    const isPrivate = Boolean(lib.is_private);
+    const isUnlocked = isPrivate ? client.isLibraryUnlocked(lib.id) : true;
+    return { lib, isPrivate, isUnlocked };
+  };
 
   const isSidebarFocused = Boolean(
     focusedId &&
@@ -149,10 +170,21 @@ export function BrowseScreen({
       .catch(() => {
         // Fallback to defaultScreens
       });
+
+    if (!propLibraries) {
+      fetchLibraries(client)
+        .then((libs) => {
+          if (!cancelled && libs) {
+            setInternalLibraries(libs);
+          }
+        })
+        .catch(() => {});
+    }
+
     return () => {
       cancelled = true;
     };
-  }, [client, initialTab, refreshKey]);
+  }, [client, initialTab, refreshKey, propLibraries]);
 
   useEffect(() => {
     lastContentFocusedIdRef.current = null;
@@ -178,9 +210,14 @@ export function BrowseScreen({
           setLoading(false);
           // If no focus is currently set, focus the first focusable element
           if (focusedIdRef.current === null) {
-            const firstId = getFirstFocusableId(data);
-            if (firstId) {
-              setFocusedId(firstId);
+            const currentInfo = getLibraryInfo(activeTab);
+            if (currentInfo?.isPrivate && !currentInfo.isUnlocked) {
+              setFocusedId('unlock-library-btn');
+            } else {
+              const firstId = getFirstFocusableId(data);
+              if (firstId) {
+                setFocusedId(firstId);
+              }
             }
           }
         }
@@ -195,6 +232,16 @@ export function BrowseScreen({
       cancelled = true;
     };
   }, [client, activeTab, setFocusedId, refreshKey]);
+
+  const handleSelectScreen = (screenId: string) => {
+    const info = getLibraryInfo(screenId);
+    if (info && info.isPrivate && !info.isUnlocked) {
+      setActiveTab(screenId);
+      onLockedLibrary?.(info.lib.id);
+      return;
+    }
+    setActiveTab(screenId);
+  };
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -274,6 +321,8 @@ export function BrowseScreen({
   }, [activeTab, layout, setFocusedId, activeTrap]);
 
   const displayScreens = screens.length > 0 ? screens : defaultScreens;
+  const currentLibInfo = getLibraryInfo(activeTab);
+  const isCurrentScreenLocked = Boolean(currentLibInfo?.isPrivate && !currentLibInfo.isUnlocked);
 
   return (
     <div className="w-full h-full flex bg-[#2A0A0A] overflow-hidden">
@@ -297,6 +346,8 @@ export function BrowseScreen({
           {displayScreens.map((screenItem, index) => {
             const IconComponent = getScreenIcon(screenItem.id);
             const isActive = activeTab === screenItem.id;
+            const info = getLibraryInfo(screenItem.id);
+
             return (
               <TVButton
                 key={screenItem.id}
@@ -304,18 +355,35 @@ export function BrowseScreen({
                 groupId="sidebar"
                 order={index + 1}
                 variant={isActive ? 'nav-active' : 'nav-inactive'}
-                onEnter={() => setActiveTab(screenItem.id)}
-                onClick={() => setActiveTab(screenItem.id)}
+                onEnter={() => handleSelectScreen(screenItem.id)}
+                onClick={() => handleSelectScreen(screenItem.id)}
                 className="w-full justify-start px-4"
               >
-                <IconComponent className="w-6 h-6 shrink-0" />
+                {info?.isPrivate ? (
+                  info.isUnlocked ? (
+                    <Unlock className="w-6 h-6 shrink-0 text-[#FF6B00]" />
+                  ) : (
+                    <Lock className="w-6 h-6 shrink-0 text-[#FFB800]" />
+                  )
+                ) : (
+                  <IconComponent className="w-6 h-6 shrink-0" />
+                )}
                 <span
                   className={`${
                     isSidebarFocused ? 'inline' : 'hidden group-hover:inline group-focus-within:inline'
-                  } ml-2 text-lg`}
+                  } ml-2 text-lg truncate`}
                 >
                   {screenItem.title}
                 </span>
+                {info?.isPrivate && !info.isUnlocked && (
+                  <span
+                    className={`${
+                      isSidebarFocused ? 'inline' : 'hidden group-hover:inline group-focus-within:inline'
+                    } ml-auto text-xs px-2 py-0.5 rounded bg-[#FFB800]/20 text-[#FFB800] border border-[#FFB800]/30 font-bold`}
+                  >
+                    Locked
+                  </span>
+                )}
               </TVButton>
             );
           })}
@@ -346,6 +414,29 @@ export function BrowseScreen({
         {loading ? (
           <div className="w-full h-full flex items-center justify-center text-[#5C3C3C] text-2xl">
             Loading {activeTab}...
+          </div>
+        ) : isCurrentScreenLocked ? (
+          <div className="w-full h-full flex flex-col items-center justify-center gap-6 select-none">
+            <div className="w-24 h-24 rounded-full bg-[#3B1111] border border-[rgba(245,229,229,0.08)] flex items-center justify-center shadow-xl">
+              <Lock className="w-12 h-12 text-[#FFB800]" />
+            </div>
+            <div className="flex flex-col items-center gap-2">
+              <h2 className="text-3xl font-bold text-[#F5E5E5]">Private Library Locked</h2>
+              <p className="text-lg text-[#5C3C3C] max-w-md text-center">
+                This library is protected with a 4-digit PIN. Unlock it to access its media contents.
+              </p>
+            </div>
+            <TVButton
+              id="unlock-library-btn"
+              groupId="locked-library"
+              variant="primary"
+              autoFocus
+              onClick={() => onLockedLibrary?.(currentLibInfo?.lib.id || activeTab)}
+              onEnter={() => onLockedLibrary?.(currentLibInfo?.lib.id || activeTab)}
+              className="mt-2"
+            >
+              <KeyRound className="w-6 h-6 mr-2" /> Unlock with PIN
+            </TVButton>
           </div>
         ) : layout ? (
           <WidgetRenderer

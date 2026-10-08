@@ -38,18 +38,19 @@ export function CardCarouselWidget({
             : undefined;
 
           return (
-            <TVCard
-              key={item.id}
-              id={`card-${widget.id}-${item.id}`}
-              groupId={`carousel-${widget.id}`}
-              title={item.title}
-              subtitle={subtitle}
-              imageUrl={imgUrl}
-              badge={item.badge}
-              progressPercent={progressPercent}
-              onSelect={() => onSelectItem(item.id)}
-              autoFocus={autoFocusFirstItem && idx === 0}
-            />
+            <div key={item.id} className="shrink-0 mr-6">
+              <TVCard
+                id={`card-${widget.id}-${item.id}`}
+                groupId={`carousel-${widget.id}`}
+                title={item.title}
+                subtitle={subtitle}
+                imageUrl={imgUrl}
+                badge={item.badge}
+                progressPercent={progressPercent}
+                onSelect={() => onSelectItem(item.id)}
+                autoFocus={autoFocusFirstItem && idx === 0}
+              />
+            </div>
           );
         })}
       </div>

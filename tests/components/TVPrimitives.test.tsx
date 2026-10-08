@@ -68,6 +68,22 @@ describe('TVButton', () => {
     expect(onEnter).toHaveBeenCalledTimes(1);
   });
 
+  it('does not invoke both onEnter and onClick when Enter is pressed and both are provided', () => {
+    const onEnter = vi.fn();
+    const onClick = vi.fn();
+    render(
+      <FocusProvider>
+        <TVButton id="btn-both" groupId="row" autoFocus onEnter={onEnter} onClick={onClick}>
+          Both
+        </TVButton>
+      </FocusProvider>
+    );
+
+    fireEvent.keyDown(window, { key: 'Enter', keyCode: TVKeys.ENTER });
+    expect(onEnter).toHaveBeenCalledTimes(1);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
   it('does not invoke onEnter or onClick when disabled', () => {
     const onEnter = vi.fn();
     const onClick = vi.fn();
@@ -116,6 +132,8 @@ describe('TVCard', () => {
     const card = screen.getByRole('button');
     expect(card).toHaveClass('tv-focus-ring');
     expect(card).toHaveClass('bg-[#3B1111]');
+    expect(card).toHaveClass('shrink-0');
+    expect(card).toHaveClass('w-56');
 
     expect(screen.getByText('Inception')).toBeInTheDocument();
     expect(screen.getByText('Sci-Fi / 2010')).toBeInTheDocument();
@@ -239,6 +257,33 @@ describe('KeypadGrid', () => {
     // Click Backspace
     fireEvent.click(screen.getByTestId('keypad-backspace'));
     expect(onBackspace).toHaveBeenCalledTimes(1);
+  });
+
+  it('fires onDigit exactly ONCE when Enter/OK is pressed on a focused digit button', () => {
+    const onDigit = vi.fn();
+    function KeypadTest() {
+      const { setFocusedId } = useFocusContext();
+      return (
+        <div>
+          <button onClick={() => setFocusedId('keypad-1')} data-testid="focus-trigger">Focus</button>
+          <KeypadGrid
+            groupId="keypad"
+            onDigit={onDigit}
+            onBackspace={vi.fn()}
+          />
+        </div>
+      );
+    }
+    render(
+      <FocusProvider>
+        <KeypadTest />
+      </FocusProvider>
+    );
+
+    fireEvent.click(screen.getByTestId('focus-trigger'));
+    fireEvent.keyDown(window, { key: 'Enter', keyCode: TVKeys.ENTER });
+    expect(onDigit).toHaveBeenCalledTimes(1);
+    expect(onDigit).toHaveBeenCalledWith('1');
   });
 
   it('suppresses callbacks when disabled', () => {

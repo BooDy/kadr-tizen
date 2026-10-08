@@ -11,6 +11,7 @@ export interface TVCardProps {
   onSelect?: () => void;
   autoFocus?: boolean;
   order?: number;
+  className?: string;
 }
 
 export function TVCard({
@@ -24,6 +25,7 @@ export function TVCard({
   onSelect,
   autoFocus,
   order,
+  className = '',
 }: TVCardProps) {
   const { ref, isFocused } = useFocusable<HTMLDivElement>({
     id,
@@ -40,9 +42,9 @@ export function TVCard({
       tabIndex={-1}
       role="button"
       onClick={onSelect}
-      className={`relative flex flex-col rounded-2xl overflow-hidden bg-[#3B1111] border border-[rgba(245,229,229,0.08)] cursor-pointer transition-transform duration-200 ${
+      className={`relative flex flex-col rounded-2xl overflow-hidden bg-[#3B1111] border border-[rgba(245,229,229,0.08)] cursor-pointer transition-transform duration-200 shrink-0 w-56 ${
         isFocused ? 'tv-focus-ring' : 'scale-100 opacity-90'
-      }`}
+      } ${className}`}
     >
       <div className="w-56 h-80 bg-[#2A0A0A] relative overflow-hidden">
         {imageUrl ? (

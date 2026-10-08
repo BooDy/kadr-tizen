@@ -151,6 +151,7 @@ export default function App() {
       setUnlockError(undefined);
       setUnlockLockoutSecs(0);
       setFolderRefreshKey((k) => k + 1);
+      setScreenRefreshKey((k) => k + 1);
     } catch (err: any) {
       const status = err?.status;
       const msg = err?.message || 'Incorrect PIN';
@@ -198,6 +199,9 @@ export default function App() {
               serverUrl={serverUrl || ''}
               onSelectItem={handleOpenDetail}
               onPlayItem={handlePlayItem}
+              onLockedLibrary={(libraryId) => {
+                setUnlockLibraryId(libraryId);
+              }}
               onSwitchProfile={() => {
                 localStorage.removeItem('kadr_token');
                 setToken(null);

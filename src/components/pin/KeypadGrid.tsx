@@ -32,9 +32,6 @@ export function KeypadGrid({
           onClick={() => {
             if (!disabled) onDigit(d);
           }}
-          onEnter={() => {
-            if (!disabled) onDigit(d);
-          }}
         >
           {d}
         </TVButton>
@@ -49,9 +46,6 @@ export function KeypadGrid({
         className="w-16 h-16 !px-0 !py-0 text-lg font-bold rounded-2xl flex items-center justify-center text-[#F5E5E5]/80"
         disabled={disabled}
         onClick={() => {
-          if (!disabled) onClear?.();
-        }}
-        onEnter={() => {
           if (!disabled) onClear?.();
         }}
       >
@@ -69,9 +63,6 @@ export function KeypadGrid({
         onClick={() => {
           if (!disabled) onDigit('0');
         }}
-        onEnter={() => {
-          if (!disabled) onDigit('0');
-        }}
       >
         0
       </TVButton>
@@ -85,9 +76,6 @@ export function KeypadGrid({
         className="w-16 h-16 !px-0 !py-0 text-xl font-bold rounded-2xl flex items-center justify-center text-[#F5E5E5]/80"
         disabled={disabled}
         onClick={() => {
-          if (!disabled) onBackspace();
-        }}
-        onEnter={() => {
           if (!disabled) onBackspace();
         }}
       >

@@ -6,6 +6,17 @@ export interface UnlockLibraryResponse {
   expires_at?: number;
 }
 
+export interface LibrarySummary {
+  id: string;
+  name: string;
+  media_type?: string;
+  is_private: boolean;
+}
+
+export async function fetchLibraries(client: ApiClient): Promise<LibrarySummary[]> {
+  return client.fetch<LibrarySummary[]>('/api/v1/libraries');
+}
+
 export async function unlockLibrary(
   client: ApiClient,
   libraryId: string,

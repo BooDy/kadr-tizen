@@ -110,13 +110,13 @@ describe('Kadr v0.1.1-alpha API Clients & Data Contracts', () => {
       );
       const callHeaders = (global.fetch as any).mock.calls[0][1].headers as Headers;
       expect(callHeaders.get('X-Library-Unlock-Token')).toBe('unlock-token-123');
-      expect(callHeaders.get('X-Kadr-Unlocked')).toBeNull();
+      expect(callHeaders.get('X-Kadr-Unlocked')).toBe('unlock-token-123');
 
       // Verify multiple unlock tokens header injection
       client.setLibraryUnlockToken('lib-2', 'unlock-token-456');
       await client.fetch('/api/v1/test2');
       const callHeaders2 = (global.fetch as any).mock.calls[1][1].headers as Headers;
-      expect(callHeaders2.get('X-Library-Unlock-Token')).toBeNull();
+      expect(callHeaders2.get('X-Library-Unlock-Token')).toBe('unlock-token-123');
       expect(callHeaders2.get('X-Kadr-Unlocked')).toBe('unlock-token-123,unlock-token-456');
     });
   });

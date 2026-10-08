@@ -37,6 +37,7 @@ vi.mock('../src/api/folders', () => ({
 
 vi.mock('../src/api/libraries', () => ({
   unlockLibrary: vi.fn(),
+  fetchLibraries: vi.fn(),
 }));
 
 vi.mock('../src/api/events', () => ({
@@ -148,6 +149,7 @@ describe('App State Machine & Router', () => {
     vi.mocked(screensApi.fetchScreenLayout).mockResolvedValue(mockHomeLayout);
     vi.mocked(items.fetchMediaItem).mockResolvedValue(mockItemDetail);
     vi.mocked(foldersApi.fetchLibraryFolders).mockResolvedValue(mockFolderResponse);
+    vi.mocked(librariesApi.fetchLibraries).mockResolvedValue([]);
     vi.mocked(eventsApi.subscribeEvents).mockReturnValue(vi.fn());
   });
 
@@ -679,6 +681,57 @@ describe('App State Machine & Router', () => {
 
     await waitFor(() => {
       expect(mockUnsubscribe).toHaveBeenCalled();
+    });
+  });
+
+  it('unlocks private library directly from BrowseScreen sidebar via PinPadModal and refreshes screen layout', async () => {
+    localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
+    localStorage.setItem('kadr_token', 'valid-test-token');
+
+    vi.mocked(screensApi.fetchScreens).mockResolvedValue([
+      { id: 'home', title: 'Home' },
+      { id: 'lib-vault', title: 'Vault' },
+    ]);
+    vi.mocked(librariesApi.fetchLibraries).mockResolvedValue([
+      { id: 'lib-vault', name: 'Vault', media_type: 'movie', is_private: true },
+    ]);
+
+    vi.mocked(librariesApi.unlockLibrary).mockResolvedValue({
+      token: 'jwt-unlock-vault',
+      unlock_token: 'vault-unlock-token-123',
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Vault')).toBeInTheDocument();
+    });
+
+    // Click Vault button on sidebar
+    fireEvent.click(screen.getByText('Vault'));
+
+    // PinPadModal opens
+    await waitFor(() => {
+      expect(screen.getByText('Unlock Private Library')).toBeInTheDocument();
+    });
+
+    // Enter PIN: 1, 2, 3, 4
+    fireEvent.keyDown(window, { key: '1', keyCode: 49 });
+    fireEvent.keyDown(window, { key: '2', keyCode: 50 });
+    fireEvent.keyDown(window, { key: '3', keyCode: 51 });
+    fireEvent.keyDown(window, { key: '4', keyCode: 52 });
+
+    await waitFor(() => {
+      expect(librariesApi.unlockLibrary).toHaveBeenCalledWith(
+        expect.anything(),
+        'lib-vault',
+        '1234'
+      );
+    });
+
+    // PinPadModal closes
+    await waitFor(() => {
+      expect(screen.queryByText('Unlock Private Library')).not.toBeInTheDocument();
     });
   });
 });

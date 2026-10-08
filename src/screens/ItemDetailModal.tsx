@@ -336,32 +336,33 @@ export function ItemDetailModal({
               {episodes
                 .filter((ep) => ep.season === selectedSeason)
                 .map((ep, idx) => (
-                  <TVCard
-                    key={ep.id}
-                    id={`episode-card-${ep.id}`}
-                    groupId={`season-episodes-${selectedSeason}`}
-                    order={idx + 1}
-                    title={ep.title}
-                    subtitle={
-                      ep.subtitle ||
-                      `S${String(ep.season).padStart(2, '0')}E${String(ep.episode).padStart(2, '0')}`
-                    }
-                    imageUrl={formatImageUrl(ep.poster_url)}
-                    progressPercent={
-                      ep.playback_progress
-                        ? Math.round(ep.playback_progress * 100)
-                        : undefined
-                    }
-                    badge={ep.badge}
-                    onSelect={() =>
-                      onPlay(
-                        ep.id,
-                        (ep.playback_progress || 0) > 0
-                          ? Math.round(ep.playback_progress! * 100)
-                          : 0
-                      )
-                    }
-                  />
+                  <div key={ep.id} className="shrink-0 mr-5">
+                    <TVCard
+                      id={`episode-card-${ep.id}`}
+                      groupId={`season-episodes-${selectedSeason}`}
+                      order={idx + 1}
+                      title={ep.title}
+                      subtitle={
+                        ep.subtitle ||
+                        `S${String(ep.season).padStart(2, '0')}E${String(ep.episode).padStart(2, '0')}`
+                      }
+                      imageUrl={formatImageUrl(ep.poster_url)}
+                      progressPercent={
+                        ep.playback_progress
+                          ? Math.round(ep.playback_progress * 100)
+                          : undefined
+                      }
+                      badge={ep.badge}
+                      onSelect={() =>
+                        onPlay(
+                          ep.id,
+                          (ep.playback_progress || 0) > 0
+                            ? Math.round(ep.playback_progress! * 100)
+                            : 0
+                        )
+                      }
+                    />
+                  </div>
                 ))}
             </div>
           </div>

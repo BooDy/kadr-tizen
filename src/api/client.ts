@@ -19,6 +19,10 @@ export class ApiClient {
     return this.libraryUnlockTokens.get(libraryId);
   }
 
+  isLibraryUnlocked(libraryId: string): boolean {
+    return this.libraryUnlockTokens.has(libraryId);
+  }
+
   clearLibraryUnlockTokens(): void {
     this.libraryUnlockTokens.clear();
   }
@@ -34,12 +38,10 @@ export class ApiClient {
     }
     headers.set('Accept', 'application/json');
 
-    if (this.libraryUnlockTokens.size === 1) {
-      const [token] = Array.from(this.libraryUnlockTokens.values());
-      headers.set('X-Library-Unlock-Token', token);
-    } else if (this.libraryUnlockTokens.size > 1) {
+    if (this.libraryUnlockTokens.size > 0) {
       const tokens = Array.from(this.libraryUnlockTokens.values());
       headers.set('X-Kadr-Unlocked', tokens.join(','));
+      headers.set('X-Library-Unlock-Token', tokens[0]);
     }
 
     const url = `${this.baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
