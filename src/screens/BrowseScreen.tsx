@@ -286,7 +286,13 @@ export function BrowseScreen({
       >
         <div className="flex flex-col gap-4">
           <div className="h-16 flex items-center justify-center">
-            <img src="./kadr-logo.png" alt="Kadr" className="h-10 w-auto object-contain" />
+            <img
+              src="./kadr-logo.png"
+              alt="Kadr"
+              className="h-10 w-auto object-contain"
+              style={{ height: '40px', width: 'auto', maxHeight: '40px' }}
+              height="40"
+            />
           </div>
           {displayScreens.map((screenItem, index) => {
             const IconComponent = getScreenIcon(screenItem.id);

@@ -76,7 +76,13 @@ export function ServerConnectScreen({ onServerSelected }: ServerConnectScreenPro
   return (
     <div className="w-full h-full flex flex-col items-center justify-center bg-[#2A0A0A] p-16 select-none">
       <div className="flex flex-col items-center gap-2 mb-6">
-        <img src="./kadr-logo.png" alt="Kadr" className="h-20 w-auto mb-4" />
+        <img
+          src="./kadr-logo.png"
+          alt="Kadr"
+          className="h-20 w-auto mb-4 object-contain"
+          style={{ height: '80px', width: 'auto', maxHeight: '80px' }}
+          height="80"
+        />
         <h1 className="text-5xl font-black text-[#F5E5E5]">Connect to Kadr</h1>
       </div>
 
