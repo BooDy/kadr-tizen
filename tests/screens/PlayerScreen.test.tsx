@@ -107,7 +107,7 @@ describe('PlayerScreen', () => {
   });
 
   it('handles driver onError callback by updating playerState to error', () => {
-    const { getByText } = render(
+    const { getByText, getAllByText } = render(
       <PlayerScreen
         itemId="item-123"
         title="Sample Movie"
@@ -121,7 +121,9 @@ describe('PlayerScreen', () => {
       mockDriver.errorCallback?.('Connection timed out');
     });
 
-    expect(getByText(/error/i)).toBeInTheDocument();
+    expect(getAllByText(/error/i).length).toBeGreaterThan(0);
+    expect(getByText('Playback Error')).toBeInTheDocument();
+    expect(getByText(/Connection timed out/)).toBeInTheDocument();
   });
 
   it('updates timecodes and progress bar when time updates', () => {

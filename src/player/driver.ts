@@ -1,6 +1,7 @@
 export type PlayerState = 'idle' | 'buffering' | 'playing' | 'paused' | 'ended' | 'error';
 
 export interface PlayerDriver {
+  readonly name?: string;
   init(container: HTMLElement, streamUrl: string, startMs: number): Promise<void>;
   play(): void;
   pause(): void;

@@ -478,19 +478,19 @@ describe('BrowseScreen', () => {
 
     // Initially, Hero Play button has focus, so sidebar is collapsed
     expect(sidebar.classList.contains('w-28')).toBe(true);
-    expect(sidebar.classList.contains('w-80')).toBe(false);
+    expect(sidebar.classList.contains('w-96')).toBe(false);
 
     // Press ArrowLeft from leftmost content element (hero play button) to bridge to sidebar
     fireEvent.keyDown(window, { key: 'ArrowLeft', keyCode: TVKeys.LEFT });
 
     // Focus transitioned to nav-screen-home; sidebar should now be expanded
-    expect(sidebar.classList.contains('w-80')).toBe(true);
+    expect(sidebar.classList.contains('w-96')).toBe(true);
     expect(sidebar.classList.contains('w-28')).toBe(false);
 
-    // Label for Home button should be 'inline' and large text-2xl
+    // Label for Home button should be 'inline' and large text-3xl
     const homeLabel = screen.getByText('Home');
     expect(homeLabel.className).toContain('inline');
-    expect(homeLabel.className).toContain('text-2xl');
+    expect(homeLabel.className).toContain('text-3xl');
     expect(homeLabel.className).not.toContain('hidden');
 
     // Press ArrowRight to return to content
@@ -498,7 +498,7 @@ describe('BrowseScreen', () => {
 
     // Sidebar should collapse back to w-28
     expect(sidebar.classList.contains('w-28')).toBe(true);
-    expect(sidebar.classList.contains('w-80')).toBe(false);
+    expect(sidebar.classList.contains('w-96')).toBe(false);
   });
 
   it('transitions focus between content and sidebar via ArrowLeft and ArrowRight', async () => {
@@ -518,10 +518,8 @@ describe('BrowseScreen', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Home Featured Movie')).toBeInTheDocument();
+      expect(document.activeElement?.id).toBe('hero-play-hero-home');
     });
-
-    // Content hero play button has active focus
-    expect(document.activeElement?.id).toBe('hero-play-hero-home');
 
     // Press ArrowLeft -> transitions to nav-screen-home
     fireEvent.keyDown(window, { key: 'ArrowLeft', keyCode: TVKeys.LEFT });
@@ -549,9 +547,8 @@ describe('BrowseScreen', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Home Featured Movie')).toBeInTheDocument();
+      expect(document.activeElement?.id).toBe('hero-play-hero-home');
     });
-
-    expect(document.activeElement?.id).toBe('hero-play-hero-home');
 
     // Press TV Back (10009)
     fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN });

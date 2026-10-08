@@ -9,6 +9,14 @@ import { PlaybackSessionManager } from '../player/session';
 import { TVKeys } from '../navigation/keys';
 import { FocusContext } from '../navigation/FocusContext';
 import { PlayerOSD } from '../components/osd/PlayerOSD';
+import { TVButton } from '../components/tv/TVButton';
+import { AlertTriangle, RotateCcw, MonitorPlay, ArrowLeft } from 'lucide-react';
+
+export interface PlaybackErrorInfo {
+  message: string;
+  streamUrl: string;
+  driverName: string;
+}
 
 export interface PlayerScreenProps {
   itemId: number | string;
@@ -40,6 +48,12 @@ export function PlayerScreen({
   const [showOSD, setShowOSD] = useState(true);
   const [subtitles, setSubtitles] = useState<SubtitleTrack[]>([]);
   const [selectedSubtitleId, setSelectedSubtitleId] = useState<number | null>(null);
+  const [playbackError, setPlaybackError] = useState<PlaybackErrorInfo | null>(null);
+  const [forceHtml5, setForceHtml5] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const playbackErrorRef = useRef(playbackError);
+  playbackErrorRef.current = playbackError;
 
   const focusCtx = useContext(FocusContext);
   const focusCtxRef = useRef(focusCtx);
@@ -60,6 +74,29 @@ export function PlayerScreen({
 
   const sessionManager = useMemo(() => new PlaybackSessionManager(apiClient), [apiClient]);
   const hasActiveSessionRef = useRef(false);
+
+  const handleRetry = useCallback(() => {
+    setPlaybackError(null);
+    setPlayerState('buffering');
+    setReloadKey((k) => k + 1);
+  }, []);
+
+  const handleSwitchToHtml5 = useCallback(() => {
+    setForceHtml5(true);
+    setPlaybackError(null);
+    setPlayerState('buffering');
+    setReloadKey((k) => k + 1);
+  }, []);
+
+  useEffect(() => {
+    if (playbackError && focusCtxRef.current) {
+      focusCtxRef.current.pushTrap('player-error-modal');
+      focusCtxRef.current.setFocusedId('player-error-retry-btn');
+      return () => {
+        focusCtxRef.current?.popTrap();
+      };
+    }
+  }, [playbackError]);
 
   const positionMsRef = useRef(positionMs);
   positionMsRef.current = positionMs;
@@ -162,7 +199,7 @@ export function PlayerScreen({
     }
     const queryString = queryParams.toString() ? `?${queryParams.toString()}` : '';
     const streamUrl = `${cleanServerUrl}/api/v1/stream/${itemId}${queryString}`;
-    const driver = createPlayerDriver();
+    const driver = createPlayerDriver(forceHtml5);
     driverRef.current = driver;
 
     driver.onTimeUpdate((pos, dur) => {
@@ -181,9 +218,24 @@ export function PlayerScreen({
       console.error('[PlayerScreen] Playback error:', err);
       setPlayerState('error');
       playerStateRef.current = 'error';
+      setPlaybackError({
+        message: err || 'Playback failed',
+        streamUrl,
+        driverName: driver.name || (forceHtml5 ? 'HTML5 Video' : 'Tizen AVPlay'),
+      });
     });
 
-    driver.init(containerRef.current, streamUrl, initialResume);
+    driver.init(containerRef.current, streamUrl, initialResume).catch((err) => {
+      console.error('[PlayerScreen] Driver init failed:', err);
+      setPlayerState('error');
+      playerStateRef.current = 'error';
+      setPlaybackError({
+        message: err?.message || String(err),
+        streamUrl,
+        driverName: driver.name || (forceHtml5 ? 'HTML5 Video' : 'Tizen AVPlay'),
+      });
+    });
+
     if (activeSubtitleUrlRef.current) {
       driver.setSubtitleTrack(activeSubtitleUrlRef.current);
     }
@@ -236,11 +288,25 @@ export function PlayerScreen({
       }
       driver.destroy();
     };
-  }, [itemId, serverUrl, token, initialResume, sessionManager]);
+  }, [itemId, serverUrl, token, initialResume, sessionManager, reloadKey, forceHtml5]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const code = e.keyCode || e.which;
+
+      if (playbackErrorRef.current) {
+        if (
+          code === TVKeys.BACK_TIZEN ||
+          code === TVKeys.BACK_WEB ||
+          code === TVKeys.BACKSPACE ||
+          e.key === 'Escape'
+        ) {
+          e.preventDefault();
+          onExit();
+        }
+        return;
+      }
+
       resetOsdTimer();
 
       if (
@@ -305,12 +371,128 @@ export function PlayerScreen({
         playerState={playerState}
         positionMs={positionMs}
         durationMs={durationMs}
-        visible={showOSD}
+        visible={showOSD && !playbackError}
         subtitles={subtitles}
         selectedSubtitleId={selectedSubtitleId}
         onSelectSubtitle={setSelectedSubtitleId}
         onPopupOpenChange={setIsSubtitlePopupOpen}
       />
+
+      {playbackError && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Playback Error"
+          className="fixed inset-0 z-50 bg-[#2A0A0A]/95 backdrop-blur-md flex items-center justify-center p-12 select-none"
+        >
+          <div className="bg-[#3B1111] border-2 border-[#D43F15]/50 rounded-3xl p-10 max-w-4xl w-full shadow-2xl flex flex-col">
+            <div className="flex items-center gap-4 mb-4">
+              <div className="w-14 h-14 rounded-2xl bg-[#D43F15]/20 border border-[#D43F15]/30 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-8 h-8 text-[#D43F15]" />
+              </div>
+              <div>
+                <h2 className="text-3xl font-extrabold text-[#F5E5E5] tracking-tight">Playback Error</h2>
+                <p className="text-base text-[#F5E5E5]/70">Could not stream media "{title}"</p>
+              </div>
+            </div>
+
+            <div className="bg-[#2A0A0A] p-5 rounded-2xl border border-[rgba(245,229,229,0.08)] mb-8 font-mono text-sm space-y-2 text-[#F5E5E5]/90">
+              <div>
+                <span className="text-[#FFB800] font-bold">Error:</span> {playbackError.message}
+              </div>
+              <div className="truncate">
+                <span className="text-[#FFB800] font-bold">Stream URL:</span> {playbackError.streamUrl}
+              </div>
+              <div className="flex items-center gap-6">
+                <div>
+                  <span className="text-[#FFB800] font-bold">Player Engine:</span> {playbackError.driverName}
+                </div>
+                <div>
+                  <span className="text-[#FFB800] font-bold">Auth Token:</span> {token ? 'Present' : 'None'}
+                </div>
+                <div>
+                  <span className="text-[#FFB800] font-bold">Item ID:</span> {itemId}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-4">
+              {focusCtx ? (
+                <TVButton
+                  id="player-error-retry-btn"
+                  groupId="player-error"
+                  order={1}
+                  variant="primary"
+                  autoFocus
+                  onClick={handleRetry}
+                  onEnter={handleRetry}
+                  className="px-6 py-4 text-lg font-bold"
+                >
+                  <RotateCcw className="w-6 h-6 mr-2" /> Retry Playback
+                </TVButton>
+              ) : (
+                <button
+                  id="player-error-retry-btn"
+                  type="button"
+                  autoFocus
+                  onClick={handleRetry}
+                  className="px-6 py-4 rounded-xl font-bold text-lg flex items-center justify-center cursor-pointer select-none bg-[#FF6B00] text-white"
+                >
+                  <RotateCcw className="w-6 h-6 mr-2" /> Retry Playback
+                </button>
+              )}
+
+              {playbackError.driverName.includes('AVPlay') && (
+                focusCtx ? (
+                  <TVButton
+                    id="player-error-html5-btn"
+                    groupId="player-error"
+                    order={2}
+                    variant="secondary"
+                    onClick={handleSwitchToHtml5}
+                    onEnter={handleSwitchToHtml5}
+                    className="px-6 py-4 text-lg font-bold"
+                  >
+                    <MonitorPlay className="w-6 h-6 mr-2" /> Try HTML5 Video Player
+                  </TVButton>
+                ) : (
+                  <button
+                    id="player-error-html5-btn"
+                    type="button"
+                    onClick={handleSwitchToHtml5}
+                    className="px-6 py-4 rounded-xl font-bold text-lg flex items-center justify-center cursor-pointer select-none bg-[#3B1111] text-[#F5E5E5] border border-[rgba(245,229,229,0.08)]"
+                  >
+                    <MonitorPlay className="w-6 h-6 mr-2" /> Try HTML5 Video Player
+                  </button>
+                )
+              )}
+
+              {focusCtx ? (
+                <TVButton
+                  id="player-error-exit-btn"
+                  groupId="player-error"
+                  order={3}
+                  variant="secondary"
+                  onClick={onExit}
+                  onEnter={onExit}
+                  className="px-6 py-4 text-lg font-bold ml-auto"
+                >
+                  <ArrowLeft className="w-6 h-6 mr-2" /> Exit to Browse
+                </TVButton>
+              ) : (
+                <button
+                  id="player-error-exit-btn"
+                  type="button"
+                  onClick={onExit}
+                  className="px-6 py-4 rounded-xl font-bold text-lg flex items-center justify-center cursor-pointer select-none bg-[#3B1111] text-[#F5E5E5] border border-[rgba(245,229,229,0.08)] ml-auto"
+                >
+                  <ArrowLeft className="w-6 h-6 mr-2" /> Exit to Browse
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

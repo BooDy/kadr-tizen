@@ -171,7 +171,7 @@ export function ItemDetailModal({
       role="dialog"
       aria-modal="true"
       aria-label={item.title}
-      className="fixed inset-0 bg-[#2A0A0A]/85 backdrop-blur-xl flex items-center justify-center z-[60] p-16"
+      className="fixed inset-0 bg-[#2A0A0A]/90 backdrop-blur-xl flex items-center justify-center z-[60] p-6 select-none"
     >
       {backdrop && (
         <img
@@ -180,16 +180,26 @@ export function ItemDetailModal({
           className="absolute inset-0 w-full h-full object-cover opacity-25"
         />
       )}
-      <div className="relative w-full max-w-6xl max-h-[90vh] flex flex-col bg-[#3B1111] border border-[rgba(245,229,229,0.08)] rounded-3xl p-10 shadow-2xl overflow-y-auto">
-        <div className="flex">
+      <div
+        className={`relative ${
+          isShow && seasons.length > 0 ? 'w-[1400px] max-w-[94vw] max-h-[960px] p-8' : 'w-[1240px] max-w-[90vw] max-h-[920px] p-10'
+        } flex flex-col bg-[#3B1111] border border-[rgba(245,229,229,0.08)] rounded-3xl shadow-2xl overflow-y-auto scrollbar-none`}
+      >
+        <div className="flex flex-row items-start w-full">
           {poster && (
             <img
               src={poster}
               alt={item.title}
-              className="w-72 h-[420px] object-cover rounded-2xl shadow-xl border border-[rgba(245,229,229,0.08)] shrink-0 mr-10"
+              className={`${
+                isShow && seasons.length > 0 ? 'w-52 h-[290px]' : 'w-72 h-[420px]'
+              } object-cover rounded-2xl shadow-xl border border-[rgba(245,229,229,0.08)] shrink-0 mr-10`}
             />
           )}
-          <div className="flex flex-col justify-between flex-1 min-h-[420px]">
+          <div
+            className={`flex flex-col justify-between flex-1 min-w-0 ${
+              isShow && seasons.length > 0 ? 'h-[290px]' : 'h-[420px]'
+            }`}
+          >
             <div>
               <div className="flex items-center mb-2 text-[#F5E5E5]/70 font-semibold text-lg">
                 {item.release_year && <span className="mr-3">{item.release_year}</span>}
@@ -200,15 +210,25 @@ export function ItemDetailModal({
                   </span>
                 )}
               </div>
-              <h2 className="text-5xl font-black text-[#F5E5E5] mb-4 leading-tight">{item.title}</h2>
+              <h2
+                className={`${
+                  isShow && seasons.length > 0 ? 'text-4xl font-extrabold mb-2' : 'text-5xl font-black mb-4'
+                } text-[#F5E5E5] leading-tight truncate`}
+              >
+                {item.title}
+              </h2>
               {item.overview && (
-                <p className="text-[#F5E5E5]/80 text-lg leading-relaxed max-w-2xl line-clamp-4">
+                <p
+                  className={`text-[#F5E5E5]/80 ${
+                    isShow && seasons.length > 0 ? 'text-base line-clamp-3 mb-2 max-w-3xl' : 'text-lg line-clamp-4 max-w-2xl'
+                  } leading-relaxed`}
+                >
                   {item.overview}
                 </p>
               )}
             </div>
 
-            <div className="flex mt-6 flex-wrap">
+            <div className="flex mt-auto flex-row items-center flex-wrap gap-3">
               {isShow && nextEpisode ? (
                 isEpisodeResume ? (
                   <TVButton
@@ -321,8 +341,8 @@ export function ItemDetailModal({
         </div>
 
         {seasons.length > 0 && (
-          <div className="flex flex-col mt-8 pt-6 border-t border-[rgba(245,229,229,0.08)]">
-            <div className="flex items-center overflow-x-auto pb-2 mb-4 scrollbar-none">
+          <div className="flex flex-col mt-6 pt-5 border-t border-[rgba(245,229,229,0.08)]">
+            <div className="flex items-center overflow-x-auto pb-2 mb-3 scrollbar-none">
               {seasons.map((season, idx) => (
                 <TVButton
                   key={season}

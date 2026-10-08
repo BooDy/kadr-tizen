@@ -84,7 +84,7 @@ describe('Html5PlayerDriver', () => {
     driver.onError(errorSpy);
 
     video.dispatchEvent(new Event('error'));
-    expect(errorSpy).toHaveBeenCalledWith('HTML5 Video Error');
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('HTML5 Video Error'));
   });
 
   it('supports play, pause, and seekTo', async () => {
@@ -270,7 +270,7 @@ describe('TizenAvplayDriver', () => {
 
     prepareErrorCb?.(new Error('Prepare failed'));
 
-    expect(errorSpy).toHaveBeenCalledWith('AVPlay Prepare Error');
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('AVPlay Prepare Error'));
   });
 
   it('handles play, pause, seekTo, and destroy', () => {

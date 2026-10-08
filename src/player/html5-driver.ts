@@ -1,6 +1,7 @@
 import { PlayerDriver, PlayerState } from './driver';
 
 export class Html5PlayerDriver implements PlayerDriver {
+  readonly name = 'HTML5 Video';
   private video: HTMLVideoElement | null = null;
   private timeCallback?: (posMs: number, durationMs: number) => void;
   private stateCallback?: (state: PlayerState) => void;
@@ -22,7 +23,30 @@ export class Html5PlayerDriver implements PlayerDriver {
     this.video.addEventListener('pause', () => this.stateCallback?.('paused'));
     this.video.addEventListener('waiting', () => this.stateCallback?.('buffering'));
     this.video.addEventListener('ended', () => this.stateCallback?.('ended'));
-    this.video.addEventListener('error', () => this.errorCallback?.('HTML5 Video Error'));
+    this.video.addEventListener('error', () => {
+      const err = this.video?.error;
+      let codeStr = 'Unknown';
+      if (err) {
+        switch (err.code) {
+          case 1:
+            codeStr = 'MEDIA_ERR_ABORTED (1)';
+            break;
+          case 2:
+            codeStr = 'MEDIA_ERR_NETWORK (2)';
+            break;
+          case 3:
+            codeStr = 'MEDIA_ERR_DECODE (3)';
+            break;
+          case 4:
+            codeStr = 'MEDIA_ERR_SRC_NOT_SUPPORTED (4)';
+            break;
+          default:
+            codeStr = `Code ${err.code}`;
+            break;
+        }
+      }
+      this.errorCallback?.(`HTML5 Video Error: ${codeStr}${err?.message ? ` - ${err.message}` : ''}`);
+    });
 
     container.appendChild(this.video);
 
