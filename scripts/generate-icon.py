@@ -4,6 +4,7 @@ Generate Samsung Smart TV Launcher Icon and copy Kadr brand assets.
 """
 
 import os
+import sys
 import shutil
 from pathlib import Path
 from PIL import Image
@@ -23,18 +24,33 @@ def main():
     PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
     SRC_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 
-    src = SOURCE_LOGO
-    if not src.exists():
-        if PUBLIC_LOGO.exists():
-            src = PUBLIC_LOGO
+    custom_path = None
+    if len(sys.argv) > 1 and sys.argv[1].strip():
+        custom_path = Path(sys.argv[1].strip())
+    elif os.environ.get("KADR_LOGO_PATH"):
+        custom_path = Path(os.environ["KADR_LOGO_PATH"].strip())
+
+    if custom_path is not None:
+        if custom_path.exists():
+            src = custom_path
         else:
-            raise FileNotFoundError(f"Source logo not found at {SOURCE_LOGO} or {PUBLIC_LOGO}")
+            raise FileNotFoundError(f"Specified logo not found at {custom_path}")
+    elif SOURCE_LOGO.exists():
+        src = SOURCE_LOGO
+    elif PUBLIC_LOGO.exists():
+        src = PUBLIC_LOGO
+    else:
+        raise FileNotFoundError(
+            f"Source logo not found. Checked CLI arg, KADR_LOGO_PATH, {SOURCE_LOGO}, and {PUBLIC_LOGO}"
+        )
 
     # Copy official logo
-    print(f"Copying logo from {src} to {PUBLIC_LOGO}")
-    shutil.copyfile(src, PUBLIC_LOGO)
-    print(f"Copying logo from {src} to {SRC_LOGO}")
-    shutil.copyfile(src, SRC_LOGO)
+    if src.resolve() != PUBLIC_LOGO.resolve():
+        print(f"Copying logo from {src} to {PUBLIC_LOGO}")
+        shutil.copyfile(src, PUBLIC_LOGO)
+    if src.resolve() != SRC_LOGO.resolve():
+        print(f"Copying logo from {src} to {SRC_LOGO}")
+        shutil.copyfile(src, SRC_LOGO)
 
     # Generate 512x512 TV launcher icon with #2A0A0A background and safe padding
     icon_size = (512, 512)
