@@ -46,7 +46,7 @@ export function KeypadGrid({
         groupId={groupId}
         order={10}
         variant="secondary"
-        className="w-16 h-16 !px-0 !py-0 text-lg font-bold rounded-2xl flex items-center justify-center text-zinc-400"
+        className="w-16 h-16 !px-0 !py-0 text-lg font-bold rounded-2xl flex items-center justify-center text-[#F5E5E5]/80"
         disabled={disabled}
         onClick={() => {
           if (!disabled) onClear?.();
@@ -82,7 +82,7 @@ export function KeypadGrid({
         groupId={groupId}
         order={12}
         variant="secondary"
-        className="w-16 h-16 !px-0 !py-0 text-xl font-bold rounded-2xl flex items-center justify-center text-zinc-400"
+        className="w-16 h-16 !px-0 !py-0 text-xl font-bold rounded-2xl flex items-center justify-center text-[#F5E5E5]/80"
         disabled={disabled}
         onClick={() => {
           if (!disabled) onBackspace();

@@ -608,7 +608,9 @@ describe('BrowseScreen', () => {
 
     // Press ArrowRight to enter movie catalog
     fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
-    expect(document.activeElement?.id).toBe('grid-grid-movies-10');
+    await waitFor(() => {
+      expect(document.activeElement?.id).toBe('grid-grid-movies-10');
+    });
   });
 
   it('automatically focuses first card in first widget when layout has no hero spotlight', async () => {

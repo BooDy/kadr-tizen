@@ -263,11 +263,11 @@ export function FolderBrowserModal({
 
         {!loading && isLocked && (
           <div className="flex flex-col items-center justify-center h-64 text-center gap-4">
-            <div className="w-16 h-16 rounded-full bg-rose-500/10 flex items-center justify-center text-rose-500 mb-2">
+            <div className="w-16 h-16 rounded-full bg-[#D43F15]/10 flex items-center justify-center text-[#D43F15] mb-2">
               <Lock className="w-8 h-8" />
             </div>
-            <div className="text-2xl font-bold text-white">This library is locked</div>
-            <p className="text-zinc-400 max-w-md">
+            <div className="text-2xl font-bold text-[#F5E5E5]">This library is locked</div>
+            <p className="text-[#5C3C3C] max-w-md">
               A PIN or unlock token is required to browse contents of this library.
             </p>
             <TVButton
@@ -285,13 +285,13 @@ export function FolderBrowserModal({
 
         {!loading && !isLocked && error && (
           <div className="flex flex-col items-center justify-center h-64 text-center gap-3">
-            <div className="text-xl font-bold text-rose-400">Failed to load folder</div>
-            <p className="text-zinc-400">{error}</p>
+            <div className="text-xl font-bold text-[#D43F15]">Failed to load folder</div>
+            <p className="text-[#5C3C3C]">{error}</p>
           </div>
         )}
 
         {!loading && !isLocked && isEmpty && (
-          <div className="flex flex-col items-center justify-center h-64 text-zinc-500 text-xl font-medium">
+          <div className="flex flex-col items-center justify-center h-64 text-[#5C3C3C] text-xl font-medium">
             This folder is empty
           </div>
         )}
@@ -329,7 +329,7 @@ export function FolderBrowserModal({
             {/* Media Items Section */}
             {folderData.items && folderData.items.length > 0 && (
               <div className="space-y-4">
-                <h3 className="text-2xl font-bold text-zinc-200">Media Items</h3>
+                <h3 className="text-2xl font-bold text-[#F5E5E5]">Media Items</h3>
                 <div className="grid grid-cols-6 gap-6">
                   {folderData.items.map((item) => (
                     <TVCard
@@ -359,7 +359,7 @@ export function FolderBrowserModal({
             {folderData.images && folderData.images.length > 0 && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-2xl font-bold text-zinc-200">
+                  <h3 className="text-2xl font-bold text-[#F5E5E5]">
                     Photos ({folderData.images.length})
                   </h3>
                   <TVButton
