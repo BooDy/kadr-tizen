@@ -7,11 +7,13 @@ import { useFocusable } from '../navigation/useFocusable';
 import { TVButton } from '../components/tv/TVButton';
 import { TVCard } from '../components/tv/TVCard';
 import { TVKeys } from '../navigation/keys';
-import { Folder, Play, X, Loader2, Lock } from 'lucide-react';
+import { Folder, Play, X, Loader2, Lock, ImageIcon } from 'lucide-react';
+import { getAuthenticatedImageUrl } from '../utils/imageUrl';
 
 export interface FolderBrowserModalProps {
   client: ApiClient;
   serverUrl: string;
+  token?: string;
   libraryId: string;
   initialPath?: string;
   onClose: () => void;
@@ -45,6 +47,8 @@ interface FolderImageCardProps {
   image: FolderImage;
   index: number;
   serverUrl: string;
+  token?: string;
+  client?: ApiClient;
   onSelect: (index: number) => void;
 }
 
@@ -53,8 +57,14 @@ function FolderImageCard({
   image,
   index,
   serverUrl,
+  token,
+  client,
   onSelect,
 }: FolderImageCardProps) {
+  const [hasError, setHasError] = useState(false);
+  const unlockTokens = client?.getUnlockTokens ? client.getUnlockTokens() : [];
+  const imageUrl = getAuthenticatedImageUrl(serverUrl, image.url || image.path, token, unlockTokens);
+
   const { ref, isFocused } = useFocusable<HTMLDivElement>({
     id,
     groupId: 'folder-browser-modal',
@@ -73,14 +83,15 @@ function FolderImageCard({
       }`}
     >
       <div className="w-full h-36 bg-[#2A0A0A] relative overflow-hidden flex items-center justify-center">
-        {image.url ? (
+        {hasError || !imageUrl ? (
+          <ImageIcon className="w-10 h-10 text-[#5C3C3C]" data-testid="image-fallback-icon" />
+        ) : (
           <img
-            src={formatImageUrl(serverUrl, image.url)}
+            src={imageUrl}
             alt={image.name}
+            onError={() => setHasError(true)}
             className="w-full h-full object-cover"
           />
-        ) : (
-          <span className="text-[#5C3C3C] font-bold text-2xl">{image.name.slice(0, 1)}</span>
         )}
       </div>
       <div className="p-3">
@@ -96,6 +107,7 @@ function FolderImageCard({
 export function FolderBrowserModal({
   client,
   serverUrl,
+  token,
   libraryId,
   initialPath = '',
   onClose,
@@ -382,6 +394,8 @@ export function FolderBrowserModal({
                       image={img}
                       index={idx}
                       serverUrl={serverUrl}
+                      token={token}
+                      client={client}
                       onSelect={() => onSelectImage(folderData.images, idx)}
                     />
                   ))}

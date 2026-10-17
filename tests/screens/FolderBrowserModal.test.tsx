@@ -573,4 +573,81 @@ describe('FolderBrowserModal', () => {
 
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it('renders image cards with authenticated URLs appending token and unlock tokens', async () => {
+    const client = new ApiClient('http://localhost:8492');
+    client.setLibraryUnlockToken('lib-photos-1', 'secret-unlock-token');
+    const mockFolderWithPhotos = {
+      library_name: 'Family Photos',
+      parent_path: '',
+      breadcrumbs: [{ name: 'Root', path: '' }],
+      directories: [],
+      items: [],
+      images: [
+        { name: 'vacation.jpg', path: 'vacation.jpg', url: '/api/v1/libraries/lib-photos-1/image?path=vacation.jpg', size_bytes: 2048576 }
+      ],
+    };
+    vi.spyOn(foldersApi, 'fetchLibraryFolders').mockResolvedValue(mockFolderWithPhotos as any);
+
+    render(
+      <FocusProvider>
+        <FolderBrowserModal
+          client={client}
+          serverUrl="http://localhost:8492"
+          token="jwt-token-xyz"
+          libraryId="lib-photos-1"
+          isOpen={true}
+          onClose={vi.fn()}
+          onSelectItem={vi.fn()}
+          onSelectImage={vi.fn()}
+          onStartSlideshow={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      const img = screen.getByAltText('vacation.jpg');
+      expect(img).toBeInTheDocument();
+      expect(img.getAttribute('src')).toContain('token=jwt-token-xyz');
+      expect(img.getAttribute('src')).toContain('unlocked=secret-unlock-token');
+    });
+  });
+
+  it('renders fallback icon when image thumbnail encounters an error', async () => {
+    const client = new ApiClient('http://localhost:8492');
+    const mockFolderWithPhotos = {
+      library_name: 'Family Photos',
+      parent_path: '',
+      breadcrumbs: [{ name: 'Root', path: '' }],
+      directories: [],
+      items: [],
+      images: [
+        { name: 'broken.jpg', path: 'broken.jpg', url: '/api/v1/libraries/lib-photos-1/image?path=broken.jpg', size_bytes: 1024 }
+      ],
+    };
+    vi.spyOn(foldersApi, 'fetchLibraryFolders').mockResolvedValue(mockFolderWithPhotos as any);
+
+    render(
+      <FocusProvider>
+        <FolderBrowserModal
+          client={client}
+          serverUrl="http://localhost:8492"
+          libraryId="lib-photos-1"
+          isOpen={true}
+          onClose={vi.fn()}
+          onSelectItem={vi.fn()}
+          onSelectImage={vi.fn()}
+          onStartSlideshow={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      const img = screen.getByAltText('broken.jpg');
+      fireEvent.error(img);
+    });
+
+    expect(screen.getByTestId('image-fallback-icon')).toBeInTheDocument();
+  });
 });
+
