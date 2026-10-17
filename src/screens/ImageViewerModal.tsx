@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { FolderImage } from '../types/kadr';
 import { useFocusContext } from '../navigation/FocusContext';
 import { TVKeys } from '../navigation/keys';
-import { Play, Pause, X } from 'lucide-react';
+import { Play, Pause, X, ImageIcon } from 'lucide-react';
 import { getAuthenticatedImageUrl } from '../utils/imageUrl';
 import { ApiClient } from '../api/client';
 
@@ -25,6 +25,66 @@ function formatBytes(bytes?: number): string {
   return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
 }
 
+interface FilmstripThumbnailProps {
+  image: FolderImage;
+  index: number;
+  serverUrl: string;
+  token?: string;
+  unlockTokens: string[];
+  isActive: boolean;
+  isFilmstripFocused: boolean;
+  onSelect: (index: number) => void;
+  refCallback: (el: HTMLButtonElement | null) => void;
+}
+
+function FilmstripThumbnail({
+  image,
+  index,
+  serverUrl,
+  token,
+  unlockTokens,
+  isActive,
+  isFilmstripFocused,
+  onSelect,
+  refCallback,
+}: FilmstripThumbnailProps) {
+  const [hasError, setHasError] = useState(false);
+  const thumbUrl = getAuthenticatedImageUrl(
+    serverUrl,
+    image.url || image.path,
+    token,
+    unlockTokens
+  );
+
+  useEffect(() => {
+    setHasError(false);
+  }, [thumbUrl]);
+
+  return (
+    <button
+      ref={refCallback}
+      data-testid={`filmstrip-thumb-${index}`}
+      tabIndex={isFilmstripFocused && isActive ? 0 : -1}
+      onClick={() => onSelect(index)}
+      className={`w-24 h-16 rounded-lg overflow-hidden border-2 flex-shrink-0 flex items-center justify-center bg-[#2A0A0A] transition-all duration-200 cursor-pointer ${
+        isActive ? 'border-[#FF6B00]' : 'border-transparent opacity-60'
+      }`}
+    >
+      {hasError || !thumbUrl ? (
+        <ImageIcon className="w-6 h-6 text-[#5C3C3C]" data-testid="filmstrip-fallback-icon" />
+      ) : (
+        <img
+          src={thumbUrl}
+          alt=""
+          aria-hidden="true"
+          onError={() => setHasError(true)}
+          className="w-full h-full object-cover"
+        />
+      )}
+    </button>
+  );
+}
+
 export function ImageViewerModal({
   images,
   initialIndex = 0,
@@ -41,6 +101,7 @@ export function ImageViewerModal({
   const [isPlaying, setIsPlaying] = useState<boolean>(autoPlay);
   const [showControls, setShowControls] = useState<boolean>(true);
   const [isFilmstripFocused, setIsFilmstripFocused] = useState<boolean>(false);
+  const [hasMainError, setHasMainError] = useState<boolean>(false);
 
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const filmstripRef = useRef<HTMLDivElement>(null);
@@ -59,6 +120,20 @@ export function ImageViewerModal({
 
   const unlockTokens = client?.getUnlockTokens ? client.getUnlockTokens() : [];
 
+  const currentImage = images && images.length > 0 ? images[currentIndex] : undefined;
+  const imageUrl = currentImage
+    ? getAuthenticatedImageUrl(
+        serverUrl,
+        currentImage.url || currentImage.path,
+        token,
+        unlockTokens
+      )
+    : undefined;
+
+  useEffect(() => {
+    setHasMainError(false);
+  }, [currentIndex, imageUrl]);
+
   // Focus trap lifecycle
   useEffect(() => {
     pushTrap('image-viewer-modal');
@@ -72,11 +147,26 @@ export function ImageViewerModal({
     setShowControls(true);
     if (controlsTimeoutRef.current) {
       clearTimeout(controlsTimeoutRef.current);
+      controlsTimeoutRef.current = null;
+    }
+    if (isFilmstripFocusedRef.current) {
+      return;
     }
     controlsTimeoutRef.current = setTimeout(() => {
       setShowControls(false);
     }, 3000);
   }, []);
+
+  // Ensure controls remain visible while filmstrip is focused
+  useEffect(() => {
+    if (isFilmstripFocused) {
+      setShowControls(true);
+      if (controlsTimeoutRef.current) {
+        clearTimeout(controlsTimeoutRef.current);
+        controlsTimeoutRef.current = null;
+      }
+    }
+  }, [isFilmstripFocused]);
 
   useEffect(() => {
     resetControlsTimer();
@@ -154,6 +244,7 @@ export function ImageViewerModal({
         if (!isFilmstripFocusedRef.current && count > 1) {
           isFilmstripFocusedRef.current = true;
           setIsFilmstripFocused(true);
+          resetControlsTimer();
           thumbnailRefs.current[currentIndexRef.current]?.focus();
         }
       } else if (code === TVKeys.UP || e.key === 'ArrowUp') {
@@ -163,14 +254,22 @@ export function ImageViewerModal({
           isFilmstripFocusedRef.current = false;
           setIsFilmstripFocused(false);
           (document.activeElement as HTMLElement)?.blur();
+          resetControlsTimer();
         }
-      } else if (code === TVKeys.ENTER || e.key === 'Enter') {
+      } else if (
+        code === TVKeys.ENTER ||
+        e.key === 'Enter' ||
+        code === 32 ||
+        e.key === ' ' ||
+        e.key === 'Spacebar'
+      ) {
         e.preventDefault();
         e.stopImmediatePropagation();
         if (isFilmstripFocusedRef.current) {
           isFilmstripFocusedRef.current = false;
           setIsFilmstripFocused(false);
           (document.activeElement as HTMLElement)?.blur();
+          resetControlsTimer();
         } else {
           setIsPlaying((prev) => !prev);
         }
@@ -198,6 +297,7 @@ export function ImageViewerModal({
           isFilmstripFocusedRef.current = false;
           setIsFilmstripFocused(false);
           (document.activeElement as HTMLElement)?.blur();
+          resetControlsTimer();
         } else {
           onClose();
         }
@@ -214,22 +314,23 @@ export function ImageViewerModal({
     return null;
   }
 
-  const currentImage = images[currentIndex];
-  const imageUrl = getAuthenticatedImageUrl(
-    serverUrl,
-    currentImage?.url || currentImage?.path,
-    token,
-    unlockTokens
-  );
-
   return (
     <div className="fixed inset-0 z-[70] bg-black flex items-center justify-center select-none overflow-hidden">
-      {/* Centered Image */}
-      {imageUrl && (
+      {/* Centered Image / Error Fallback */}
+      {hasMainError || !imageUrl ? (
+        <div
+          data-testid="viewer-image-fallback"
+          className="flex flex-col items-center justify-center text-[#5C3C3C] gap-4"
+        >
+          <ImageIcon className="w-24 h-24 stroke-1 text-[#5C3C3C]" />
+          <span className="text-lg font-medium text-[#5C3C3C]">Unable to load image</span>
+        </div>
+      ) : (
         <img
           key={currentImage?.path || currentIndex}
           src={imageUrl}
           alt={currentImage?.name || `Image ${currentIndex + 1}`}
+          onError={() => setHasMainError(true)}
           className="max-w-full max-h-full object-contain transition-opacity duration-300"
         />
       )}
@@ -276,42 +377,27 @@ export function ImageViewerModal({
           showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
-        {images.map((img, idx) => {
-          const thumbUrl = getAuthenticatedImageUrl(
-            serverUrl,
-            img.url || img.path,
-            token,
-            unlockTokens
-          );
-          const isActive = idx === currentIndex;
-          return (
-            <button
-              key={img.path || idx}
-              ref={(el) => {
-                thumbnailRefs.current[idx] = el;
-              }}
-              data-testid={`filmstrip-thumb-${idx}`}
-              tabIndex={isFilmstripFocused && isActive ? 0 : -1}
-              onClick={() => {
-                setCurrentIndex(idx);
-                currentIndexRef.current = idx;
-                setIsPlaying(false);
-              }}
-              className={`w-24 h-16 rounded-lg overflow-hidden border-2 flex-shrink-0 transition-all duration-200 cursor-pointer ${
-                isActive ? 'border-[#FF6B00]' : 'border-transparent opacity-60'
-              }`}
-            >
-              {thumbUrl && (
-                <img
-                  src={thumbUrl}
-                  alt=""
-                  aria-hidden="true"
-                  className="w-full h-full object-cover"
-                />
-              )}
-            </button>
-          );
-        })}
+        {images.map((img, idx) => (
+          <FilmstripThumbnail
+            key={img.path || idx}
+            image={img}
+            index={idx}
+            serverUrl={serverUrl}
+            token={token}
+            unlockTokens={unlockTokens}
+            isActive={idx === currentIndex}
+            isFilmstripFocused={isFilmstripFocused}
+            onSelect={(selectedIdx) => {
+              setCurrentIndex(selectedIdx);
+              currentIndexRef.current = selectedIdx;
+              setIsPlaying(false);
+              resetControlsTimer();
+            }}
+            refCallback={(el) => {
+              thumbnailRefs.current[idx] = el;
+            }}
+          />
+        ))}
       </div>
 
       {/* Bottom HUD Bar */}

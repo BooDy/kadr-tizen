@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { ApiClient } from '../api/client';
 import { fetchLibraryFolders } from '../api/folders';
 import { FolderImage, LibraryFolderResponse } from '../types/kadr';
@@ -64,6 +64,15 @@ function FolderImageCard({
   const [hasError, setHasError] = useState(false);
   const unlockTokens = client?.getUnlockTokens ? client.getUnlockTokens() : [];
   const imageUrl = getAuthenticatedImageUrl(serverUrl, image.url || image.path, token, unlockTokens);
+
+  const isFirstRender = useRef(true);
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    setHasError(false);
+  }, [imageUrl]);
 
   const { ref, isFocused } = useFocusable<HTMLDivElement>({
     id,

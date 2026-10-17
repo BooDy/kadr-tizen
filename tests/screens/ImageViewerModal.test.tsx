@@ -551,4 +551,171 @@ describe('ImageViewerModal', () => {
       'http://localhost:8492/img/secret_1.jpg?token=test-auth-token&unlocked=unlock-secret-token'
     );
   });
+
+  it('does not auto-hide HUD controls or filmstrip after 3 seconds while filmstrip is focused, and resumes auto-hide on exit', () => {
+    const { container } = render(
+      <FocusProvider>
+        <ImageViewerModal
+          images={mockImages}
+          initialIndex={0}
+          autoPlay={false}
+          serverUrl={serverUrl}
+          onClose={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    const hudHeader = container.querySelector('[data-testid="hud-header"]');
+    const filmstrip = container.querySelector('[data-testid="filmstrip-carousel"]');
+    expect(hudHeader).not.toHaveClass('opacity-0');
+    expect(filmstrip).not.toHaveClass('opacity-0');
+
+    // Focus filmstrip using ArrowDown
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowDown', keyCode: TVKeys.DOWN, bubbles: true })
+      );
+    });
+
+    // Advance 5 seconds while filmstrip is focused
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+
+    // Controls and filmstrip must remain visible!
+    expect(hudHeader).not.toHaveClass('opacity-0');
+    expect(filmstrip).not.toHaveClass('opacity-0');
+
+    // Exit filmstrip using ArrowUp
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowUp', keyCode: TVKeys.UP, bubbles: true })
+      );
+    });
+
+    // Still visible immediately
+    expect(hudHeader).not.toHaveClass('opacity-0');
+
+    // Advance 3 seconds of inactivity after exiting filmstrip
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
+
+    // Controls must now auto-hide!
+    expect(hudHeader).toHaveClass('opacity-0');
+    expect(filmstrip).toHaveClass('opacity-0');
+  });
+
+  it('renders fallback icon when main image fails to load, and resets error on navigation', () => {
+    render(
+      <FocusProvider>
+        <ImageViewerModal
+          images={mockImages}
+          initialIndex={0}
+          autoPlay={false}
+          serverUrl={serverUrl}
+          onClose={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    const mainImg = screen.getByRole('img');
+    expect(mainImg).toBeInTheDocument();
+    expect(screen.queryByTestId('viewer-image-fallback')).not.toBeInTheDocument();
+
+    // Trigger image loading failure
+    act(() => {
+      fireEvent.error(mainImg);
+    });
+
+    expect(screen.getByTestId('viewer-image-fallback')).toBeInTheDocument();
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+
+    // Navigate to next image
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowRight', keyCode: TVKeys.RIGHT, bubbles: true })
+      );
+    });
+
+    // New image should display without error fallback
+    expect(screen.queryByTestId('viewer-image-fallback')).not.toBeInTheDocument();
+    expect(screen.getByRole('img')).toHaveAttribute(
+      'src',
+      'http://localhost:8492/images/vacation_2.jpg'
+    );
+  });
+
+  it('renders fallback icon when thumbnail image encounters an error', () => {
+    render(
+      <FocusProvider>
+        <ImageViewerModal
+          images={mockImages}
+          initialIndex={0}
+          serverUrl={serverUrl}
+          onClose={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    const thumbBtn = screen.getByTestId('filmstrip-thumb-0');
+    const thumbImg = thumbBtn.querySelector('img');
+    expect(thumbImg).toBeInTheDocument();
+
+    act(() => {
+      fireEvent.error(thumbImg!);
+    });
+
+    expect(thumbBtn.querySelector('img')).not.toBeInTheDocument();
+    expect(screen.getByTestId('filmstrip-fallback-icon')).toBeInTheDocument();
+  });
+
+  it('toggles slideshow play/pause on Space key in main view and exits filmstrip when focused', () => {
+    render(
+      <FocusProvider>
+        <ImageViewerModal
+          images={mockImages}
+          initialIndex={0}
+          autoPlay={false}
+          serverUrl={serverUrl}
+          onClose={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    expect(screen.getByText('Paused')).toBeInTheDocument();
+
+    // Press Space key to play
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: ' ', keyCode: 32, bubbles: true })
+      );
+    });
+    expect(screen.getByText('Playing Slideshow (4s)')).toBeInTheDocument();
+
+    // Press Space key again to pause
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: ' ', keyCode: 32, bubbles: true })
+      );
+    });
+    expect(screen.getByText('Paused')).toBeInTheDocument();
+
+    // Focus filmstrip with ArrowDown
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowDown', keyCode: TVKeys.DOWN, bubbles: true })
+      );
+    });
+    expect(screen.getByTestId('filmstrip-thumb-0')).toHaveFocus();
+
+    // Press Space while filmstrip is focused -> exits filmstrip, does NOT toggle slideshow
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: ' ', keyCode: 32, bubbles: true })
+      );
+    });
+    expect(screen.getByTestId('filmstrip-thumb-0')).not.toHaveFocus();
+    expect(screen.getByText('Paused')).toBeInTheDocument();
+  });
 });

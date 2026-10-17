@@ -649,5 +649,70 @@ describe('FolderBrowserModal', () => {
 
     expect(screen.getByTestId('image-fallback-icon')).toBeInTheDocument();
   });
+
+  it('resets error state when image URL changes in FolderImageCard', async () => {
+    const client = new ApiClient('http://localhost:8492');
+    const mockFolderWithPhotos = {
+      library_name: 'Family Photos',
+      parent_path: '',
+      breadcrumbs: [{ name: 'Root', path: '' }],
+      directories: [],
+      items: [],
+      images: [
+        { name: 'photo.jpg', path: 'photo.jpg', url: '/api/v1/libraries/lib-photos-1/image?path=photo.jpg', size_bytes: 1024 }
+      ],
+    };
+    vi.spyOn(foldersApi, 'fetchLibraryFolders').mockResolvedValue(mockFolderWithPhotos as any);
+
+    const { rerender } = render(
+      <FocusProvider>
+        <FolderBrowserModal
+          client={client}
+          serverUrl="http://localhost:8492"
+          libraryId="lib-photos-1"
+          token="initial-token"
+          isOpen={true}
+          onClose={vi.fn()}
+          onSelectItem={vi.fn()}
+          onSelectImage={vi.fn()}
+          onStartSlideshow={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    const img = await screen.findByAltText('photo.jpg');
+    expect(img).toBeInTheDocument();
+    expect(img.getAttribute('src')).toContain('token=initial-token');
+
+    // Trigger image load failure -> renders fallback
+    act(() => {
+      fireEvent.error(img);
+    });
+    expect(screen.getByTestId('image-fallback-icon')).toBeInTheDocument();
+    expect(screen.queryByAltText('photo.jpg')).not.toBeInTheDocument();
+
+    // Change token -> imageUrl changes -> error resets
+    rerender(
+      <FocusProvider>
+        <FolderBrowserModal
+          client={client}
+          serverUrl="http://localhost:8492"
+          libraryId="lib-photos-1"
+          token="updated-token"
+          isOpen={true}
+          onClose={vi.fn()}
+          onSelectItem={vi.fn()}
+          onSelectImage={vi.fn()}
+          onStartSlideshow={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    const recoveredImg = await screen.findByAltText('photo.jpg');
+    expect(recoveredImg).toBeInTheDocument();
+    expect(recoveredImg.getAttribute('src')).toContain('token=updated-token');
+    expect(screen.queryByTestId('image-fallback-icon')).not.toBeInTheDocument();
+  });
 });
+
 
