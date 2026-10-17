@@ -3,6 +3,8 @@ import { FolderImage } from '../types/kadr';
 import { useFocusContext } from '../navigation/FocusContext';
 import { TVKeys } from '../navigation/keys';
 import { Play, Pause, X } from 'lucide-react';
+import { getAuthenticatedImageUrl } from '../utils/imageUrl';
+import { ApiClient } from '../api/client';
 
 export interface ImageViewerModalProps {
   images: FolderImage[];
@@ -10,6 +12,8 @@ export interface ImageViewerModalProps {
   autoPlay?: boolean;
   serverUrl: string;
   onClose: () => void;
+  token?: string;
+  client?: ApiClient;
 }
 
 function formatBytes(bytes?: number): string {
@@ -21,20 +25,14 @@ function formatBytes(bytes?: number): string {
   return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
 }
 
-function formatImageUrl(serverUrl: string, path?: string): string | undefined {
-  if (!path) return undefined;
-  if (path.startsWith('http://') || path.startsWith('https://')) return path;
-  const cleanServer = serverUrl.replace(/\/+$/, '');
-  const cleanPath = path.startsWith('/') ? path : `/${path}`;
-  return `${cleanServer}${cleanPath}`;
-}
-
 export function ImageViewerModal({
   images,
   initialIndex = 0,
   autoPlay = false,
   serverUrl,
   onClose,
+  token,
+  client,
 }: ImageViewerModalProps) {
   const [currentIndex, setCurrentIndex] = useState<number>(() => {
     if (!images || images.length === 0) return 0;
@@ -42,9 +40,24 @@ export function ImageViewerModal({
   });
   const [isPlaying, setIsPlaying] = useState<boolean>(autoPlay);
   const [showControls, setShowControls] = useState<boolean>(true);
+  const [isFilmstripFocused, setIsFilmstripFocused] = useState<boolean>(false);
 
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const filmstripRef = useRef<HTMLDivElement>(null);
+  const thumbnailRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  const isFilmstripFocusedRef = useRef(isFilmstripFocused);
+  isFilmstripFocusedRef.current = isFilmstripFocused;
+
+  const currentIndexRef = useRef(currentIndex);
+  currentIndexRef.current = currentIndex;
+
+  const imagesRef = useRef(images);
+  imagesRef.current = images;
+
   const { pushTrap, popTrap } = useFocusContext();
+
+  const unlockTokens = client?.getUnlockTokens ? client.getUnlockTokens() : [];
 
   // Focus trap lifecycle
   useEffect(() => {
@@ -76,21 +89,39 @@ export function ImageViewerModal({
 
   // Slideshow auto-advance timer (4 seconds)
   useEffect(() => {
-    if (!isPlaying || !images || images.length <= 1) return;
+    if (!isPlaying || isFilmstripFocused || !images || images.length <= 1) return;
 
     const timer = setInterval(() => {
-      setCurrentIndex((prev) => (prev + 1) % images.length);
+      setCurrentIndex((prev) => {
+        const next = (prev + 1) % images.length;
+        currentIndexRef.current = next;
+        return next;
+      });
     }, 4000);
 
     return () => {
       clearInterval(timer);
     };
-  }, [isPlaying, currentIndex, images]);
+  }, [isPlaying, isFilmstripFocused, currentIndex, images]);
+
+  // Auto-scroll active thumbnail into view
+  useEffect(() => {
+    const activeThumb = thumbnailRefs.current[currentIndex];
+    if (activeThumb && typeof activeThumb.scrollIntoView === 'function') {
+      activeThumb.scrollIntoView({
+        behavior: 'smooth',
+        inline: 'center',
+        block: 'nearest',
+      });
+    }
+  }, [currentIndex]);
 
   // Remote keydown capture listener
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const code = e.keyCode || e.which;
+      const curImages = imagesRef.current;
+      const count = curImages ? curImages.length : 0;
 
       // Any key activity resets auto-hide timer and displays controls
       resetControlsTimer();
@@ -98,18 +129,52 @@ export function ImageViewerModal({
       if (code === TVKeys.LEFT || e.key === 'ArrowLeft') {
         e.preventDefault();
         e.stopImmediatePropagation();
-        if (images && images.length > 0) {
-          setCurrentIndex((prev) => (prev - 1 + images.length) % images.length);
+        if (count > 0) {
+          const nextIndex = (currentIndexRef.current - 1 + count) % count;
+          currentIndexRef.current = nextIndex;
+          setCurrentIndex(nextIndex);
+          if (isFilmstripFocusedRef.current) {
+            thumbnailRefs.current[nextIndex]?.focus();
+          }
         }
       } else if (code === TVKeys.RIGHT || e.key === 'ArrowRight') {
         e.preventDefault();
         e.stopImmediatePropagation();
-        if (images && images.length > 0) {
-          setCurrentIndex((prev) => (prev + 1) % images.length);
+        if (count > 0) {
+          const nextIndex = (currentIndexRef.current + 1) % count;
+          currentIndexRef.current = nextIndex;
+          setCurrentIndex(nextIndex);
+          if (isFilmstripFocusedRef.current) {
+            thumbnailRefs.current[nextIndex]?.focus();
+          }
+        }
+      } else if (code === TVKeys.DOWN || e.key === 'ArrowDown') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (!isFilmstripFocusedRef.current && count > 1) {
+          isFilmstripFocusedRef.current = true;
+          setIsFilmstripFocused(true);
+          thumbnailRefs.current[currentIndexRef.current]?.focus();
+        }
+      } else if (code === TVKeys.UP || e.key === 'ArrowUp') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (isFilmstripFocusedRef.current) {
+          isFilmstripFocusedRef.current = false;
+          setIsFilmstripFocused(false);
+          (document.activeElement as HTMLElement)?.blur();
+        }
+      } else if (code === TVKeys.ENTER || e.key === 'Enter') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (isFilmstripFocusedRef.current) {
+          isFilmstripFocusedRef.current = false;
+          setIsFilmstripFocused(false);
+          (document.activeElement as HTMLElement)?.blur();
+        } else {
+          setIsPlaying((prev) => !prev);
         }
       } else if (
-        code === TVKeys.ENTER ||
-        e.key === 'Enter' ||
         code === TVKeys.PLAY_PAUSE ||
         code === TVKeys.PLAY ||
         code === TVKeys.PAUSE ||
@@ -129,7 +194,13 @@ export function ImageViewerModal({
       ) {
         e.preventDefault();
         e.stopImmediatePropagation();
-        onClose();
+        if (isFilmstripFocusedRef.current) {
+          isFilmstripFocusedRef.current = false;
+          setIsFilmstripFocused(false);
+          (document.activeElement as HTMLElement)?.blur();
+        } else {
+          onClose();
+        }
       }
     };
 
@@ -137,14 +208,19 @@ export function ImageViewerModal({
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, [images, onClose, resetControlsTimer]);
+  }, [onClose, resetControlsTimer]);
 
   if (!images || images.length === 0) {
     return null;
   }
 
   const currentImage = images[currentIndex];
-  const imageUrl = formatImageUrl(serverUrl, currentImage?.url || currentImage?.path);
+  const imageUrl = getAuthenticatedImageUrl(
+    serverUrl,
+    currentImage?.url || currentImage?.path,
+    token,
+    unlockTokens
+  );
 
   return (
     <div className="fixed inset-0 z-[70] bg-black flex items-center justify-center select-none overflow-hidden">
@@ -192,6 +268,52 @@ export function ImageViewerModal({
         </button>
       </div>
 
+      {/* Filmstrip Carousel */}
+      <div
+        ref={filmstripRef}
+        data-testid="filmstrip-carousel"
+        className={`absolute bottom-24 left-0 right-0 px-8 flex items-center gap-3 overflow-x-auto scrollbar-none z-20 transition-opacity duration-300 ${
+          showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
+        }`}
+      >
+        {images.map((img, idx) => {
+          const thumbUrl = getAuthenticatedImageUrl(
+            serverUrl,
+            img.url || img.path,
+            token,
+            unlockTokens
+          );
+          const isActive = idx === currentIndex;
+          return (
+            <button
+              key={img.path || idx}
+              ref={(el) => {
+                thumbnailRefs.current[idx] = el;
+              }}
+              data-testid={`filmstrip-thumb-${idx}`}
+              tabIndex={isFilmstripFocused && isActive ? 0 : -1}
+              onClick={() => {
+                setCurrentIndex(idx);
+                currentIndexRef.current = idx;
+                setIsPlaying(false);
+              }}
+              className={`w-24 h-16 rounded-lg overflow-hidden border-2 flex-shrink-0 transition-all duration-200 cursor-pointer ${
+                isActive ? 'border-[#FF6B00]' : 'border-transparent opacity-60'
+              }`}
+            >
+              {thumbUrl && (
+                <img
+                  src={thumbUrl}
+                  alt=""
+                  aria-hidden="true"
+                  className="w-full h-full object-cover"
+                />
+              )}
+            </button>
+          );
+        })}
+      </div>
+
       {/* Bottom HUD Bar */}
       <div
         data-testid="hud-footer"
@@ -218,7 +340,9 @@ export function ImageViewerModal({
 
         {/* Remote Control Hints */}
         <div className="text-sm font-medium text-[#F5E5E5]/70 bg-[#3B1111]/90 backdrop-blur px-5 py-2 rounded-full border border-[rgba(245,229,229,0.08)]">
-          ◄ / ► Navigate • Enter / ⏯ Play/Pause • Back Exit
+          {isFilmstripFocused
+            ? '◄ / ► Scrub • ▲ / Enter Select • Back Exit Filmstrip'
+            : '◄ / ► Navigate • ▼ Filmstrip • Enter / ⏯ Play/Pause • Back Exit'}
         </div>
       </div>
     </div>

@@ -408,4 +408,147 @@ describe('ImageViewerModal', () => {
 
     expect(screen.getByText('vacation_1.jpg')).toBeInTheDocument();
   });
+
+  it('renders bottom filmstrip thumbnail carousel displaying neighboring photos', () => {
+    const images = [
+      { name: 'photo-1.jpg', path: 'photo-1.jpg', url: '/img/1.jpg', size_bytes: 1000 },
+      { name: 'photo-2.jpg', path: 'photo-2.jpg', url: '/img/2.jpg', size_bytes: 2000 },
+      { name: 'photo-3.jpg', path: 'photo-3.jpg', url: '/img/3.jpg', size_bytes: 3000 },
+    ];
+
+    render(
+      <FocusProvider>
+        <ImageViewerModal
+          images={images}
+          initialIndex={1}
+          serverUrl="http://localhost:8492"
+          token="test-jwt"
+          onClose={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    const carousel = screen.getByTestId('filmstrip-carousel');
+    expect(carousel).toBeInTheDocument();
+    const thumbnails = screen.getAllByTestId(/^filmstrip-thumb-/);
+    expect(thumbnails).toHaveLength(3);
+    expect(screen.getByTestId('filmstrip-thumb-1')).toHaveClass('border-[#FF6B00]');
+  });
+
+  it('navigates into filmstrip on ArrowDown and scrolls thumbnails with live preview on ArrowRight/ArrowLeft', () => {
+    const images = [
+      { name: 'photo-1.jpg', path: 'photo-1.jpg', url: '/img/1.jpg', size_bytes: 1000 },
+      { name: 'photo-2.jpg', path: 'photo-2.jpg', url: '/img/2.jpg', size_bytes: 2000 },
+    ];
+
+    render(
+      <FocusProvider>
+        <ImageViewerModal
+          images={images}
+          initialIndex={0}
+          serverUrl="http://localhost:8492"
+          onClose={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    // Press ArrowDown to focus filmstrip
+    fireEvent.keyDown(window, { key: 'ArrowDown', keyCode: TVKeys.DOWN });
+    expect(screen.getByTestId('filmstrip-thumb-0')).toHaveFocus();
+
+    // Press ArrowRight while in filmstrip to scrub to next photo
+    fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+    expect(screen.getByText('photo-2.jpg')).toBeInTheDocument();
+    expect(screen.getByTestId('filmstrip-thumb-1')).toHaveClass('border-[#FF6B00]');
+
+    // Press ArrowLeft to scrub back to first photo
+    fireEvent.keyDown(window, { key: 'ArrowLeft', keyCode: TVKeys.LEFT });
+    expect(screen.getByText('photo-1.jpg')).toBeInTheDocument();
+    expect(screen.getByTestId('filmstrip-thumb-0')).toHaveClass('border-[#FF6B00]');
+  });
+
+  it('exits filmstrip focus on ArrowUp, Enter, and Back/Escape without closing modal', () => {
+    const onClose = vi.fn();
+    const images = [
+      { name: 'photo-1.jpg', path: 'photo-1.jpg', url: '/img/1.jpg', size_bytes: 1000 },
+      { name: 'photo-2.jpg', path: 'photo-2.jpg', url: '/img/2.jpg', size_bytes: 2000 },
+    ];
+
+    render(
+      <FocusProvider>
+        <ImageViewerModal
+          images={images}
+          initialIndex={0}
+          serverUrl="http://localhost:8492"
+          onClose={onClose}
+        />
+      </FocusProvider>
+    );
+
+    // Focus filmstrip with ArrowDown
+    fireEvent.keyDown(window, { key: 'ArrowDown', keyCode: TVKeys.DOWN });
+    expect(screen.getByTestId('filmstrip-thumb-0')).toHaveFocus();
+
+    // Press ArrowUp to exit filmstrip
+    fireEvent.keyDown(window, { key: 'ArrowUp', keyCode: TVKeys.UP });
+    expect(screen.getByTestId('filmstrip-thumb-0')).not.toHaveFocus();
+
+    // Re-focus filmstrip
+    fireEvent.keyDown(window, { key: 'ArrowDown', keyCode: TVKeys.DOWN });
+    expect(screen.getByTestId('filmstrip-thumb-0')).toHaveFocus();
+
+    // Press Enter to exit filmstrip
+    fireEvent.keyDown(window, { key: 'Enter', keyCode: TVKeys.ENTER });
+    expect(screen.getByTestId('filmstrip-thumb-0')).not.toHaveFocus();
+    // Verify modal is still open
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Re-focus filmstrip
+    fireEvent.keyDown(window, { key: 'ArrowDown', keyCode: TVKeys.DOWN });
+    expect(screen.getByTestId('filmstrip-thumb-0')).toHaveFocus();
+
+    // Press Escape to exit filmstrip without closing modal
+    fireEvent.keyDown(window, { key: 'Escape', keyCode: TVKeys.BACK_WEB });
+    expect(screen.getByTestId('filmstrip-thumb-0')).not.toHaveFocus();
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Press Escape again now that filmstrip is unfocused -> modal closes
+    fireEvent.keyDown(window, { key: 'Escape', keyCode: TVKeys.BACK_WEB });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses authenticated image URLs with token and unlock tokens for main image and thumbnails', () => {
+    const images = [
+      { name: 'secret_1.jpg', path: 'secret_1.jpg', url: '/img/secret_1.jpg', size_bytes: 1000 },
+    ];
+
+    const mockClient = {
+      getUnlockTokens: () => ['unlock-secret-token'],
+    } as any;
+
+    render(
+      <FocusProvider>
+        <ImageViewerModal
+          images={images}
+          initialIndex={0}
+          serverUrl="http://localhost:8492"
+          token="test-auth-token"
+          client={mockClient}
+          onClose={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    const mainImg = screen.getByRole('img');
+    expect(mainImg).toHaveAttribute(
+      'src',
+      'http://localhost:8492/img/secret_1.jpg?token=test-auth-token&unlocked=unlock-secret-token'
+    );
+
+    const thumbImg = screen.getByTestId('filmstrip-thumb-0').querySelector('img');
+    expect(thumbImg).toHaveAttribute(
+      'src',
+      'http://localhost:8492/img/secret_1.jpg?token=test-auth-token&unlocked=unlock-secret-token'
+    );
+  });
 });
