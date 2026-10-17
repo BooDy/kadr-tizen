@@ -241,6 +241,7 @@ export default function App() {
                 key={`${folderBrowserState.libraryId}-${folderBrowserState.path}`}
                 client={client}
                 serverUrl={serverUrl || ''}
+                token={token || ''}
                 libraryId={folderBrowserState.libraryId}
                 initialPath={folderBrowserState.path}
                 refreshKey={folderRefreshKey}
@@ -276,6 +277,8 @@ export default function App() {
                 initialIndex={imageViewerState.initialIndex}
                 autoPlay={imageViewerState.autoPlay}
                 serverUrl={serverUrl || ''}
+                token={token || ''}
+                client={client}
                 onClose={() => setImageViewerState(null)}
               />
             )}

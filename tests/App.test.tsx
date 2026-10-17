@@ -523,6 +523,13 @@ describe('App State Machine & Router', () => {
       expect(screen.getByText('dune_poster.jpg')).toBeInTheDocument();
     });
 
+    // Verify folder thumbnail includes token
+    const folderThumb = screen.getByAltText('dune_poster.jpg');
+    expect(folderThumb).toHaveAttribute(
+      'src',
+      'http://192.168.1.100:8492/images/dune_poster.jpg?token=valid-test-token'
+    );
+
     // Click single image
     const photo = screen.getByText('dune_poster.jpg');
     fireEvent.click(photo);
@@ -532,6 +539,20 @@ describe('App State Machine & Router', () => {
       expect(screen.getByTestId('hud-header')).toBeInTheDocument();
       expect(screen.getByText('Paused')).toBeInTheDocument();
     });
+
+    // Verify viewer main image and filmstrip thumbnail include token
+    const viewerImages = screen.getAllByAltText('dune_poster.jpg');
+    const mainViewerImg = viewerImages.find((img) => img.className.includes('object-contain'));
+    expect(mainViewerImg).toBeInTheDocument();
+    expect(mainViewerImg).toHaveAttribute(
+      'src',
+      'http://192.168.1.100:8492/images/dune_poster.jpg?token=valid-test-token'
+    );
+    const filmstripThumb0 = screen.getByTestId('filmstrip-thumb-0').querySelector('img');
+    expect(filmstripThumb0).toHaveAttribute(
+      'src',
+      'http://192.168.1.100:8492/images/dune_poster.jpg?token=valid-test-token'
+    );
 
     // Close image viewer via Escape
     fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
