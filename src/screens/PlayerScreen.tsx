@@ -189,6 +189,18 @@ export function PlayerScreen({
     let isMounted = true;
 
     const cleanServerUrl = serverUrl.replace(/\/+$/, '');
+    if (!itemId || itemId === 'undefined' || itemId === 'null') {
+      console.error('[PlayerScreen] Invalid itemId:', itemId);
+      setPlayerState('error');
+      playerStateRef.current = 'error';
+      setPlaybackError({
+        message: 'Invalid or missing media item ID for playback stream',
+        streamUrl: `${cleanServerUrl}/api/v1/stream/${itemId}`,
+        driverName: forceHtml5 ? 'HTML5 Video' : 'Tizen AVPlay',
+      });
+      return;
+    }
+
     const queryParams = new URLSearchParams();
     if (token) {
       queryParams.set('token', token);

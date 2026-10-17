@@ -134,8 +134,26 @@ export default function App() {
     }
   };
 
-  const handlePlayItem = (itemId: number | string, resumeMs = 0) => {
-    const title = activeItem?.title || 'Playing';
+  const handlePlayItem = (itemId: number | string, resumeMs = 0, titleOverride?: string) => {
+    if (itemId === undefined || itemId === null || itemId === '' || itemId === 'undefined') {
+      console.error('[App] Cannot play item with invalid id:', itemId);
+      return;
+    }
+    let title = titleOverride;
+    if (!title && activeItem) {
+      if (activeItem.id === itemId) {
+        title = activeItem.title || activeItem.card?.title;
+      } else if (activeItem.episodes) {
+        const ep = activeItem.episodes.find((e) => e.id === itemId);
+        if (ep?.title) {
+          title = ep.title;
+        }
+      }
+      if (!title) {
+        title = activeItem.title || activeItem.card?.title;
+      }
+    }
+    title = title || 'Playing';
     setActiveItem(null);
     setPlayerItem({ id: itemId, title, startMs: resumeMs });
     setView('player');

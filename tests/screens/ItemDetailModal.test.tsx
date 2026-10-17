@@ -711,7 +711,37 @@ describe('ItemDetailModal', () => {
       const seasonTab1 = screen.getByRole('button', { name: /Season 1/i });
       expect(seasonTab1.className).toContain('mr-3');
     });
+
+    it('renders and plays correctly when item only has nested card attributes', () => {
+      const onPlay = vi.fn();
+      const rawItem: any = {
+        card: {
+          id: 99,
+          title: 'Nested Card Movie',
+          poster_url: '/poster.jpg',
+          media_type: 'movie',
+        },
+        overview: 'Overview from payload',
+      };
+
+      render(
+        <FocusProvider>
+          <ItemDetailModal
+            isOpen={true}
+            item={rawItem}
+            serverUrl="http://localhost:8492"
+            onPlay={onPlay}
+            onClose={vi.fn()}
+          />
+        </FocusProvider>
+      );
+
+      expect(screen.getByText('Nested Card Movie')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /^Play$/i }));
+      expect(onPlay).toHaveBeenCalledWith(99, 0);
+    });
   });
 });
+
 
 

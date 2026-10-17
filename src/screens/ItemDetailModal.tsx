@@ -10,7 +10,7 @@ export interface ItemDetailModalProps {
   isOpen?: boolean;
   item: MediaItemDetail | null;
   serverUrl: string;
-  onPlay: (itemId: number | string, resumeMs?: number) => void;
+  onPlay: (itemId: number | string, resumeMs?: number, title?: string) => void;
   onClose: () => void;
   onBrowseFolder?: (libraryId: string, folderPath: string) => void;
 }
@@ -23,6 +23,23 @@ export function ItemDetailModal({
   onClose,
   onBrowseFolder,
 }: ItemDetailModalProps) {
+  const resolvedId = item?.id ?? item?.card?.id;
+  const resolvedTitle = item?.title ?? item?.card?.title ?? '';
+  const resolvedOverview = item?.overview ?? item?.card?.subtitle;
+  const resolvedReleaseYear = item?.release_year ?? item?.card?.release_year;
+  const resolvedResolution = item?.resolution ?? item?.technical?.resolution;
+  const resolvedPosterUrl = item?.poster_url ?? item?.card?.poster_url;
+  const resolvedBackdropUrl = item?.backdrop_url ?? item?.card?.backdrop_url;
+  const resolvedDurationMs =
+    item?.duration_ms ?? (item?.duration_seconds ? item.duration_seconds * 1000 : undefined);
+  const resolvedResumeMs =
+    item?.resume_position_ms ??
+    (item?.resume_position_seconds !== undefined
+      ? item.resume_position_seconds * 1000
+      : undefined);
+  const resolvedLibraryId = item?.library_id;
+  const resolvedFolderPath = item?.folder_path;
+
   const isShow = Boolean(
     item?.card?.media_type === 'show' ||
       item?.media_type === 'show' ||
@@ -44,7 +61,7 @@ export function ItemDetailModal({
 
   useEffect(() => {
     setSelectedSeason(defaultSeason);
-  }, [defaultSeason, item?.id]);
+  }, [defaultSeason, resolvedId]);
 
   const { focusedId, setFocusedId, pushTrap, popTrap } = useFocusContext();
 
@@ -87,7 +104,7 @@ export function ItemDetailModal({
     ? isEpisodeResume
       ? 'detail-resume-btn'
       : 'detail-play-btn'
-    : item?.resume_position_ms && item.resume_position_ms > 0
+    : resolvedResumeMs && resolvedResumeMs > 0
     ? 'detail-resume-btn'
     : 'detail-play-btn';
 
@@ -160,23 +177,23 @@ export function ItemDetailModal({
     return `${cleanServer}${cleanPath}`;
   };
 
-  const backdrop = formatImageUrl(item.backdrop_url);
-  const poster = formatImageUrl(item.poster_url);
+  const backdrop = formatImageUrl(resolvedBackdropUrl);
+  const poster = formatImageUrl(resolvedPosterUrl);
 
-  const durationMins = item.duration_ms ? Math.round(item.duration_ms / 60000) : null;
-  const resumeMins = item.resume_position_ms ? Math.round(item.resume_position_ms / 60000) : null;
+  const durationMins = resolvedDurationMs ? Math.round(resolvedDurationMs / 60000) : null;
+  const resumeMins = resolvedResumeMs ? Math.round(resolvedResumeMs / 60000) : null;
 
   return (
     <div
       role="dialog"
       aria-modal="true"
-      aria-label={item.title}
+      aria-label={resolvedTitle}
       className="fixed inset-0 bg-[#2A0A0A]/90 backdrop-blur-xl flex items-center justify-center z-[60] p-6 select-none"
     >
       {backdrop && (
         <img
           src={backdrop}
-          alt={item.title}
+          alt={resolvedTitle}
           className="absolute inset-0 w-full h-full object-cover opacity-25"
         />
       )}
@@ -189,7 +206,7 @@ export function ItemDetailModal({
           {poster && (
             <img
               src={poster}
-              alt={item.title}
+              alt={resolvedTitle}
               className={`${
                 isShow && seasons.length > 0 ? 'w-52 h-[290px]' : 'w-72 h-[420px]'
               } object-cover rounded-2xl shadow-xl border border-[rgba(245,229,229,0.08)] shrink-0 mr-10`}
@@ -202,11 +219,11 @@ export function ItemDetailModal({
           >
             <div>
               <div className="flex items-center mb-2 text-[#F5E5E5]/70 font-semibold text-lg">
-                {item.release_year && <span className="mr-3">{item.release_year}</span>}
+                {resolvedReleaseYear && <span className="mr-3">{resolvedReleaseYear}</span>}
                 {durationMins && <span className="mr-3">• {durationMins}m</span>}
-                {item.resolution && (
+                {resolvedResolution && (
                   <span className="mr-3 px-2 py-0.5 bg-[#FFB800]/20 border border-[#FFB800]/30 rounded text-xs text-[#FFB800] font-bold">
-                    {item.resolution}
+                    {resolvedResolution}
                   </span>
                 )}
               </div>
@@ -215,15 +232,15 @@ export function ItemDetailModal({
                   isShow && seasons.length > 0 ? 'text-4xl font-extrabold mb-2' : 'text-5xl font-black mb-4'
                 } text-[#F5E5E5] leading-tight truncate`}
               >
-                {item.title}
+                {resolvedTitle}
               </h2>
-              {item.overview && (
+              {resolvedOverview && (
                 <p
                   className={`text-[#F5E5E5]/80 ${
                     isShow && seasons.length > 0 ? 'text-base line-clamp-3 mb-2 max-w-3xl' : 'text-lg line-clamp-4 max-w-2xl'
                   } leading-relaxed`}
                 >
-                  {item.overview}
+                  {resolvedOverview}
                 </p>
               )}
             </div>
@@ -259,15 +276,15 @@ export function ItemDetailModal({
                     Play
                   </TVButton>
                 )
-              ) : item.resume_position_ms && item.resume_position_ms > 0 ? (
+              ) : resolvedResumeMs && resolvedResumeMs > 0 ? (
                 <>
                   <TVButton
                     id="detail-resume-btn"
                     groupId="item-detail-modal"
                     order={1}
                     variant="primary"
-                    onEnter={() => onPlay(item.id, item.resume_position_ms)}
-                    onClick={() => onPlay(item.id, item.resume_position_ms)}
+                    onEnter={() => onPlay(resolvedId!, resolvedResumeMs)}
+                    onClick={() => onPlay(resolvedId!, resolvedResumeMs)}
                     className="mr-4 mb-2"
                     autoFocus
                   >
@@ -279,8 +296,8 @@ export function ItemDetailModal({
                     groupId="item-detail-modal"
                     order={2}
                     variant="secondary"
-                    onEnter={() => onPlay(item.id, 0)}
-                    onClick={() => onPlay(item.id, 0)}
+                    onEnter={() => onPlay(resolvedId!, 0)}
+                    onClick={() => onPlay(resolvedId!, 0)}
                     className="mr-4 mb-2"
                   >
                     <RotateCcw className="w-6 h-6 mr-3" /> Play from Beginning
@@ -292,8 +309,8 @@ export function ItemDetailModal({
                   groupId="item-detail-modal"
                   order={1}
                   variant="primary"
-                  onEnter={() => onPlay(item.id, 0)}
-                  onClick={() => onPlay(item.id, 0)}
+                  onEnter={() => onPlay(resolvedId!, 0)}
+                  onClick={() => onPlay(resolvedId!, 0)}
                   className="mr-4 mb-2"
                   autoFocus
                 >
@@ -301,16 +318,16 @@ export function ItemDetailModal({
                 </TVButton>
               )}
 
-              {item.library_id && item.folder_path && (
+              {resolvedLibraryId && resolvedFolderPath && (
                 <TVButton
                   id="detail-browse-folder-btn"
                   groupId="item-detail-modal"
                   order={
-                    !isShow && item.resume_position_ms && item.resume_position_ms > 0 ? 3 : 2
+                    !isShow && resolvedResumeMs && resolvedResumeMs > 0 ? 3 : 2
                   }
                   variant="secondary"
-                  onEnter={() => onBrowseFolder?.(item.library_id!, item.folder_path!)}
-                  onClick={() => onBrowseFolder?.(item.library_id!, item.folder_path!)}
+                  onEnter={() => onBrowseFolder?.(resolvedLibraryId!, resolvedFolderPath!)}
+                  onClick={() => onBrowseFolder?.(resolvedLibraryId!, resolvedFolderPath!)}
                   className="mr-4 mb-2"
                 >
                   <Folder className="w-6 h-6 mr-3" /> Browse Folder
@@ -321,11 +338,11 @@ export function ItemDetailModal({
                 id="detail-close-btn"
                 groupId="item-detail-modal"
                 order={
-                  !isShow && item.resume_position_ms && item.resume_position_ms > 0
-                    ? item.library_id && item.folder_path
+                  !isShow && resolvedResumeMs && resolvedResumeMs > 0
+                    ? resolvedLibraryId && resolvedFolderPath
                       ? 4
                       : 3
-                    : item.library_id && item.folder_path
+                    : resolvedLibraryId && resolvedFolderPath
                     ? 3
                     : 2
                 }

@@ -881,5 +881,26 @@ describe('PlayerScreen', () => {
       expect(mockDriver.pause).not.toHaveBeenCalled();
       expect(mockDriver.play).not.toHaveBeenCalled();
     });
+
+    it('displays error diagnostic modal and prevents driver init when itemId is undefined', async () => {
+      render(
+        <PlayerScreen
+          itemId={undefined as any}
+          title="Unknown Video"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          onExit={vi.fn()}
+        />
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(mockDriver.init).not.toHaveBeenCalled();
+      expect(screen.getByText('Playback Error')).toBeInTheDocument();
+      expect(screen.getByText(/Invalid or missing media item ID for playback stream/)).toBeInTheDocument();
+    });
   });
 });
+

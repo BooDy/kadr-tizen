@@ -76,6 +76,7 @@ export function HeroSpotlightWidget({ widget, serverUrl, onPlay, onDetails }: He
               groupId="hero"
               variant="primary"
               onEnter={() => onPlay(item.id, resumeMs)}
+              onClick={() => onPlay(item.id, resumeMs)}
               autoFocus
             >
               <Play className="w-6 h-6 fill-current" />
