@@ -60,6 +60,12 @@ describe('ItemDetailModal Season Navigation', () => {
     // Now Season 2 episodes should be rendered
     expect(screen.getByText('Seven Thirty-Seven')).toBeInTheDocument();
     expect(screen.queryByText('Pilot')).not.toBeInTheDocument();
+
+    // Press Left to navigate back to Season 1 tab
+    await act(async () => {
+      fireEvent.keyDown(window, { keyCode: TVKeys.LEFT });
+    });
+    expect(document.activeElement).toBe(season1Tab);
   });
 
   it('navigates Down from active season tab to first episode card, and Up back to season tab', async () => {

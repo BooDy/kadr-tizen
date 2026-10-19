@@ -148,11 +148,11 @@ export function ItemDetailModal({
         // Left Navigation on Season Tabs
         else if (code === TVKeys.LEFT || e.key === 'ArrowLeft') {
           if (current && current.startsWith('season-tab-')) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
             const seasonNum = parseInt(current.replace('season-tab-', ''), 10);
             const currentIdx = seasons.indexOf(seasonNum);
             if (currentIdx > 0) {
-              e.preventDefault();
-              e.stopImmediatePropagation();
               const prevSeason = seasons[currentIdx - 1];
               setFocusedId(`season-tab-${prevSeason}`);
             }
@@ -161,11 +161,11 @@ export function ItemDetailModal({
         // Right Navigation on Season Tabs
         else if (code === TVKeys.RIGHT || e.key === 'ArrowRight') {
           if (current && current.startsWith('season-tab-')) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
             const seasonNum = parseInt(current.replace('season-tab-', ''), 10);
             const currentIdx = seasons.indexOf(seasonNum);
             if (currentIdx >= 0 && currentIdx < seasons.length - 1) {
-              e.preventDefault();
-              e.stopImmediatePropagation();
               const nextSeason = seasons[currentIdx + 1];
               setFocusedId(`season-tab-${nextSeason}`);
             }
@@ -174,10 +174,10 @@ export function ItemDetailModal({
         // Enter Navigation on Season Tabs: Commit Season Switch
         else if (code === TVKeys.ENTER || e.key === 'Enter') {
           if (current && current.startsWith('season-tab-')) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
             const seasonNum = parseInt(current.replace('season-tab-', ''), 10);
             if (!isNaN(seasonNum) && seasonNum !== selectedSeason) {
-              e.preventDefault();
-              e.stopImmediatePropagation();
               setSelectedSeason(seasonNum);
             }
           }
