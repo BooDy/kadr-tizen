@@ -46,11 +46,31 @@ if (fs.existsSync(outWgt)) {
   fs.unlinkSync(outWgt);
 }
 
-try {
-  execSync(`cd dist && zip -r "${outWgt}" .`, { stdio: 'inherit' });
-  const stats = fs.statSync(outWgt);
-  console.log(`\n Successfully created ${outWgt} (${(stats.size / 1024).toFixed(1)} KB)`);
-} catch (err) {
-  console.error('Failed to create wgt zip archive:', err.message);
-  process.exit(1);
+const tizenBin = '/home/boody/tizen-studio/tools/ide/bin/tizen';
+let packaged = false;
+
+if (fs.existsSync(tizenBin)) {
+  try {
+    console.log('Signing and packaging with Tizen Studio CLI (profile: kadr)...');
+    execSync(`${tizenBin} package -t wgt -s kadr -- "${distDir}"`, { stdio: 'inherit' });
+    const signedWgt = path.join(distDir, 'Kadr.wgt');
+    if (fs.existsSync(signedWgt)) {
+      fs.copyFileSync(signedWgt, outWgt);
+      packaged = true;
+    }
+  } catch (e) {
+    console.warn('Tizen CLI signing failed, falling back to standard zip package:', e.message);
+  }
 }
+
+if (!packaged) {
+  try {
+    execSync(`cd dist && zip -r "${outWgt}" .`, { stdio: 'inherit' });
+  } catch (err) {
+    console.error('Failed to create wgt zip archive:', err.message);
+    process.exit(1);
+  }
+}
+
+const stats = fs.statSync(outWgt);
+console.log(`\n Successfully created ${outWgt} (${(stats.size / 1024).toFixed(1)} KB)`);
