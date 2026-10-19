@@ -15,6 +15,8 @@ export interface PlayerOSDProps {
   selectedSubtitleId?: number | null;
   onSelectSubtitle?: (id: number | null) => void;
   onPopupOpenChange?: (isOpen: boolean) => void;
+  onOpenSubtitleModal?: () => void;
+  onOpenSubtitles?: () => void;
 }
 
 export function formatTime(ms: number): string {
@@ -34,9 +36,21 @@ export function PlayerOSD({
   selectedSubtitleId,
   onSelectSubtitle,
   onPopupOpenChange,
+  onOpenSubtitleModal,
+  onOpenSubtitles,
 }: PlayerOSDProps) {
   const [isPopupOpen, setIsPopupOpen] = useState(false);
   const focusCtx = useContext(FocusContext);
+
+  const handleOpenSubtitles = () => {
+    if (onOpenSubtitleModal) {
+      onOpenSubtitleModal();
+    } else if (onOpenSubtitles) {
+      onOpenSubtitles();
+    } else {
+      setIsPopupOpen(true);
+    }
+  };
 
   useEffect(() => {
     onPopupOpenChange?.(isPopupOpen);
@@ -148,8 +162,8 @@ export function PlayerOSD({
                 id="btn-subtitles"
                 groupId="player-osd"
                 variant={selectedSubtitleId ? 'primary' : 'secondary'}
-                onClick={() => setIsPopupOpen(true)}
-                onEnter={() => setIsPopupOpen(true)}
+                onClick={handleOpenSubtitles}
+                onEnter={handleOpenSubtitles}
                 data-testid="subtitles-button"
                 aria-label="Subtitles"
                 className="pointer-events-auto px-5 py-2.5 text-lg"
@@ -163,7 +177,7 @@ export function PlayerOSD({
                 type="button"
                 data-testid="subtitles-button"
                 aria-label="Subtitles"
-                onClick={() => setIsPopupOpen(true)}
+                onClick={handleOpenSubtitles}
                 className={`pointer-events-auto px-5 py-2.5 rounded-xl font-semibold text-lg flex items-center gap-2 cursor-pointer transition-all duration-150 outline-none ${
                   selectedSubtitleId
                     ? 'bg-[#D43F15] text-[#F5E5E5]'

@@ -886,6 +886,90 @@ describe('PlayerScreen', () => {
       expect(mockDriver.play).not.toHaveBeenCalled();
     });
 
+    it('downloads online subtitle via SubtitleModal and immediately activates it on player driver', async () => {
+      vi.spyOn(subtitlesApi, 'fetchItemSubtitles').mockResolvedValue(mockTracks);
+
+      const client = new ApiClient('http://localhost:8492');
+      vi.spyOn(client, 'fetch').mockImplementation(async (path: string) => {
+        if (path.includes('/search')) {
+          return {
+            configured: true,
+            matches: [
+              {
+                file_id: 'os-300',
+                language: 'ara',
+                format: 'srt',
+                title: 'Arabic.Subs.srt',
+                download_count: 500,
+                hearing_impaired: false,
+              },
+            ],
+          } as any;
+        }
+        if (path.includes('/download')) {
+          return {
+            id: 99,
+            media_item_id: 101,
+            source: 'online',
+            language: 'ara',
+            title: 'Arabic.Subs.srt',
+            format: 'srt',
+            is_default: false,
+            is_forced: false,
+            stream_url: '/api/v1/subtitles/99/stream.vtt',
+          } as any;
+        }
+        return {} as any;
+      });
+
+      render(
+        <PlayerScreen
+          itemId={101}
+          title="Sample Movie"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          client={client}
+          onExit={vi.fn()}
+        />
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      // Open subtitles modal
+      act(() => {
+        screen.getByTestId('subtitles-button').click();
+      });
+
+      // Switch to Search Online tab
+      act(() => {
+        screen.getByText('Search Online').click();
+      });
+
+      // Pick Arabic language
+      act(() => {
+        screen.getByTestId('lang-btn-ara').click();
+      });
+
+      // Wait for search result to appear
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(screen.getByText('Arabic.Subs.srt')).toBeInTheDocument();
+
+      // Click Download & Activate
+      await act(async () => {
+        screen.getByText('Download & Activate').click();
+      });
+
+      // Driver should immediately be updated with the newly downloaded track
+      expect(mockDriver.setSubtitleTrack).toHaveBeenLastCalledWith(
+        'http://localhost:8492/api/v1/subtitles/99/stream.vtt'
+      );
+    });
+
     it('displays error diagnostic modal and prevents driver init when itemId is undefined', async () => {
       render(
         <PlayerScreen

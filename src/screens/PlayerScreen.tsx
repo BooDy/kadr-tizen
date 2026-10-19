@@ -9,6 +9,7 @@ import { PlaybackSessionManager } from '../player/session';
 import { TVKeys } from '../navigation/keys';
 import { FocusContext } from '../navigation/FocusContext';
 import { PlayerOSD } from '../components/osd/PlayerOSD';
+import { SubtitleModal } from '../components/player/SubtitleModal';
 import { TVButton } from '../components/tv/TVButton';
 import { AlertTriangle, RotateCcw, MonitorPlay, ArrowLeft, FastForward, Rewind } from 'lucide-react';
 
@@ -71,6 +72,10 @@ export function PlayerScreen({
   const [isSubtitlePopupOpen, setIsSubtitlePopupOpen] = useState(false);
   const isSubtitlePopupOpenRef = useRef(isSubtitlePopupOpen);
   isSubtitlePopupOpenRef.current = isSubtitlePopupOpen;
+
+  const [isSubtitleModalOpen, setIsSubtitleModalOpen] = useState(false);
+  const isSubtitleModalOpenRef = useRef(isSubtitleModalOpen);
+  isSubtitleModalOpenRef.current = isSubtitleModalOpen;
 
   const cleanServerUrl = useMemo(() => serverUrl.replace(/\/+$/, ''), [serverUrl]);
 
@@ -161,7 +166,7 @@ export function PlayerScreen({
   const resetOsdTimer = useCallback(() => {
     setShowOSD(true);
     if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
-    if (playerStateRef.current === 'playing' && !isSubtitlePopupOpenRef.current) {
+    if (playerStateRef.current === 'playing' && !isSubtitlePopupOpenRef.current && !isSubtitleModalOpenRef.current) {
       osdTimerRef.current = setTimeout(() => {
         setShowOSD(false);
       }, 4000);
@@ -202,7 +207,7 @@ export function PlayerScreen({
   }, [resetOsdTimer]);
 
   useEffect(() => {
-    if (isSubtitlePopupOpen) {
+    if (isSubtitlePopupOpen || isSubtitleModalOpen) {
       setShowOSD(true);
       if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
       return;
@@ -216,7 +221,7 @@ export function PlayerScreen({
       setShowOSD(true);
       if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
     }
-  }, [playerState, isSubtitlePopupOpen]);
+  }, [playerState, isSubtitlePopupOpen, isSubtitleModalOpen]);
 
   useEffect(() => {
     // For AVPlay hardware video plane on Samsung Tizen, body background must be transparent
@@ -382,6 +387,7 @@ export function PlayerScreen({
         if (
           e.defaultPrevented ||
           isSubtitlePopupOpenRef.current ||
+          isSubtitleModalOpenRef.current ||
           focusCtxRef.current?.focusedId ||
           (document.activeElement &&
             document.activeElement !== document.body &&
@@ -446,6 +452,24 @@ export function PlayerScreen({
         selectedSubtitleId={selectedSubtitleId}
         onSelectSubtitle={setSelectedSubtitleId}
         onPopupOpenChange={setIsSubtitlePopupOpen}
+        onOpenSubtitleModal={() => setIsSubtitleModalOpen(true)}
+        onOpenSubtitles={() => setIsSubtitleModalOpen(true)}
+      />
+
+      <SubtitleModal
+        isOpen={isSubtitleModalOpen}
+        itemId={itemId}
+        apiClient={apiClient}
+        subtitles={subtitles}
+        selectedSubtitleId={selectedSubtitleId}
+        onSelectSubtitle={(id) => {
+          setSelectedSubtitleId(id);
+          setIsSubtitleModalOpen(false);
+        }}
+        onSubtitleDownloaded={(track) => {
+          setSubtitles((prev) => [...prev, track]);
+        }}
+        onClose={() => setIsSubtitleModalOpen(false)}
       />
 
       {seekHud && (
