@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo, useContext } from 'react';
-import { createPlayerDriver } from '../player/avplay-driver';
-import { PlayerDriver, PlayerState } from '../player/driver';
+import { createPlayerDriver, PlayerDriver, PlayerState } from '../player/driver';
+import { ErrorQRCode, DiagnosticPayload } from '../components/player/ErrorQRCode';
+import { KNOWN_COMPATIBILITY_INFO } from '../player/compatibility';
 import { reportPlaybackProgress } from '../api/playback';
 import { ApiClient } from '../api/client';
 import { fetchItemSubtitles } from '../api/subtitles';
@@ -102,6 +103,31 @@ export function PlayerScreen({
     setPlayerState('buffering');
     setReloadKey((k) => k + 1);
   }, []);
+
+  const diagnosticPayload = useMemo<DiagnosticPayload | null>(() => {
+    if (!playbackError) return null;
+    let tvModel = 'Unknown TV';
+    let tizenVer = '5.5';
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      tvModel = (window as any).webapis?.productinfo?.getModel?.() || (typeof navigator !== 'undefined' ? navigator.userAgent : 'Unknown TV');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      tizenVer = (window as any).tizen?.systeminfo?.getCapability?.('http://tizen.org/feature/platform.version') || '5.5';
+    } catch {
+      // Fallback
+    }
+    return {
+      app: 'kadr-tizen',
+      item_id: itemId,
+      title: title || undefined,
+      stream_url: playbackError.streamUrl,
+      driver: playbackError.driverName,
+      error: playbackError.message,
+      tv_model: tvModel,
+      tizen_version: tizenVer,
+      timestamp: new Date().toISOString(),
+    };
+  }, [playbackError, itemId, title]);
 
   useEffect(() => {
     if (playbackError && focusCtxRef.current) {
@@ -262,7 +288,24 @@ export function PlayerScreen({
     const driver = createPlayerDriver(forceHtml5);
     driverRef.current = driver;
 
+    const bufferWatchdog = setTimeout(() => {
+      if (playerStateRef.current !== 'playing') {
+        console.error('[PlayerScreen] 10s buffering timeout fired');
+        driver.destroy();
+        setPlayerState('error');
+        playerStateRef.current = 'error';
+        setPlaybackError({
+          message: 'Buffering timeout after 10s. The stream may contain an unsupported codec (e.g. DTS audio or AV1 video) or network stalls.',
+          streamUrl,
+          driverName: driver.name || (forceHtml5 ? 'HTML5 Video' : 'Tizen AVPlay'),
+        });
+      }
+    }, 10000);
+
     driver.onTimeUpdate((pos, dur) => {
+      if (pos > 0) {
+        clearTimeout(bufferWatchdog);
+      }
       setDurationMs(dur);
       durationMsRef.current = dur;
       if (seekDebounceTimerRef.current === null) {
@@ -274,9 +317,13 @@ export function PlayerScreen({
     driver.onStateChange((state) => {
       setPlayerState(state);
       playerStateRef.current = state;
+      if (state === 'playing') {
+        clearTimeout(bufferWatchdog);
+      }
     });
 
     driver.onError((err) => {
+      clearTimeout(bufferWatchdog);
       console.error('[PlayerScreen] Playback error:', err);
       setPlayerState('error');
       playerStateRef.current = 'error';
@@ -288,6 +335,7 @@ export function PlayerScreen({
     });
 
     driver.init(containerRef.current, streamUrl, initialResume).catch((err) => {
+      clearTimeout(bufferWatchdog);
       console.error('[PlayerScreen] Driver init failed:', err);
       setPlayerState('error');
       playerStateRef.current = 'error';
@@ -338,6 +386,7 @@ export function PlayerScreen({
 
     return () => {
       isMounted = false;
+      clearTimeout(bufferWatchdog);
       clearInterval(scrobbleInterval);
       if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
       if (seekHudTimerRef.current) clearTimeout(seekHudTimerRef.current);
@@ -496,35 +545,65 @@ export function PlayerScreen({
           aria-label="Playback Error"
           className="fixed inset-0 z-50 bg-[#2A0A0A]/95 backdrop-blur-md flex items-center justify-center p-12 select-none"
         >
-          <div className="bg-[#3B1111] border-2 border-[#D43F15]/50 rounded-3xl p-10 max-w-4xl w-full shadow-2xl flex flex-col">
-            <div className="flex items-center gap-4 mb-4">
-              <div className="w-14 h-14 rounded-2xl bg-[#D43F15]/20 border border-[#D43F15]/30 flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-8 h-8 text-[#D43F15]" />
-              </div>
-              <div>
-                <h2 className="text-3xl font-extrabold text-[#F5E5E5] tracking-tight">Playback Error</h2>
-                <p className="text-base text-[#F5E5E5]/70">Could not stream media "{title}"</p>
-              </div>
-            </div>
+          <div className="bg-[#3B1111] border-2 border-[#D43F15]/50 rounded-3xl p-8 max-w-5xl w-full shadow-2xl flex flex-col">
+            <div className="flex items-start justify-between gap-8 mb-6">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-4 mb-4">
+                  <div className="w-14 h-14 rounded-2xl bg-[#D43F15]/20 border border-[#D43F15]/30 flex items-center justify-center shrink-0">
+                    <AlertTriangle className="w-8 h-8 text-[#D43F15]" />
+                  </div>
+                  <div>
+                    <h2 className="text-3xl font-extrabold text-[#F5E5E5] tracking-tight">Playback Error</h2>
+                    <p className="text-base text-[#F5E5E5]/70">Could not stream media "{title}"</p>
+                  </div>
+                </div>
 
-            <div className="bg-[#2A0A0A] p-5 rounded-2xl border border-[rgba(245,229,229,0.08)] mb-8 font-mono text-sm space-y-2 text-[#F5E5E5]/90">
-              <div>
-                <span className="text-[#FFB800] font-bold">Error:</span> {playbackError.message}
-              </div>
-              <div className="truncate">
-                <span className="text-[#FFB800] font-bold">Stream URL:</span> {playbackError.streamUrl}
-              </div>
-              <div className="flex items-center gap-6">
-                <div>
-                  <span className="text-[#FFB800] font-bold">Player Engine:</span> {playbackError.driverName}
+                <div className="bg-[#2A0A0A] p-4 rounded-2xl border border-[rgba(245,229,229,0.08)] mb-4 font-mono text-sm space-y-2 text-[#F5E5E5]/90">
+                  <div>
+                    <span className="text-[#FFB800] font-bold">Error:</span> {playbackError.message}
+                  </div>
+                  <div className="truncate">
+                    <span className="text-[#FFB800] font-bold">Stream URL:</span> {playbackError.streamUrl}
+                  </div>
+                  <div className="flex items-center gap-6">
+                    <div>
+                      <span className="text-[#FFB800] font-bold">Player Engine:</span> {playbackError.driverName}
+                    </div>
+                    <div>
+                      <span className="text-[#FFB800] font-bold">Auth Token:</span> {token ? 'Present' : 'None'}
+                    </div>
+                    <div>
+                      <span className="text-[#FFB800] font-bold">Item ID:</span> {itemId}
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <span className="text-[#FFB800] font-bold">Auth Token:</span> {token ? 'Present' : 'None'}
-                </div>
-                <div>
-                  <span className="text-[#FFB800] font-bold">Item ID:</span> {itemId}
+
+                <div className="bg-[#2A0A0A]/70 p-4 rounded-xl border border-[rgba(245,229,229,0.08)] font-sans text-xs space-y-1.5 text-[#F5E5E5]/80">
+                  <div className="font-bold text-[#FFB800] uppercase tracking-wider text-[11px] mb-1">
+                    Samsung TV Hardware Compatibility Reference
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <div>
+                      <span className="text-emerald-400 font-semibold">Supported Video:</span> {KNOWN_COMPATIBILITY_INFO.supportedVideo.join(', ')}
+                    </div>
+                    <div>
+                      <span className="text-emerald-400 font-semibold">Supported Audio:</span> {KNOWN_COMPATIBILITY_INFO.supportedAudio.join(', ')}
+                    </div>
+                    <div>
+                      <span className="text-[#D43F15] font-semibold">Unsupported Video:</span> {KNOWN_COMPATIBILITY_INFO.unsupportedVideo.join(', ')}
+                    </div>
+                    <div>
+                      <span className="text-[#D43F15] font-semibold">Unsupported Audio:</span> {KNOWN_COMPATIBILITY_INFO.unsupportedAudio.join(', ')} (e.g. DTS)
+                    </div>
+                  </div>
                 </div>
               </div>
+
+              {diagnosticPayload && (
+                <div className="shrink-0 flex flex-col items-center justify-center pt-2">
+                  <ErrorQRCode payload={diagnosticPayload} />
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-4">

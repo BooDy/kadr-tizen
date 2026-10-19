@@ -12,3 +12,5 @@ export interface PlayerDriver {
   onStateChange(callback: (state: PlayerState) => void): void;
   onError(callback: (error: string) => void): void;
 }
+
+export { createPlayerDriver } from './avplay-driver';
