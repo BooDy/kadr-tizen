@@ -220,7 +220,7 @@ export function SubtitleModal({
           body: JSON.stringify({
             file_id: match.file_id,
             language: match.language,
-            title: match.title,
+            title: match.title || match.file_name || `Subtitle ${match.file_id}`,
             is_forced: match.hearing_impaired || false,
           }),
         }

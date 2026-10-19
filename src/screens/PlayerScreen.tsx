@@ -131,7 +131,7 @@ export function PlayerScreen({
 
   useEffect(() => {
     if (playbackError && focusCtxRef.current) {
-      focusCtxRef.current.pushTrap('player-error-modal');
+      focusCtxRef.current.pushTrap('player-error');
       focusCtxRef.current.setFocusedId('player-error-retry-btn');
       return () => {
         focusCtxRef.current?.popTrap();
@@ -228,6 +228,7 @@ export function PlayerScreen({
 
     if (seekDebounceTimerRef.current) clearTimeout(seekDebounceTimerRef.current);
     seekDebounceTimerRef.current = setTimeout(() => {
+      seekDebounceTimerRef.current = null;
       driverRef.current?.seekTo(targetMs);
     }, 300);
   }, [resetOsdTimer]);
@@ -390,7 +391,10 @@ export function PlayerScreen({
       clearInterval(scrobbleInterval);
       if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
       if (seekHudTimerRef.current) clearTimeout(seekHudTimerRef.current);
-      if (seekDebounceTimerRef.current) clearTimeout(seekDebounceTimerRef.current);
+      if (seekDebounceTimerRef.current) {
+        clearTimeout(seekDebounceTimerRef.current);
+        seekDebounceTimerRef.current = null;
+      }
       // Final scrobble sync before teardown
       if (hasActiveSessionRef.current) {
         sessionManager.updateProgress(Math.floor(positionMsRef.current / 1000));
@@ -450,14 +454,23 @@ export function PlayerScreen({
           driverRef.current?.play();
         }
       } else if (code === TVKeys.LEFT) {
+        if (isSubtitlePopupOpenRef.current || isSubtitleModalOpenRef.current) {
+          return;
+        }
         consecutiveFfCountRef.current = 0;
         consecutiveRewCountRef.current = 0;
         applySeek(-10000, 'backward', '-10s');
       } else if (code === TVKeys.RIGHT) {
+        if (isSubtitlePopupOpenRef.current || isSubtitleModalOpenRef.current) {
+          return;
+        }
         consecutiveFfCountRef.current = 0;
         consecutiveRewCountRef.current = 0;
         applySeek(10000, 'forward', '+10s');
       } else if (code === TVKeys.FAST_FORWARD) {
+        if (isSubtitlePopupOpenRef.current || isSubtitleModalOpenRef.current) {
+          return;
+        }
         const count = consecutiveFfCountRef.current;
         const stepSecs = count === 0 ? 30 : count === 1 ? 60 : 120;
         const stepMs = stepSecs * 1000;
@@ -465,6 +478,9 @@ export function PlayerScreen({
         consecutiveRewCountRef.current = 0;
         applySeek(stepMs, 'forward', `+${stepSecs}s`);
       } else if (code === TVKeys.REWIND) {
+        if (isSubtitlePopupOpenRef.current || isSubtitleModalOpenRef.current) {
+          return;
+        }
         const count = consecutiveRewCountRef.current;
         const stepSecs = count === 0 ? 30 : count === 1 ? 60 : 120;
         const stepMs = stepSecs * 1000;

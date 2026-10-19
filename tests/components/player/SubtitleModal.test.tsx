@@ -276,4 +276,78 @@ describe('SubtitleModal', () => {
       expect(araLangBtn.className).toContain('tv-focus-ring');
     });
   });
+
+  it('falls back to file_name or Subtitle {file_id} when match title is missing during download', async () => {
+    const onSelect = vi.fn();
+    const onClose = vi.fn();
+    const apiClient = new ApiClient('http://127.0.0.1:8492');
+    let capturedBody: any = null;
+
+    vi.spyOn(apiClient, 'fetch').mockImplementation(async (path: string, options?: any) => {
+      if (path.includes('/search')) {
+        return {
+          configured: true,
+          matches: [
+            {
+              file_id: 'os-fallback-1',
+              language: 'eng',
+              format: 'srt',
+              file_name: 'Fallback.FileName.srt',
+              download_count: 50,
+              hearing_impaired: false,
+            },
+          ],
+        } as any;
+      }
+      if (path.includes('/download')) {
+        capturedBody = JSON.parse(options.body);
+        return {
+          id: 4,
+          media_item_id: 10,
+          source: 'online',
+          language: capturedBody.language,
+          title: capturedBody.title,
+          format: 'srt',
+          is_default: false,
+          is_forced: false,
+          stream_url: '/api/v1/subtitles/4/stream.vtt',
+        } as any;
+      }
+      return {} as any;
+    });
+
+    render(
+      <SubtitleModal
+        isOpen={true}
+        itemId={10}
+        apiClient={apiClient}
+        subtitles={mockTracks}
+        selectedSubtitleId={1}
+        onSelectSubtitle={onSelect}
+        onClose={onClose}
+      />
+    );
+
+    // Switch to "Search Online" tab
+    fireEvent.click(screen.getByText('Search Online'));
+
+    // Search English
+    fireEvent.click(screen.getByTestId('lang-btn-eng'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Fallback.FileName.srt')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('Download & Activate'));
+
+    await waitFor(() => {
+      expect(capturedBody).toEqual({
+        file_id: 'os-fallback-1',
+        language: 'eng',
+        title: 'Fallback.FileName.srt',
+        is_forced: false,
+      });
+    });
+  });
 });
+

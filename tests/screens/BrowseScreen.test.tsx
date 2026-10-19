@@ -172,7 +172,9 @@ describe('BrowseScreen', () => {
 
     // Move to sidebar and down to anime
     fireEvent.keyDown(window, { key: 'ArrowLeft', keyCode: TVKeys.LEFT });
-    expect(document.activeElement?.id).toBe('nav-screen-home');
+    await waitFor(() => {
+      expect(document.activeElement?.id).toBe('nav-screen-home');
+    });
     fireEvent.keyDown(window, { key: 'ArrowDown', keyCode: TVKeys.DOWN });
     expect(document.activeElement?.id).toBe('nav-screen-anime');
 

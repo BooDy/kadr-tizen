@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, act, screen } from '@testing-library/react';
+import { render, act, screen, fireEvent } from '@testing-library/react';
 import { PlayerScreen } from '../../src/screens/PlayerScreen';
 import * as playbackApi from '../../src/api/playback';
 import * as subtitlesApi from '../../src/api/subtitles';
 import { TVKeys } from '../../src/navigation/keys';
 import { PlayerDriver, PlayerState } from '../../src/player/driver';
 import { ApiClient } from '../../src/api/client';
+import { FocusProvider } from '../../src/navigation/FocusContext';
 
 // Mock driver instance
 let mockDriver: {
@@ -990,6 +991,65 @@ describe('PlayerScreen', () => {
       expect(screen.getByText('Playback Error')).toBeInTheDocument();
       expect(screen.getByText(/Invalid or missing media item ID for playback stream/)).toBeInTheDocument();
     });
+
+    it('supports TV remote D-Pad navigation between Retry Playback, Try HTML5 Video Player, and Exit to Browse on error screen', async () => {
+      const onExit = vi.fn();
+      render(
+        <FocusProvider>
+          <PlayerScreen
+            itemId={101}
+            title="Sample Movie"
+            serverUrl="http://localhost:8492"
+            token="test-token"
+            onExit={onExit}
+          />
+        </FocusProvider>
+      );
+
+      // Trigger error from player driver
+      act(() => {
+        mockDriver.errorCallback?.('Hardware decoding error');
+      });
+
+      expect(screen.getByText('Playback Error')).toBeInTheDocument();
+
+      const retryBtn = screen.getByRole('button', { name: /Retry Playback/i });
+      const html5Btn = screen.getByRole('button', { name: /Try HTML5 Video Player/i });
+      const exitBtn = screen.getByRole('button', { name: /Exit to Browse/i });
+
+      // Retry Playback is initially focused
+      expect(retryBtn).toHaveClass('tv-focus-ring');
+
+      // Navigate Right -> Try HTML5 Video Player
+      act(() => {
+        fireEvent.keyDown(window, { keyCode: TVKeys.RIGHT, key: 'ArrowRight' });
+      });
+      expect(html5Btn).toHaveClass('tv-focus-ring');
+
+      // Navigate Right -> Exit to Browse
+      act(() => {
+        fireEvent.keyDown(window, { keyCode: TVKeys.RIGHT, key: 'ArrowRight' });
+      });
+      expect(exitBtn).toHaveClass('tv-focus-ring');
+
+      // Navigate Left -> back to Try HTML5 Video Player
+      act(() => {
+        fireEvent.keyDown(window, { keyCode: TVKeys.LEFT, key: 'ArrowLeft' });
+      });
+      expect(html5Btn).toHaveClass('tv-focus-ring');
+
+      // Navigate Right -> Exit to Browse and press Enter
+      act(() => {
+        fireEvent.keyDown(window, { keyCode: TVKeys.RIGHT, key: 'ArrowRight' });
+      });
+      expect(exitBtn).toHaveClass('tv-focus-ring');
+
+      act(() => {
+        fireEvent.keyDown(window, { keyCode: TVKeys.ENTER, key: 'Enter' });
+      });
+      expect(onExit).toHaveBeenCalledTimes(1);
+    });
   });
 });
+
 
