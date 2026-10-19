@@ -251,12 +251,14 @@ describe('PlayerScreen', () => {
     // Press Left (-10s)
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.LEFT }));
+      vi.advanceTimersByTime(300);
     });
     expect(mockDriver.seekTo).toHaveBeenCalledWith(15000);
 
     // Press Right (+10s)
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.RIGHT }));
+      vi.advanceTimersByTime(300);
     });
     expect(mockDriver.seekTo).toHaveBeenCalledWith(25000); // 15000 + 10000
   });
@@ -279,6 +281,7 @@ describe('PlayerScreen', () => {
     // Press Left with pos 4s -> should seek to 0, not -6s
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.LEFT }));
+      vi.advanceTimersByTime(300);
     });
     expect(mockDriver.seekTo).toHaveBeenCalledWith(0);
     expect(getByText('0:00')).toBeInTheDocument();
@@ -288,6 +291,7 @@ describe('PlayerScreen', () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.RIGHT })); // to 10s
       window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.RIGHT })); // to 20s
       window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.RIGHT })); // clamped at 20s
+      vi.advanceTimersByTime(300);
     });
     expect(mockDriver.seekTo).toHaveBeenLastCalledWith(20000);
     expect(getAllByText('0:20')).toHaveLength(2);

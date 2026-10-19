@@ -287,7 +287,11 @@ describe('TizenAvplayDriver', () => {
     expect(stateSpy).toHaveBeenCalledWith('paused');
 
     driver.seekTo(25000);
-    expect(mockAvplay.seekTo).toHaveBeenCalledWith(25000);
+    expect(mockAvplay.seekTo).toHaveBeenCalledWith(
+      25000,
+      expect.any(Function),
+      expect.any(Function)
+    );
 
     driver.destroy();
     expect(mockAvplay.stop).toHaveBeenCalled();
@@ -300,6 +304,23 @@ describe('TizenAvplayDriver', () => {
     expect(mockAvplay.pause).toHaveBeenCalledTimes(1);
     driver.seekTo(1000);
     expect(mockAvplay.seekTo).toHaveBeenCalledTimes(1);
+  });
+
+  it('invokes webapis.avplay.seekTo with success and error callbacks', () => {
+    const driver = new TizenAvplayDriver();
+    const seekSpy = vi.fn();
+    (window as any).webapis = {
+      avplay: {
+        seekTo: seekSpy,
+      },
+    };
+
+    driver.seekTo(15000);
+    expect(seekSpy).toHaveBeenCalledWith(
+      15000,
+      expect.any(Function),
+      expect.any(Function)
+    );
   });
 });
 

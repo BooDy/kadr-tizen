@@ -10,7 +10,14 @@ import { TVKeys } from '../navigation/keys';
 import { FocusContext } from '../navigation/FocusContext';
 import { PlayerOSD } from '../components/osd/PlayerOSD';
 import { TVButton } from '../components/tv/TVButton';
-import { AlertTriangle, RotateCcw, MonitorPlay, ArrowLeft } from 'lucide-react';
+import { AlertTriangle, RotateCcw, MonitorPlay, ArrowLeft, FastForward, Rewind } from 'lucide-react';
+
+export function formatTime(seconds: number): string {
+  const totalSecs = Math.max(0, Math.floor(seconds));
+  const m = Math.floor(totalSecs / 60);
+  const s = totalSecs % 60;
+  return `${m}:${s < 10 ? '0' : ''}${s}`;
+}
 
 export interface PlaybackErrorInfo {
   message: string;
@@ -20,23 +27,25 @@ export interface PlaybackErrorInfo {
 
 export interface PlayerScreenProps {
   itemId: number | string;
-  title: string;
+  title?: string;
   serverUrl: string;
   token: string;
   initialTimeMs?: number;
   initialResumeMs?: number;
   client?: ApiClient;
+  apiClient?: ApiClient;
   onExit: () => void;
 }
 
 export function PlayerScreen({
   itemId,
-  title,
+  title = '',
   serverUrl,
   token,
   initialTimeMs = 0,
   initialResumeMs,
   client,
+  apiClient: apiClientProp,
   onExit,
 }: PlayerScreenProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -66,11 +75,12 @@ export function PlayerScreen({
   const cleanServerUrl = useMemo(() => serverUrl.replace(/\/+$/, ''), [serverUrl]);
 
   const apiClient = useMemo(() => {
+    if (apiClientProp) return apiClientProp;
     if (client) return client;
     const c = new ApiClient(serverUrl);
     if (token) c.setToken(token);
     return c;
-  }, [client, serverUrl, token]);
+  }, [apiClientProp, client, serverUrl, token]);
 
   const sessionManager = useMemo(() => new PlaybackSessionManager(apiClient), [apiClient]);
   const hasActiveSessionRef = useRef(false);
@@ -157,6 +167,41 @@ export function PlayerScreen({
       }, 4000);
     }
   }, []);
+
+  const [seekHud, setSeekHud] = useState<{ label: string; targetMs: number; direction: 'forward' | 'backward' } | null>(null);
+  const seekHudTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const seekDebounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const consecutiveFfCountRef = useRef(0);
+  const consecutiveRewCountRef = useRef(0);
+  const lastFfTimeRef = useRef(0);
+  const lastRewTimeRef = useRef(0);
+
+  const applySeek = useCallback((deltaMs: number, direction: 'forward' | 'backward', stepLabel: string) => {
+    resetOsdTimer();
+    const current = positionMsRef.current;
+    const dur = durationMsRef.current > 0 ? durationMsRef.current : Infinity;
+    const targetMs = Math.max(0, Math.min(dur, current + deltaMs));
+    positionMsRef.current = targetMs;
+    setPositionMs(targetMs);
+
+    setSeekHud({
+      label: stepLabel,
+      targetMs,
+      direction,
+    });
+
+    if (seekHudTimerRef.current) clearTimeout(seekHudTimerRef.current);
+    seekHudTimerRef.current = setTimeout(() => {
+      setSeekHud(null);
+      consecutiveFfCountRef.current = 0;
+      consecutiveRewCountRef.current = 0;
+    }, 1500);
+
+    if (seekDebounceTimerRef.current) clearTimeout(seekDebounceTimerRef.current);
+    seekDebounceTimerRef.current = setTimeout(() => {
+      driverRef.current?.seekTo(targetMs);
+    }, 300);
+  }, [resetOsdTimer]);
 
   useEffect(() => {
     if (isSubtitlePopupOpen) {
@@ -290,6 +335,8 @@ export function PlayerScreen({
       isMounted = false;
       clearInterval(scrobbleInterval);
       if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
+      if (seekHudTimerRef.current) clearTimeout(seekHudTimerRef.current);
+      if (seekDebounceTimerRef.current) clearTimeout(seekDebounceTimerRef.current);
       // Final scrobble sync before teardown
       if (hasActiveSessionRef.current) {
         sessionManager.updateProgress(Math.floor(positionMsRef.current / 1000));
@@ -348,16 +395,27 @@ export function PlayerScreen({
           driverRef.current?.play();
         }
       } else if (code === TVKeys.LEFT) {
-        const newPos = Math.max(0, positionMsRef.current - 10000);
-        positionMsRef.current = newPos;
-        setPositionMs(newPos);
-        driverRef.current?.seekTo(newPos);
+        consecutiveFfCountRef.current = 0;
+        consecutiveRewCountRef.current = 0;
+        applySeek(-10000, 'backward', '-10s');
       } else if (code === TVKeys.RIGHT) {
-        const maxPos = durationMsRef.current > 0 ? durationMsRef.current : Infinity;
-        const newPos = Math.min(maxPos, positionMsRef.current + 10000);
-        positionMsRef.current = newPos;
-        setPositionMs(newPos);
-        driverRef.current?.seekTo(newPos);
+        consecutiveFfCountRef.current = 0;
+        consecutiveRewCountRef.current = 0;
+        applySeek(10000, 'forward', '+10s');
+      } else if (code === TVKeys.FAST_FORWARD) {
+        const count = consecutiveFfCountRef.current;
+        const stepSecs = count === 0 ? 30 : count === 1 ? 60 : 120;
+        const stepMs = stepSecs * 1000;
+        consecutiveFfCountRef.current += 1;
+        consecutiveRewCountRef.current = 0;
+        applySeek(stepMs, 'forward', `+${stepSecs}s`);
+      } else if (code === TVKeys.REWIND) {
+        const count = consecutiveRewCountRef.current;
+        const stepSecs = count === 0 ? 30 : count === 1 ? 60 : 120;
+        const stepMs = stepSecs * 1000;
+        consecutiveRewCountRef.current += 1;
+        consecutiveFfCountRef.current = 0;
+        applySeek(-stepMs, 'backward', `-${stepSecs}s`);
       } else if (
         code === TVKeys.BACK_TIZEN ||
         code === TVKeys.BACK_WEB ||
@@ -373,7 +431,7 @@ export function PlayerScreen({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onExit, resetOsdTimer, sessionManager]);
+  }, [onExit, resetOsdTimer, sessionManager, applySeek]);
 
   return (
     <div className="relative w-full h-full bg-transparent overflow-hidden select-none">
@@ -389,6 +447,23 @@ export function PlayerScreen({
         onSelectSubtitle={setSelectedSubtitleId}
         onPopupOpenChange={setIsSubtitlePopupOpen}
       />
+
+      {seekHud && (
+        <div
+          data-testid="seek-hud-badge"
+          className="fixed top-24 left-1/2 -translate-x-1/2 z-50 bg-[#3B1111]/90 backdrop-blur-md border border-[rgba(245,229,229,0.2)] px-6 py-3 rounded-2xl flex items-center gap-3 text-white text-2xl font-bold shadow-2xl animate-fade-in"
+        >
+          {seekHud.direction === 'forward' ? (
+            <FastForward className="w-8 h-8 text-[#FF6B00]" />
+          ) : (
+            <Rewind className="w-8 h-8 text-[#FF6B00]" />
+          )}
+          <span>{seekHud.label}</span>
+          <span className="text-[#F5E5E5]/60 text-lg font-normal">
+            ({formatTime(seekHud.targetMs / 1000)} / {formatTime(durationMs / 1000)})
+          </span>
+        </div>
+      )}
 
       {playbackError && (
         <div

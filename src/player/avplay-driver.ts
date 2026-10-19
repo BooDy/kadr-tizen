@@ -125,8 +125,23 @@ export class TizenAvplayDriver implements PlayerDriver {
 
   seekTo(ms: number): void {
     if (this.isDestroyed) return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (window as any).webapis?.avplay?.seekTo(ms);
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const avplay = (window as any).webapis?.avplay;
+      if (avplay && typeof avplay.seekTo === 'function') {
+        avplay.seekTo(
+          Math.max(0, Math.floor(ms)),
+          () => {
+            // Seek success
+          },
+          (err: any) => {
+            console.error('[AVPlay] seekTo error:', err);
+          }
+        );
+      }
+    } catch (e) {
+      console.error('[AVPlay] seekTo exception:', e);
+    }
   }
 
   setSubtitleTrack(_trackUrl: string | null): void {
