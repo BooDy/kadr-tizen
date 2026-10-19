@@ -56,7 +56,9 @@ export function PlayerOSD({
     onPopupOpenChange?.(isPopupOpen);
   }, [isPopupOpen, onPopupOpenChange]);
 
-  const hasSubtitles = Boolean(subtitles && subtitles.length > 0);
+  const hasSubtitles = Boolean(
+    (subtitles && subtitles.length > 0) || onOpenSubtitleModal || onOpenSubtitles
+  );
 
   const options = useMemo(() => {
     if (!subtitles || subtitles.length === 0) return [];

@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useContext, useRef } from 'react';
 import { Check, Download, Globe, ListFilter, X, Search, Loader2 } from 'lucide-react';
 import { SubtitleTrack } from '../../types/kadr';
 import { ApiClient } from '../../api/client';
 import { TVKeys } from '../../navigation/keys';
 import { FocusContext } from '../../navigation/FocusContext';
+import { TVButton } from '../tv/TVButton';
 
 export interface SubtitleModalProps {
   isOpen: boolean;
@@ -25,6 +26,69 @@ const LANGUAGES = [
   { code: 'all', name: 'All Languages' },
 ];
 
+interface SubModalButtonProps {
+  id: string;
+  order?: number;
+  autoFocus?: boolean;
+  variant?: 'primary' | 'secondary' | 'danger' | 'nav-active' | 'nav-inactive';
+  disabled?: boolean;
+  onClick?: (e?: any) => void;
+  onEnter?: () => void;
+  className?: string;
+  children: React.ReactNode;
+  'data-testid'?: string;
+  'aria-label'?: string;
+}
+
+function SubModalButton({
+  id,
+  order,
+  autoFocus,
+  variant = 'secondary',
+  disabled = false,
+  onClick,
+  onEnter,
+  className = '',
+  children,
+  'data-testid': testId,
+  'aria-label': ariaLabel,
+}: SubModalButtonProps) {
+  const focusCtx = useContext(FocusContext);
+  if (focusCtx) {
+    return (
+      <TVButton
+        id={id}
+        groupId="subtitle-modal"
+        order={order}
+        autoFocus={autoFocus}
+        variant={variant}
+        disabled={disabled}
+        onClick={onClick}
+        onEnter={onEnter || onClick}
+        className={className}
+        data-testid={testId}
+        aria-label={ariaLabel}
+      >
+        {children}
+      </TVButton>
+    );
+  }
+
+  return (
+    <button
+      id={id}
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={className}
+      data-testid={testId}
+      aria-label={ariaLabel}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function SubtitleModal({
   isOpen,
   itemId,
@@ -41,16 +105,67 @@ export function SubtitleModal({
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searchError, setSearchError] = useState<string | null>(null);
-  const focusCtx = React.useContext(FocusContext);
+  const focusCtx = useContext(FocusContext);
+  const pushTrap = focusCtx?.pushTrap;
+  const popTrap = focusCtx?.popTrap;
+  const setFocusedId = focusCtx?.setFocusedId;
 
+  const subtitlesRef = useRef(subtitles);
+  subtitlesRef.current = subtitles;
+  const selectedSubtitleIdRef = useRef(selectedSubtitleId);
+  selectedSubtitleIdRef.current = selectedSubtitleId;
+
+  // Manage modal focus trap
   useEffect(() => {
-    if (isOpen && focusCtx) {
-      focusCtx.pushTrap('subtitle-modal');
+    if (isOpen && pushTrap && popTrap) {
+      pushTrap('subtitle-modal');
       return () => {
-        focusCtx.popTrap();
+        popTrap();
       };
     }
-  }, [isOpen, focusCtx]);
+  }, [isOpen, pushTrap, popTrap]);
+
+  // Initial focus on modal open
+  const isOpenedRef = useRef(false);
+  const prevTabRef = useRef(activeTab);
+
+  useEffect(() => {
+    if (!isOpen) {
+      isOpenedRef.current = false;
+      return;
+    }
+
+    if (!isOpenedRef.current && setFocusedId) {
+      isOpenedRef.current = true;
+      prevTabRef.current = activeTab;
+      const initialId =
+        activeTab === 'tracks'
+          ? selectedSubtitleIdRef.current !== null &&
+            subtitlesRef.current.some((t) => t.id === selectedSubtitleIdRef.current)
+            ? `sub-track-${selectedSubtitleIdRef.current}`
+            : 'sub-track-off'
+          : 'sub-tab-search';
+      setFocusedId(initialId);
+    }
+  }, [isOpen, activeTab, setFocusedId]);
+
+  // Shift focus when switching tabs
+  useEffect(() => {
+    if (!isOpen || !setFocusedId) return;
+    if (prevTabRef.current !== activeTab) {
+      prevTabRef.current = activeTab;
+      if (activeTab === 'search') {
+        setFocusedId('sub-lang-eng');
+      } else {
+        const initialId =
+          selectedSubtitleIdRef.current !== null &&
+          subtitlesRef.current.some((t) => t.id === selectedSubtitleIdRef.current)
+            ? `sub-track-${selectedSubtitleIdRef.current}`
+            : 'sub-track-off';
+        setFocusedId(initialId);
+      }
+    }
+  }, [activeTab, isOpen, setFocusedId]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -141,43 +256,50 @@ export function SubtitleModal({
               <Globe className="w-7 h-7 text-[#FF6B00]" /> Subtitles
             </h2>
             <div className="flex items-center gap-2 bg-[#2A0A0A] p-1 rounded-xl border border-[rgba(245,229,229,0.08)]">
-              <button
-                type="button"
+              <SubModalButton
+                id="sub-tab-tracks"
+                order={1}
+                variant={activeTab === 'tracks' ? 'primary' : 'secondary'}
                 onClick={() => setActiveTab('tracks')}
-                className={`px-5 py-2 rounded-lg font-bold text-sm transition-all cursor-pointer ${
+                className={`!px-5 !py-2 rounded-lg font-bold text-sm transition-all cursor-pointer ${
                   activeTab === 'tracks'
-                    ? 'bg-[#FF6B00] text-white shadow-lg'
-                    : 'text-[#F5E5E5]/70 hover:text-white'
+                    ? '!bg-[#FF6B00] !text-white shadow-lg'
+                    : '!text-[#F5E5E5]/70 hover:!text-white !bg-[#2A0A0A]'
                 }`}
               >
                 <ListFilter className="w-4 h-4 inline mr-2" /> Current Tracks ({subtitles.length})
-              </button>
-              <button
-                type="button"
+              </SubModalButton>
+              <SubModalButton
+                id="sub-tab-search"
+                order={2}
+                variant={activeTab === 'search' ? 'primary' : 'secondary'}
                 onClick={() => {
                   setActiveTab('search');
+                  focusCtx?.setFocusedId('sub-lang-eng');
                   if (searchResults.length === 0 && !isSearching) {
                     handleSearch(selectedLang);
                   }
                 }}
-                className={`px-5 py-2 rounded-lg font-bold text-sm transition-all cursor-pointer ${
+                className={`!px-5 !py-2 rounded-lg font-bold text-sm transition-all cursor-pointer ${
                   activeTab === 'search'
-                    ? 'bg-[#FF6B00] text-white shadow-lg'
-                    : 'text-[#F5E5E5]/70 hover:text-white'
+                    ? '!bg-[#FF6B00] !text-white shadow-lg'
+                    : '!text-[#F5E5E5]/70 hover:!text-white !bg-[#2A0A0A]'
                 }`}
               >
                 <Search className="w-4 h-4 inline mr-2" /> Search Online
-              </button>
+              </SubModalButton>
             </div>
           </div>
-          <button
-            type="button"
+          <SubModalButton
+            id="sub-modal-close"
+            order={3}
+            variant="secondary"
             onClick={onClose}
-            className="p-2.5 rounded-full hover:bg-white/10 text-[#F5E5E5]/70 hover:text-white transition cursor-pointer"
+            className="!p-2.5 !rounded-full hover:!bg-white/10 !text-[#F5E5E5]/70 hover:!text-white transition cursor-pointer"
             aria-label="Close"
           >
             <X className="w-6 h-6" />
-          </button>
+          </SubModalButton>
         </div>
 
         {/* Tab Content */}
@@ -185,39 +307,43 @@ export function SubtitleModal({
           {activeTab === 'tracks' ? (
             <div className="space-y-3">
               {/* Off Track */}
-              <button
-                type="button"
+              <SubModalButton
+                id="sub-track-off"
+                order={10}
                 data-testid="subtitle-option-off"
+                variant={selectedSubtitleId === null ? 'primary' : 'secondary'}
                 onClick={() => {
                   onSelectSubtitle(null);
                   onClose();
                 }}
-                className={`w-full flex items-center justify-between px-6 py-4 rounded-2xl font-bold text-lg border transition cursor-pointer ${
+                className={`w-full !flex !items-center !justify-between !px-6 !py-4 !rounded-2xl font-bold !text-lg border transition cursor-pointer text-left ${
                   selectedSubtitleId === null
-                    ? 'bg-[#FF6B00]/20 border-[#FF6B00] text-[#FF6B00]'
-                    : 'bg-[#3B1111]/60 border-[rgba(245,229,229,0.08)] text-[#F5E5E5] hover:bg-[#3B1111]'
+                    ? '!bg-[#FF6B00]/20 !border-[#FF6B00] !text-[#FF6B00]'
+                    : '!bg-[#3B1111]/60 !border-[rgba(245,229,229,0.08)] !text-[#F5E5E5] hover:!bg-[#3B1111]'
                 }`}
               >
                 <span>Off</span>
                 {selectedSubtitleId === null && <Check className="w-6 h-6" />}
-              </button>
+              </SubModalButton>
 
-              {subtitles.map((track) => {
+              {subtitles.map((track, idx) => {
                 const isSelected = selectedSubtitleId === track.id;
                 const trackLabel = `${track.title || `Track ${track.id}`} (${track.language})`;
                 return (
-                  <button
+                  <SubModalButton
                     key={track.id}
-                    type="button"
+                    id={`sub-track-${track.id}`}
+                    order={11 + idx}
                     data-testid={`subtitle-option-${track.id}`}
+                    variant={isSelected ? 'primary' : 'secondary'}
                     onClick={() => {
                       onSelectSubtitle(track.id);
                       onClose();
                     }}
-                    className={`w-full flex items-center justify-between px-6 py-4 rounded-2xl font-bold text-lg border transition cursor-pointer ${
+                    className={`w-full !flex !items-center !justify-between !px-6 !py-4 !rounded-2xl font-bold !text-lg border transition cursor-pointer text-left ${
                       isSelected
-                        ? 'bg-[#FF6B00]/20 border-[#FF6B00] text-[#FF6B00]'
-                        : 'bg-[#3B1111]/60 border-[rgba(245,229,229,0.08)] text-[#F5E5E5] hover:bg-[#3B1111]'
+                        ? '!bg-[#FF6B00]/20 !border-[#FF6B00] !text-[#FF6B00]'
+                        : '!bg-[#3B1111]/60 !border-[rgba(245,229,229,0.08)] !text-[#F5E5E5] hover:!bg-[#3B1111]'
                     }`}
                   >
                     <div className="flex items-center gap-3">
@@ -229,7 +355,7 @@ export function SubtitleModal({
                       )}
                     </div>
                     {isSelected && <Check className="w-6 h-6" />}
-                  </button>
+                  </SubModalButton>
                 );
               })}
             </div>
@@ -237,20 +363,23 @@ export function SubtitleModal({
             <div>
               {/* Language Picker */}
               <div className="flex items-center gap-3 overflow-x-auto pb-4 mb-6 border-b border-[rgba(245,229,229,0.08)]">
-                {LANGUAGES.map((lang) => (
-                  <button
+                {LANGUAGES.map((lang, idx) => (
+                  <SubModalButton
                     key={lang.code}
-                    type="button"
+                    id={`sub-lang-${lang.code}`}
+                    order={50 + idx}
+                    autoFocus={activeTab === 'search' && idx === 0}
                     data-testid={`lang-btn-${lang.code}`}
+                    variant={selectedLang === lang.code ? 'primary' : 'secondary'}
                     onClick={() => handleSearch(lang.code)}
-                    className={`px-5 py-2.5 rounded-full font-bold text-sm shrink-0 transition cursor-pointer ${
+                    className={`!px-5 !py-2.5 !rounded-full font-bold !text-sm shrink-0 transition cursor-pointer ${
                       selectedLang === lang.code
-                        ? 'bg-[#FF6B00] text-white shadow'
-                        : 'bg-[#3B1111] text-[#F5E5E5]/70 hover:text-white border border-[rgba(245,229,229,0.08)]'
+                        ? '!bg-[#FF6B00] !text-white shadow'
+                        : '!bg-[#3B1111] !text-[#F5E5E5]/70 hover:!text-white border !border-[rgba(245,229,229,0.08)]'
                     }`}
                   >
                     {lang.name}
-                  </button>
+                  </SubModalButton>
                 ))}
               </div>
 
@@ -275,7 +404,7 @@ export function SubtitleModal({
               )}
 
               <div className="space-y-3">
-                {searchResults.map((match) => (
+                {searchResults.map((match, idx) => (
                   <div
                     key={match.file_id}
                     className="flex items-center justify-between p-4 bg-[#3B1111]/70 border border-[rgba(245,229,229,0.08)] rounded-2xl"
@@ -292,11 +421,13 @@ export function SubtitleModal({
                         )}
                       </div>
                     </div>
-                    <button
-                      type="button"
+                    <SubModalButton
+                      id={`sub-dl-${match.file_id}`}
+                      order={100 + idx}
                       disabled={downloadingId === match.file_id}
                       onClick={() => handleDownload(match)}
-                      className="px-5 py-2.5 rounded-xl font-bold bg-[#FF6B00] text-white flex items-center gap-2 hover:bg-[#FF8533] disabled:opacity-50 transition cursor-pointer"
+                      variant="primary"
+                      className="!px-5 !py-2.5 !rounded-xl font-bold !bg-[#FF6B00] !text-white !flex items-center gap-2 hover:!bg-[#FF8533] disabled:opacity-50 transition cursor-pointer !text-sm"
                     >
                       {downloadingId === match.file_id ? (
                         <Loader2 className="w-4 h-4 animate-spin" />
@@ -304,7 +435,7 @@ export function SubtitleModal({
                         <Download className="w-4 h-4" />
                       )}
                       <span>Download & Activate</span>
-                    </button>
+                    </SubModalButton>
                   </div>
                 ))}
               </div>

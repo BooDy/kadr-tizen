@@ -1,9 +1,14 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import React from 'react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { SubtitleModal } from '../../../src/components/player/SubtitleModal';
 import { ApiClient } from '../../../src/api/client';
 import { TVKeys } from '../../../src/navigation/keys';
+import { FocusProvider, useFocusContext } from '../../../src/navigation/FocusContext';
+
+function DebugFocus() {
+  const { focusedId } = useFocusContext();
+  return <div data-testid="debug-focused-id">{focusedId}</div>;
+}
 
 const mockTracks = [
   { id: 1, media_item_id: 10, source: 'embedded' as any, language: 'eng', title: 'English [Original]', format: 'srt' as any, is_default: true, is_forced: false, stream_url: '/api/v1/subtitles/1/stream.vtt' },
@@ -44,7 +49,7 @@ describe('SubtitleModal', () => {
     const onSubtitleDownloaded = vi.fn();
     const apiClient = new ApiClient('http://127.0.0.1:8492');
 
-    vi.spyOn(apiClient, 'fetch').mockImplementation(async (path: string, options?: any) => {
+    vi.spyOn(apiClient, 'fetch').mockImplementation(async (path: string, _options?: any) => {
       if (path.includes('/search')) {
         return {
           configured: true,
@@ -159,6 +164,116 @@ describe('SubtitleModal', () => {
 
     await waitFor(() => {
       expect(screen.getByText('OpenSubtitles is not configured on the server.')).toBeInTheDocument();
+    });
+  });
+
+  it('supports TV remote D-Pad navigation (ArrowUp/ArrowDown) and Enter key selection with FocusProvider', async () => {
+    const onSelect = vi.fn();
+    const onClose = vi.fn();
+    const apiClient = new ApiClient('http://127.0.0.1:8492');
+
+    render(
+      <FocusProvider>
+        <SubtitleModal
+          isOpen={true}
+          itemId={10}
+          apiClient={apiClient}
+          subtitles={mockTracks}
+          selectedSubtitleId={null} // Off is initial selection
+          onSelectSubtitle={onSelect}
+          onClose={onClose}
+        />
+        <DebugFocus />
+      </FocusProvider>
+    );
+
+    // Initial focus is on Off track (order 10)
+    await waitFor(() => {
+      expect(screen.getByTestId('debug-focused-id').textContent).toBe('sub-track-off');
+      const offBtn = screen.getByTestId('subtitle-option-off');
+      expect(offBtn.className).toContain('tv-focus-ring');
+    });
+
+    // Press ArrowDown to navigate to English track (order 11)
+    act(() => {
+      fireEvent.keyDown(window, { keyCode: TVKeys.DOWN, key: 'ArrowDown' });
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('debug-focused-id').textContent).toBe('sub-track-1');
+      const engBtn = screen.getByTestId('subtitle-option-1');
+      expect(engBtn.className).toContain('tv-focus-ring');
+    });
+
+    // Press ArrowDown to navigate to Arabic track (order 12)
+    act(() => {
+      fireEvent.keyDown(window, { keyCode: TVKeys.DOWN, key: 'ArrowDown' });
+    });
+    await waitFor(() => {
+      const araBtn = screen.getByTestId('subtitle-option-2');
+      expect(araBtn.className).toContain('tv-focus-ring');
+    });
+
+    // Press Enter to select Arabic track
+    act(() => {
+      fireEvent.keyDown(window, { keyCode: TVKeys.ENTER, key: 'Enter' });
+    });
+    expect(onSelect).toHaveBeenCalledWith(2);
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('supports TV remote D-Pad navigation across tabs and language buttons', async () => {
+    const apiClient = new ApiClient('http://127.0.0.1:8492');
+    vi.spyOn(apiClient, 'fetch').mockImplementation(async (path: string) => {
+      if (path.includes('/search')) {
+        return {
+          configured: true,
+          matches: [
+            {
+              file_id: 'os-123',
+              language: 'eng',
+              format: 'srt',
+              title: 'Sample.English.srt',
+              download_count: 42,
+              hearing_impaired: false,
+            },
+          ],
+        } as any;
+      }
+      return {} as any;
+    });
+
+    render(
+      <FocusProvider>
+        <SubtitleModal
+          isOpen={true}
+          itemId={10}
+          apiClient={apiClient}
+          subtitles={mockTracks}
+          selectedSubtitleId={1}
+          onSelectSubtitle={vi.fn()}
+          onClose={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    // Switch to search tab by clicking Search Online
+    act(() => {
+      fireEvent.click(screen.getByText('Search Online'));
+    });
+
+    // Focus automatically shifts to the first language button: eng
+    await waitFor(() => {
+      const engLangBtn = screen.getByTestId('lang-btn-eng');
+      expect(engLangBtn.className).toContain('tv-focus-ring');
+    });
+
+    // Press ArrowRight to navigate to Arabic language button
+    act(() => {
+      fireEvent.keyDown(window, { keyCode: TVKeys.RIGHT, key: 'ArrowRight' });
+    });
+    await waitFor(() => {
+      const araLangBtn = screen.getByTestId('lang-btn-ara');
+      expect(araLangBtn.className).toContain('tv-focus-ring');
     });
   });
 });

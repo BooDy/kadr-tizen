@@ -805,7 +805,8 @@ describe('PlayerScreen', () => {
         await Promise.resolve();
       });
 
-      expect(queryByTestId('subtitles-button')).not.toBeInTheDocument();
+      // Subtitle button remains available so user can search OpenSubtitles online even if local fetch rejected
+      expect(queryByTestId('subtitles-button')).toBeInTheDocument();
       expect(getByText('Sample Movie')).toBeInTheDocument();
     });
 

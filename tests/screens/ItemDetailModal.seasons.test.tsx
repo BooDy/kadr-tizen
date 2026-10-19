@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
-import React from 'react';
 import { ItemDetailModal } from '../../src/screens/ItemDetailModal';
 import { FocusProvider } from '../../src/navigation/FocusContext';
 import { TVKeys } from '../../src/navigation/keys';
