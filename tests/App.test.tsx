@@ -8,6 +8,7 @@ import * as screensApi from '../src/api/screens';
 import * as foldersApi from '../src/api/folders';
 import * as librariesApi from '../src/api/libraries';
 import * as eventsApi from '../src/api/events';
+import * as subtitlesApi from '../src/api/subtitles';
 import { MediaItemDetail } from '../src/api/items';
 import { ScreenLayout } from '../src/types/ast';
 import { ProfileCard, LibraryFolderResponse } from '../src/types/kadr';
@@ -48,6 +49,22 @@ vi.mock('../src/api/playback', () => ({
   reportPlaybackProgress: vi.fn(),
 }));
 
+vi.mock('../src/api/subtitles', () => ({
+  fetchItemSubtitles: vi.fn().mockResolvedValue([
+    {
+      id: 1,
+      media_item_id: 200,
+      source: 'embedded',
+      language: 'eng',
+      title: 'English [Original]',
+      format: 'srt',
+      is_default: true,
+      is_forced: false,
+      stream_url: '/api/v1/subtitles/1/stream.vtt',
+    },
+  ]),
+}));
+
 vi.mock('../src/player/avplay-driver', () => ({
   createPlayerDriver: () => ({
     init: vi.fn().mockResolvedValue(undefined),
@@ -84,7 +101,41 @@ const mockHomeLayout: ScreenLayout = {
       id: 'carousel-1',
       type: 'carousel',
       title: 'Trending',
-      items: [{ id: 200, title: 'Trending Dune Part Two', media_type: 'movie' }],
+      items: [
+        { id: 200, title: 'Trending Dune Part Two', media_type: 'movie' },
+        { id: 300, title: 'Trending Severance Series', media_type: 'show' },
+      ],
+    },
+  ],
+};
+
+const mockSeriesDetail: MediaItemDetail = {
+  id: 300,
+  title: 'Severance',
+  overview: 'Mark Scout leads a team at Lumon Industries.',
+  release_year: 2022,
+  media_type: 'show',
+  episodes: [
+    {
+      id: 301,
+      season: 1,
+      episode: 1,
+      title: 'Good News About Hell',
+      playback_progress: 0,
+    },
+    {
+      id: 302,
+      season: 1,
+      episode: 2,
+      title: 'Half Loop',
+      playback_progress: 0,
+    },
+    {
+      id: 303,
+      season: 2,
+      episode: 1,
+      title: 'Episode 201',
+      playback_progress: 0,
     },
   ],
 };
@@ -147,10 +198,26 @@ describe('App State Machine & Router', () => {
       { id: 'shows', title: 'Shows' },
     ]);
     vi.mocked(screensApi.fetchScreenLayout).mockResolvedValue(mockHomeLayout);
-    vi.mocked(items.fetchMediaItem).mockResolvedValue(mockItemDetail);
+    vi.mocked(items.fetchMediaItem).mockImplementation(async (_client, id) => {
+      if (id === 300 || id === '300') return mockSeriesDetail;
+      return mockItemDetail;
+    });
     vi.mocked(foldersApi.fetchLibraryFolders).mockResolvedValue(mockFolderResponse);
     vi.mocked(librariesApi.fetchLibraries).mockResolvedValue([]);
     vi.mocked(eventsApi.subscribeEvents).mockReturnValue(vi.fn());
+    vi.mocked(subtitlesApi.fetchItemSubtitles).mockResolvedValue([
+      {
+        id: 1,
+        media_item_id: 200,
+        source: 'embedded',
+        language: 'eng',
+        title: 'English [Original]',
+        format: 'srt',
+        is_default: true,
+        is_forced: false,
+        stream_url: '/api/v1/subtitles/1/stream.vtt',
+      },
+    ]);
   });
 
   it('renders ServerConnectScreen on first run when no server saved', async () => {
@@ -753,6 +820,94 @@ describe('App State Machine & Router', () => {
     // PinPadModal closes
     await waitFor(() => {
       expect(screen.queryByText('Unlock Private Library')).not.toBeInTheDocument();
+    });
+  });
+
+  it('navigates series seasons in ItemDetailModal and plays selected episode into PlayerScreen', async () => {
+    localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
+    localStorage.setItem('kadr_token', 'valid-test-token');
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Trending Severance Series')).toBeInTheDocument();
+    });
+
+    // Click on the series card to open detail
+    fireEvent.click(screen.getByText('Trending Severance Series'));
+
+    // Modal renders with seasons and episodes
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      expect(screen.getByText('Season 1')).toBeInTheDocument();
+      expect(screen.getByText('Season 2')).toBeInTheDocument();
+      expect(screen.getByText('Good News About Hell')).toBeInTheDocument();
+    });
+
+    // Switch to Season 2 tab
+    fireEvent.click(screen.getByText('Season 2'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Episode 201')).toBeInTheDocument();
+    });
+
+    // Play Episode 201
+    fireEvent.click(screen.getByText('Episode 201'));
+
+    // Modal closes and player opens with episode title
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(screen.getByText('Episode 201')).toBeInTheDocument();
+    });
+
+    // Press Escape to exit PlayerScreen
+    fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Episode 201')).not.toBeInTheDocument();
+      expect(screen.getByText('Trending Severance Series')).toBeInTheDocument();
+    });
+  });
+
+  it('opens and closes SubtitleModal from PlayerScreen and handles back navigation', async () => {
+    localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
+    localStorage.setItem('kadr_token', 'valid-test-token');
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^Play$/i })).toBeInTheDocument();
+    });
+
+    // Click Play on Hero widget to enter PlayerScreen
+    fireEvent.click(screen.getByRole('button', { name: /^Play$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Playing')).toBeInTheDocument();
+      expect(screen.getByTestId('subtitles-button')).toBeInTheDocument();
+    });
+
+    // Click Subtitles button to open SubtitleModal
+    fireEvent.click(screen.getByTestId('subtitles-button'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: 'Subtitles' })).toBeInTheDocument();
+      expect(screen.getByText('English [Original] (eng)')).toBeInTheDocument();
+      expect(screen.getByText('Off')).toBeInTheDocument();
+    });
+
+    // Close SubtitleModal via Escape
+    fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Subtitles' })).not.toBeInTheDocument();
+    });
+
+    // Press Escape to exit PlayerScreen
+    fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^Play$/i })).toBeInTheDocument();
     });
   });
 });
