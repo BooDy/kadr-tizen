@@ -12,6 +12,7 @@ export interface TVCardProps {
   autoFocus?: boolean;
   order?: number;
   className?: string;
+  'data-testid'?: string;
 }
 
 export function TVCard({
@@ -26,6 +27,7 @@ export function TVCard({
   autoFocus,
   order,
   className = '',
+  'data-testid': testId,
 }: TVCardProps) {
   const { ref, isFocused } = useFocusable<HTMLDivElement>({
     id,
@@ -39,6 +41,7 @@ export function TVCard({
     <div
       ref={ref}
       id={id}
+      data-testid={testId || `card-${id}`}
       tabIndex={-1}
       role="button"
       onClick={onSelect}

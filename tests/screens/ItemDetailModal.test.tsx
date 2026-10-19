@@ -661,6 +661,11 @@ describe('ItemDetailModal', () => {
         fireEvent.keyDown(window, { key: 'ArrowRight' });
       });
       expect(screen.getByTestId('focused-id').textContent).toBe('season-tab-2');
+
+      // Commit Season 2 switch
+      act(() => {
+        fireEvent.keyDown(window, { key: 'Enter' });
+      });
       // Season 2 episodes now visible
       expect(screen.getByText('Season 2 Premiere')).toBeInTheDocument();
 

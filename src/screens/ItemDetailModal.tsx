@@ -74,15 +74,6 @@ export function ItemDetailModal({
     }
   }, [isOpen, pushTrap, popTrap]);
 
-  // When focused on a season tab, update the active season
-  useEffect(() => {
-    if (focusedId && focusedId.startsWith('season-tab-')) {
-      const seasonNum = parseInt(focusedId.replace('season-tab-', ''), 10);
-      if (!isNaN(seasonNum) && seasonNum !== selectedSeason) {
-        setSelectedSeason(seasonNum);
-      }
-    }
-  }, [focusedId, selectedSeason]);
 
   const nextEpisode = useMemo(() => {
     if (!isShow || episodes.length === 0) return null;
@@ -125,8 +116,10 @@ export function ItemDetailModal({
       }
 
       if (seasons.length > 0) {
+        const current = focusedId;
+
+        // Down Navigation
         if (code === TVKeys.DOWN || e.key === 'ArrowDown') {
-          const current = focusedId;
           if (current && (current.startsWith('detail-') || current === 'item-detail-modal')) {
             e.preventDefault();
             e.stopImmediatePropagation();
@@ -139,8 +132,9 @@ export function ItemDetailModal({
               setFocusedId(`episode-card-${seasonEps[0].id}`);
             }
           }
-        } else if (code === TVKeys.UP || e.key === 'ArrowUp') {
-          const current = focusedId;
+        } 
+        // Up Navigation
+        else if (code === TVKeys.UP || e.key === 'ArrowUp') {
           if (current && current.startsWith('episode-card-')) {
             e.preventDefault();
             e.stopImmediatePropagation();
@@ -151,6 +145,43 @@ export function ItemDetailModal({
             setFocusedId(primaryBtnId);
           }
         }
+        // Left Navigation on Season Tabs
+        else if (code === TVKeys.LEFT || e.key === 'ArrowLeft') {
+          if (current && current.startsWith('season-tab-')) {
+            const seasonNum = parseInt(current.replace('season-tab-', ''), 10);
+            const currentIdx = seasons.indexOf(seasonNum);
+            if (currentIdx > 0) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              const prevSeason = seasons[currentIdx - 1];
+              setFocusedId(`season-tab-${prevSeason}`);
+            }
+          }
+        }
+        // Right Navigation on Season Tabs
+        else if (code === TVKeys.RIGHT || e.key === 'ArrowRight') {
+          if (current && current.startsWith('season-tab-')) {
+            const seasonNum = parseInt(current.replace('season-tab-', ''), 10);
+            const currentIdx = seasons.indexOf(seasonNum);
+            if (currentIdx >= 0 && currentIdx < seasons.length - 1) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              const nextSeason = seasons[currentIdx + 1];
+              setFocusedId(`season-tab-${nextSeason}`);
+            }
+          }
+        }
+        // Enter Navigation on Season Tabs: Commit Season Switch
+        else if (code === TVKeys.ENTER || e.key === 'Enter') {
+          if (current && current.startsWith('season-tab-')) {
+            const seasonNum = parseInt(current.replace('season-tab-', ''), 10);
+            if (!isNaN(seasonNum) && seasonNum !== selectedSeason) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              setSelectedSeason(seasonNum);
+            }
+          }
+        }
       }
     };
 
@@ -159,7 +190,7 @@ export function ItemDetailModal({
   }, [
     isOpen,
     onClose,
-    seasons.length,
+    seasons,
     selectedSeason,
     episodes,
     focusedId,
@@ -369,6 +400,7 @@ export function ItemDetailModal({
                   variant={selectedSeason === season ? 'primary' : 'secondary'}
                   onClick={() => setSelectedSeason(season)}
                   onEnter={() => setSelectedSeason(season)}
+                  onFocus={() => setFocusedId(`season-tab-${season}`)}
                   className="!px-6 !py-2.5 !text-base rounded-full mr-3 shrink-0"
                 >
                   Season {season}
