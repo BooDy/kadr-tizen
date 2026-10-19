@@ -173,8 +173,6 @@ export function PlayerScreen({
   const seekDebounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const consecutiveFfCountRef = useRef(0);
   const consecutiveRewCountRef = useRef(0);
-  const lastFfTimeRef = useRef(0);
-  const lastRewTimeRef = useRef(0);
 
   const applySeek = useCallback((deltaMs: number, direction: 'forward' | 'backward', stepLabel: string) => {
     resetOsdTimer();
@@ -260,10 +258,12 @@ export function PlayerScreen({
     driverRef.current = driver;
 
     driver.onTimeUpdate((pos, dur) => {
-      setPositionMs(pos);
       setDurationMs(dur);
-      positionMsRef.current = pos;
       durationMsRef.current = dur;
+      if (seekDebounceTimerRef.current === null) {
+        setPositionMs(pos);
+        positionMsRef.current = pos;
+      }
     });
 
     driver.onStateChange((state) => {

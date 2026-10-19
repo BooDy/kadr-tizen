@@ -86,7 +86,7 @@ export class TizenAvplayDriver implements PlayerDriver {
         if (this.isDestroyed) return;
         if (startMs > 0) {
           try {
-            avplay.seekTo(startMs);
+            this.seekTo(startMs);
           } catch (e) {
             console.warn('[AVPlay] seekTo on start failed:', e);
           }

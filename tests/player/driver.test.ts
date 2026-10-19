@@ -209,7 +209,7 @@ describe('TizenAvplayDriver', () => {
     expect(mockAvplay.setDisplayRect).toHaveBeenCalledWith(0, 0, 1920, 1080);
     expect(mockAvplay.setListener).toHaveBeenCalled();
     expect(mockAvplay.prepareAsync).toHaveBeenCalled();
-    expect(mockAvplay.seekTo).toHaveBeenCalledWith(15000);
+    expect(mockAvplay.seekTo).toHaveBeenCalledWith(15000, expect.any(Function), expect.any(Function));
     expect(mockAvplay.play).toHaveBeenCalled();
     expect(stateSpy).toHaveBeenCalledWith('playing');
 
