@@ -352,10 +352,12 @@ describe('BrowseScreen', () => {
     expect(onSwitchProfile).toHaveBeenCalledTimes(1);
   });
 
-  it('displays error message when screen layout fetch fails', async () => {
-    vi.spyOn(screensApi, 'fetchScreenLayout').mockRejectedValue(
-      new Error('Network error')
+  it('displays error diagnostics and interactive action buttons when screen layout fetch fails', async () => {
+    const fetchLayoutMock = vi.spyOn(screensApi, 'fetchScreenLayout').mockRejectedValue(
+      new Error('Connection refused')
     );
+    const onSwitchProfile = vi.fn();
+    const onSwitchServer = vi.fn();
 
     render(
       <FocusProvider>
@@ -364,13 +366,59 @@ describe('BrowseScreen', () => {
           serverUrl="http://localhost:8492"
           onSelectItem={vi.fn()}
           onPlayItem={vi.fn()}
-          onSwitchProfile={vi.fn()}
+          onSwitchProfile={onSwitchProfile}
+          onSwitchServer={onSwitchServer}
         />
       </FocusProvider>
     );
 
     await waitFor(() => {
       expect(screen.getByText('Failed to load screen layout.')).toBeInTheDocument();
+      expect(screen.getByText(/Connection refused/)).toBeInTheDocument();
+      expect(screen.getByText(/http:\/\/localhost:8492/)).toBeInTheDocument();
+    });
+
+    const retryBtn = screen.getByRole('button', { name: /retry/i });
+    expect(retryBtn).toBeInTheDocument();
+
+    const switchProfileBtn = screen.getByRole('button', { name: /switch profile/i });
+    expect(switchProfileBtn).toBeInTheDocument();
+    fireEvent.click(switchProfileBtn);
+    expect(onSwitchProfile).toHaveBeenCalledTimes(1);
+
+    const changeServerBtn = screen.getByRole('button', { name: /change server/i });
+    expect(changeServerBtn).toBeInTheDocument();
+    fireEvent.click(changeServerBtn);
+    expect(onSwitchServer).toHaveBeenCalledTimes(1);
+
+    // Test retry
+    fetchLayoutMock.mockResolvedValueOnce(mockHomeLayout);
+    fireEvent.click(retryBtn);
+    await waitFor(() => {
+      expect(screen.getByText('Home Featured Movie')).toBeInTheDocument();
+    });
+  });
+
+  it('automatically triggers onSwitchProfile when layout fetch fails with 401 Unauthorized', async () => {
+    vi.spyOn(screensApi, 'fetchScreenLayout').mockRejectedValue(
+      new Error('HTTP error 401: Unauthorized')
+    );
+    const onSwitchProfile = vi.fn();
+
+    render(
+      <FocusProvider>
+        <BrowseScreen
+          client={mockClient}
+          serverUrl="http://localhost:8492"
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+          onSwitchProfile={onSwitchProfile}
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(onSwitchProfile).toHaveBeenCalledTimes(1);
     });
   });
 

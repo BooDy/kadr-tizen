@@ -5,7 +5,7 @@ import { fetchScreens, fetchScreenLayout } from '../api/screens';
 import { fetchLibraries, LibrarySummary } from '../api/libraries';
 import { WidgetRenderer } from '../components/widgets/WidgetRenderer';
 import { TVButton } from '../components/tv/TVButton';
-import { Home, Film, Tv, Layers, Users, Lock, Unlock, KeyRound } from 'lucide-react';
+import { Home, Film, Tv, Layers, Users, Lock, Unlock, KeyRound, AlertTriangle, RotateCcw, Server } from 'lucide-react';
 import { useFocusContext } from '../navigation/FocusContext';
 import { TVKeys } from '../navigation/keys';
 
@@ -15,6 +15,7 @@ export interface BrowseScreenProps {
   onSelectItem: (itemId: number | string) => void;
   onPlayItem: (itemId: number | string, resumeMs?: number) => void;
   onSwitchProfile: () => void;
+  onSwitchServer?: () => void;
   onLockedLibrary?: (libraryId: string) => void;
   initialTab?: string;
   refreshKey?: number;
@@ -57,7 +58,7 @@ function getFirstFocusableId(layout: ScreenLayout): string | null {
 
 function isLeftmostContentNode(id: string | null, layout: ScreenLayout | null): boolean {
   if (!id) return false;
-  if (id === 'unlock-library-btn') return true;
+  if (id === 'unlock-library-btn' || id === 'retry-layout-btn') return true;
   if (!layout) return false;
   for (const widget of layout.widgets) {
     if (widget.type === 'hero_banner') {
@@ -117,6 +118,7 @@ export function BrowseScreen({
   onSelectItem,
   onPlayItem,
   onSwitchProfile,
+  onSwitchServer,
   onLockedLibrary,
   initialTab,
   refreshKey,
@@ -128,6 +130,8 @@ export function BrowseScreen({
   const [activeTab, setActiveTab] = useState<string>(initialTab || 'home');
   const [layout, setLayout] = useState<ScreenLayout | null>(null);
   const [loading, setLoading] = useState(true);
+  const [layoutError, setLayoutError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState<number>(0);
 
   const { focusedId, setFocusedId, activeTrap } = useFocusContext();
 
@@ -170,8 +174,10 @@ export function BrowseScreen({
           });
         }
       })
-      .catch(() => {
-        // Fallback to defaultScreens
+      .catch((err) => {
+        if (err?.message?.includes('401')) {
+          onSwitchProfile?.();
+        }
       });
 
     if (!propLibraries) {
@@ -187,7 +193,7 @@ export function BrowseScreen({
     return () => {
       cancelled = true;
     };
-  }, [client, initialTab, refreshKey, propLibraries]);
+  }, [client, initialTab, refreshKey, propLibraries, onSwitchProfile]);
 
   useEffect(() => {
     lastContentFocusedIdRef.current = null;
@@ -210,6 +216,7 @@ export function BrowseScreen({
       .then((data) => {
         if (!cancelled) {
           setLayout(data);
+          setLayoutError(null);
           setLoading(false);
           // If no focus is currently set, focus the first focusable element
           if (focusedIdRef.current === null) {
@@ -225,16 +232,23 @@ export function BrowseScreen({
           }
         }
       })
-      .catch(() => {
+      .catch((err) => {
         if (!cancelled) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes('401')) {
+            onSwitchProfile?.();
+            return;
+          }
           setLayout(null);
+          setLayoutError(msg || 'Network error');
           setLoading(false);
+          setFocusedId('retry-layout-btn');
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [client, activeTab, setFocusedId, refreshKey]);
+  }, [client, activeTab, setFocusedId, refreshKey, retryCount, onSwitchProfile]);
 
   const handleSelectScreen = (screenId: string) => {
     const info = getLibraryInfo(screenId);
@@ -451,8 +465,53 @@ export function BrowseScreen({
             onPlayItem={onPlayItem}
           />
         ) : (
-          <div className="w-full h-full flex items-center justify-center text-[#D43F15] text-2xl">
-            Failed to load screen layout.
+          <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center space-y-6">
+            <div className="w-20 h-20 rounded-full bg-[#D43F15]/10 border border-[#D43F15]/30 flex items-center justify-center">
+              <AlertTriangle className="w-10 h-10 text-[#D43F15]" />
+            </div>
+            <div className="space-y-2 max-w-xl">
+              <h2 className="text-3xl font-bold text-[#F5E5E5]">
+                Failed to load screen layout.
+              </h2>
+              <p className="text-lg text-[#D43F15]">
+                Error: {layoutError || 'Unable to connect to server'}
+              </p>
+              <p className="text-sm text-[#5C3C3C] break-all">
+                Server URL: {serverUrl}
+              </p>
+            </div>
+            <div className="flex items-center gap-4 mt-4">
+              <TVButton
+                id="retry-layout-btn"
+                groupId="content"
+                variant="primary"
+                autoFocus
+                onClick={() => setRetryCount((c) => c + 1)}
+                onEnter={() => setRetryCount((c) => c + 1)}
+              >
+                <RotateCcw className="w-5 h-5 mr-2" /> Retry
+              </TVButton>
+              <TVButton
+                id="switch-profile-btn"
+                groupId="content"
+                variant="secondary"
+                onClick={() => onSwitchProfile?.()}
+                onEnter={() => onSwitchProfile?.()}
+              >
+                <Users className="w-5 h-5 mr-2" /> Switch Profile
+              </TVButton>
+              {onSwitchServer && (
+                <TVButton
+                  id="change-server-btn"
+                  groupId="content"
+                  variant="secondary"
+                  onClick={() => onSwitchServer?.()}
+                  onEnter={() => onSwitchServer?.()}
+                >
+                  <Server className="w-5 h-5 mr-2" /> Change Server
+                </TVButton>
+              )}
+            </div>
           </div>
         )}
       </main>

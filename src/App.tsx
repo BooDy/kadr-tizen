@@ -125,6 +125,20 @@ export default function App() {
     return { success: false, error: res.error, lockedOutSecs: res.retryAfterSecs };
   };
 
+  const handleSwitchServer = () => {
+    localStorage.removeItem('kadr_server_url');
+    localStorage.removeItem('kadr_server_name');
+    localStorage.removeItem('kadr_token');
+    setServerUrl(null);
+    setToken(null);
+    setActiveItem(null);
+    setFolderBrowserState(null);
+    setImageViewerState(null);
+    setUnlockLibraryId(null);
+    client.clearLibraryUnlockTokens();
+    setView('connect');
+  };
+
   const handleOpenDetail = async (itemId: number | string) => {
     try {
       const item = await fetchMediaItem(client, itemId);
@@ -234,6 +248,7 @@ export default function App() {
                 client.clearLibraryUnlockTokens();
                 setView('profiles');
               }}
+              onSwitchServer={handleSwitchServer}
               refreshKey={screenRefreshKey}
             />
             {folderBrowserState && (
