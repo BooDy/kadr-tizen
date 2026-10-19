@@ -18,9 +18,9 @@ export interface DiagnosticPayload {
 export function ErrorQRCode({ payload }: { payload: DiagnosticPayload }) {
   const qrSvg = useMemo(() => {
     try {
-      const text = JSON.stringify(payload, null, 2);
+      const text = JSON.stringify(payload);
       let svg = '';
-      QRCode.toString(text, { type: 'svg', margin: 1, width: 220, color: { dark: '#000000', light: '#FFFFFF' } }, (err, string) => {
+      QRCode.toString(text, { type: 'svg', margin: 1, width: 200, color: { dark: '#000000', light: '#FFFFFF' } }, (err, string) => {
         if (!err && string) {
           svg = string;
         }
@@ -39,7 +39,7 @@ export function ErrorQRCode({ payload }: { payload: DiagnosticPayload }) {
       {qrSvg ? (
         <div
           dangerouslySetInnerHTML={{ __html: qrSvg }}
-          className="w-[200px] h-[200px] flex items-center justify-center"
+          className="w-[200px] h-[200px] flex items-center justify-center [&>svg]:w-full [&>svg]:h-full"
         />
       ) : (
         <div className="w-[200px] h-[200px] flex items-center justify-center text-black font-bold">

@@ -25,7 +25,9 @@ export function checkMediaCompatibility(
   const reasons: string[] = [];
   const warnings: string[] = [];
 
-  if (KNOWN_COMPATIBILITY_INFO.unsupportedAudio.some((bad) => a.includes(bad))) {
+  if (a.includes('truehd')) {
+    reasons.push('Dolby TrueHD audio decoding is not supported on Samsung TV hardware.');
+  } else if (KNOWN_COMPATIBILITY_INFO.unsupportedAudio.some((bad) => a.includes(bad))) {
     reasons.push('DTS audio is not supported on Samsung TV hardware (2018+ models lack DTS decoders).');
   }
 

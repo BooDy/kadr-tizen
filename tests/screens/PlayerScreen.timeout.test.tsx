@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
 import { PlayerScreen } from '../../src/screens/PlayerScreen';
 import { ApiClient } from '../../src/api/client';
@@ -25,6 +25,11 @@ describe('PlayerScreen 10s Fail-Fast Buffering Timeout', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
   });
 
   it('triggers error screen with QR code if stream does not play within 10 seconds', async () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { checkMediaCompatibility, KNOWN_COMPATIBILITY_INFO } from '../../src/player/compatibility';
+import { checkMediaCompatibility, KNOWN_COMPATIBILITY_INFO, isSupportedOnSamsungTv } from '../../src/player/compatibility';
 
 describe('Samsung TV Codec Compatibility Matrix', () => {
   it('exposes known hardware compatibility definitions', () => {
@@ -19,9 +19,21 @@ describe('Samsung TV Codec Compatibility Matrix', () => {
     expect(result.reasons).toContain('DTS audio is not supported on Samsung TV hardware (2018+ models lack DTS decoders).');
   });
 
+  it('identifies unsupported TrueHD audio on Samsung TV hardware', () => {
+    const result = checkMediaCompatibility('hevc', 'truehd', 'mkv');
+    expect(result.isSupported).toBe(false);
+    expect(result.reasons).toContain('Dolby TrueHD audio decoding is not supported on Samsung TV hardware.');
+  });
+
   it('identifies unsupported AV1 video on pre-2021 Tizen chipsets', () => {
     const result = checkMediaCompatibility('av1', 'aac', 'mp4');
     expect(result.isSupported).toBe(false);
     expect(result.reasons).toContain('AV1 video decoding is not supported on this TV hardware.');
+  });
+
+  it('verifies isSupportedOnSamsungTv helper function', () => {
+    expect(isSupportedOnSamsungTv('h264', 'aac', 'mp4')).toBe(true);
+    expect(isSupportedOnSamsungTv('hevc', 'dts', 'mkv')).toBe(false);
+    expect(isSupportedOnSamsungTv('av1', 'aac', 'mp4')).toBe(false);
   });
 });
