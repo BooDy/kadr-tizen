@@ -124,11 +124,26 @@ describe('PlayerOSD', () => {
       expect(queryByTestId('subtitles-button')).not.toBeInTheDocument();
     });
 
-    it('renders Subtitles button when subtitles are provided', () => {
-      const { getByTestId, getByText } = render(
+    it('does not render Subtitles button when video is playing', () => {
+      const { queryByTestId } = render(
         <PlayerOSD
           title="Big Buck Bunny"
           playerState="playing"
+          positionMs={0}
+          durationMs={100000}
+          visible={true}
+          subtitles={mockSubtitles}
+        />
+      );
+
+      expect(queryByTestId('subtitles-button')).not.toBeInTheDocument();
+    });
+
+    it('renders Subtitles button next to seek bar when video is paused', () => {
+      const { getByTestId, getByText } = render(
+        <PlayerOSD
+          title="Big Buck Bunny"
+          playerState="paused"
           positionMs={0}
           durationMs={100000}
           visible={true}
@@ -146,7 +161,7 @@ describe('PlayerOSD', () => {
       const { getByTestId, queryByTestId, getByText } = render(
         <PlayerOSD
           title="Big Buck Bunny"
-          playerState="playing"
+          playerState="paused"
           positionMs={0}
           durationMs={100000}
           visible={true}
@@ -175,7 +190,7 @@ describe('PlayerOSD', () => {
       const { getByTestId, queryByTestId } = render(
         <PlayerOSD
           title="Big Buck Bunny"
-          playerState="playing"
+          playerState="paused"
           positionMs={0}
           durationMs={100000}
           visible={true}
@@ -197,7 +212,7 @@ describe('PlayerOSD', () => {
       const { getByTestId, queryByTestId } = render(
         <PlayerOSD
           title="Big Buck Bunny"
-          playerState="playing"
+          playerState="paused"
           positionMs={0}
           durationMs={100000}
           visible={true}
@@ -219,7 +234,7 @@ describe('PlayerOSD', () => {
       const { getByTestId, queryByTestId } = render(
         <PlayerOSD
           title="Big Buck Bunny"
-          playerState="playing"
+          playerState="paused"
           positionMs={0}
           durationMs={100000}
           visible={true}
@@ -248,7 +263,7 @@ describe('PlayerOSD', () => {
       const { getByTestId, queryByTestId } = render(
         <PlayerOSD
           title="Big Buck Bunny"
-          playerState="playing"
+          playerState="paused"
           positionMs={0}
           durationMs={100000}
           visible={true}
@@ -273,7 +288,7 @@ describe('PlayerOSD', () => {
         <FocusProvider>
           <PlayerOSD
             title="Big Buck Bunny"
-            playerState="playing"
+            playerState="paused"
             positionMs={0}
             durationMs={100000}
             visible={true}
@@ -299,7 +314,7 @@ describe('PlayerOSD', () => {
       const { getByTestId } = render(
         <PlayerOSD
           title="Big Buck Bunny"
-          playerState="playing"
+          playerState="paused"
           positionMs={0}
           durationMs={100000}
           visible={true}
@@ -322,7 +337,7 @@ describe('PlayerOSD', () => {
       const { getByTestId, queryByTestId, rerender } = render(
         <PlayerOSD
           title="Big Buck Bunny"
-          playerState="playing"
+          playerState="paused"
           positionMs={0}
           durationMs={100000}
           visible={true}
@@ -338,7 +353,7 @@ describe('PlayerOSD', () => {
       rerender(
         <PlayerOSD
           title="Big Buck Bunny"
-          playerState="playing"
+          playerState="paused"
           positionMs={0}
           durationMs={100000}
           visible={false}

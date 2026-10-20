@@ -725,6 +725,12 @@ describe('PlayerScreen', () => {
       expect(mockDriver.setSubtitleTrack).toHaveBeenCalledWith(
         'http://localhost:8492/api/v1/subtitles/1/stream.vtt'
       );
+
+      // Subtitles button appears when video is paused
+      act(() => {
+        mockDriver.stateCallback?.('paused');
+      });
+
       expect(getByTestId('subtitles-button')).toBeInTheDocument();
       expect(getByText('Subtitles')).toBeInTheDocument();
     });
@@ -744,6 +750,10 @@ describe('PlayerScreen', () => {
 
       await act(async () => {
         await Promise.resolve();
+      });
+
+      act(() => {
+        mockDriver.stateCallback?.('paused');
       });
 
       // Open subtitles popup
@@ -779,6 +789,10 @@ describe('PlayerScreen', () => {
       });
 
       act(() => {
+        mockDriver.stateCallback?.('paused');
+      });
+
+      act(() => {
         getByTestId('subtitles-button').click();
       });
 
@@ -806,7 +820,11 @@ describe('PlayerScreen', () => {
         await Promise.resolve();
       });
 
-      // Subtitle button remains available so user can search OpenSubtitles online even if local fetch rejected
+      act(() => {
+        mockDriver.stateCallback?.('paused');
+      });
+
+      // Subtitle button remains available when paused so user can search OpenSubtitles online even if local fetch rejected
       expect(queryByTestId('subtitles-button')).toBeInTheDocument();
       expect(getByText('Sample Movie')).toBeInTheDocument();
     });
@@ -828,9 +846,9 @@ describe('PlayerScreen', () => {
         await Promise.resolve();
       });
 
-      // Playing state
+      // Paused state to show subtitles button
       act(() => {
-        mockDriver.stateCallback?.('playing');
+        mockDriver.stateCallback?.('paused');
       });
 
       // Open subtitles popup
@@ -838,6 +856,11 @@ describe('PlayerScreen', () => {
         getByTestId('subtitles-button').click();
       });
       expect(getByTestId('subtitles-popup')).toBeInTheDocument();
+
+      // Resume playing
+      act(() => {
+        mockDriver.stateCallback?.('playing');
+      });
 
       // Advance 5 seconds (past the 4s auto-hide limit)
       act(() => {
@@ -867,7 +890,7 @@ describe('PlayerScreen', () => {
       });
 
       act(() => {
-        mockDriver.stateCallback?.('playing');
+        mockDriver.stateCallback?.('paused');
       });
 
       // Open popup
@@ -937,6 +960,10 @@ describe('PlayerScreen', () => {
 
       await act(async () => {
         await Promise.resolve();
+      });
+
+      act(() => {
+        mockDriver.stateCallback?.('paused');
       });
 
       // Open subtitles modal

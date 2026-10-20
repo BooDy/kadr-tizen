@@ -6,6 +6,7 @@ import { ApiClient } from '../../src/api/client';
 
 let mockDriver: any = null;
 let onTimeUpdateCb: ((pos: number, dur: number) => void) | null = null;
+let onStateChangeCb: ((state: string) => void) | null = null;
 
 const createMockDriver = () => {
   mockDriver = {
@@ -20,7 +21,10 @@ const createMockDriver = () => {
       onTimeUpdateCb = cb;
       cb(30000, 120000);
     }),
-    onStateChange: vi.fn((cb) => cb('playing')),
+    onStateChange: vi.fn((cb) => {
+      onStateChangeCb = cb;
+      cb('playing');
+    }),
     onError: vi.fn(),
   };
   return mockDriver;
@@ -167,6 +171,11 @@ describe('PlayerScreen Seeking & Fast Forward', () => {
         onExit={onExit}
       />
     );
+
+    // Pause player so subtitles button appears
+    await act(async () => {
+      onStateChangeCb?.('paused');
+    });
 
     // Open SubtitleModal
     await act(async () => {

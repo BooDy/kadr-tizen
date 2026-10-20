@@ -81,32 +81,47 @@ export class TizenAvplayDriver implements PlayerDriver {
       onstreamcompleted: () => this.stateCallback?.('ended'),
     });
 
-    avplay.prepareAsync(
-      () => {
-        if (this.isDestroyed) return;
-        if (startMs > 0) {
+    const startPlayback = () => {
+      avplay.prepareAsync(
+        () => {
+          if (this.isDestroyed) return;
           try {
-            this.seekTo(startMs);
+            avplay.play();
           } catch (e) {
-            console.warn('[AVPlay] seekTo on start failed:', e);
+            console.error('[AVPlay] play failed:', e);
+          }
+          this.stateCallback?.('playing');
+        },
+        (err: any) => {
+          if (!this.isDestroyed) {
+            console.error('[AVPlay] prepareAsync failed:', err);
+            const errStr = formatAvplayError(err, 'AVPlay Prepare Error');
+            this.stateCallback?.('error');
+            this.errorCallback?.(errStr);
           }
         }
-        try {
-          avplay.play();
-        } catch (e) {
-          console.error('[AVPlay] play failed:', e);
-        }
-        this.stateCallback?.('playing');
-      },
-      (err: any) => {
-        if (!this.isDestroyed) {
-          console.error('[AVPlay] prepareAsync failed:', err);
-          const errStr = formatAvplayError(err, 'AVPlay Prepare Error');
-          this.stateCallback?.('error');
-          this.errorCallback?.(errStr);
-        }
+      );
+    };
+
+    if (startMs > 0) {
+      try {
+        avplay.seekTo(
+          Math.max(0, Math.floor(startMs)),
+          () => {
+            if (!this.isDestroyed) startPlayback();
+          },
+          (err: any) => {
+            console.warn('[AVPlay] seekTo in IDLE state failed, falling back to prepare:', err);
+            if (!this.isDestroyed) startPlayback();
+          }
+        );
+      } catch (e) {
+        console.warn('[AVPlay] seekTo in IDLE exception:', e);
+        startPlayback();
       }
-    );
+    } else {
+      startPlayback();
+    }
   }
 
   play(): void {

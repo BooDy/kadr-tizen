@@ -202,6 +202,8 @@ export function PlayerScreen({
   const [seekHud, setSeekHud] = useState<{ label: string; targetMs: number; direction: 'forward' | 'backward' } | null>(null);
   const seekHudTimerRef = useRef<NodeJS.Timeout | null>(null);
   const seekDebounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const seekDirectionRef = useRef<'forward' | 'backward' | null>(null);
+  const targetSeekMsRef = useRef<number | null>(null);
   const seekLockUntilMsRef = useRef<number>(0);
   const consecutiveFfCountRef = useRef(0);
   const consecutiveRewCountRef = useRef(0);
@@ -213,7 +215,9 @@ export function PlayerScreen({
     const targetMs = Math.max(0, Math.min(dur, current + deltaMs));
     positionMsRef.current = targetMs;
     setPositionMs(targetMs);
-    seekLockUntilMsRef.current = Date.now() + 2500;
+    seekDirectionRef.current = direction;
+    targetSeekMsRef.current = targetMs;
+    seekLockUntilMsRef.current = Date.now() + 4000;
 
     setSeekHud({
       label: stepLabel,
@@ -231,9 +235,12 @@ export function PlayerScreen({
     if (seekDebounceTimerRef.current) clearTimeout(seekDebounceTimerRef.current);
     seekDebounceTimerRef.current = setTimeout(() => {
       seekDebounceTimerRef.current = null;
-      seekLockUntilMsRef.current = Date.now() + 1500;
+      seekDirectionRef.current = direction;
+      targetSeekMsRef.current = targetMs;
+      seekLockUntilMsRef.current = Date.now() + 3000;
       driverRef.current?.seekTo(targetMs, () => {
-        seekLockUntilMsRef.current = 0;
+        // Seek submitted to player; allow at most 1s before unlocking if no time update matches
+        seekLockUntilMsRef.current = Math.min(seekLockUntilMsRef.current, Date.now() + 1000);
       });
     }, 300);
   }, [resetOsdTimer]);
@@ -314,10 +321,32 @@ export function PlayerScreen({
       }
       setDurationMs(dur);
       durationMsRef.current = dur;
-      if (seekDebounceTimerRef.current === null && Date.now() >= seekLockUntilMsRef.current) {
-        setPositionMs(pos);
-        positionMsRef.current = pos;
+
+      // When seeking is in progress, ignore stale time updates
+      if (seekDebounceTimerRef.current !== null) {
+        return;
       }
+      if (targetSeekMsRef.current !== null) {
+        if (Date.now() < seekLockUntilMsRef.current) {
+          const dir = seekDirectionRef.current;
+          const target = targetSeekMsRef.current;
+          const isStale =
+            dir === 'forward'
+              ? pos < target - 2000
+              : dir === 'backward'
+              ? pos > target + 2000
+              : false;
+          if (isStale) {
+            // Drop stale timestamp from before seek completed
+            return;
+          }
+        }
+        targetSeekMsRef.current = null;
+        seekDirectionRef.current = null;
+      }
+
+      setPositionMs(pos);
+      positionMsRef.current = pos;
     });
 
     driver.onStateChange((state) => {
@@ -434,12 +463,29 @@ export function PlayerScreen({
       if (
         code === TVKeys.PLAY_PAUSE ||
         code === TVKeys.PLAY ||
-        code === TVKeys.PAUSE
+        code === TVKeys.PAUSE ||
+        e.key === 'MediaPlayPause' ||
+        e.key === ' ' ||
+        e.key === 'k'
       ) {
         if (playerStateRef.current === 'playing') {
           driverRef.current?.pause();
         } else {
           driverRef.current?.play();
+        }
+      } else if (playerStateRef.current === 'paused' && (code === TVKeys.DOWN || e.key === 'ArrowDown')) {
+        const subBtn = document.getElementById('btn-subtitles');
+        if (subBtn && document.activeElement !== subBtn) {
+          e.preventDefault();
+          subBtn.focus();
+          return;
+        }
+      } else if (playerStateRef.current === 'paused' && (code === TVKeys.UP || e.key === 'ArrowUp')) {
+        const subBtn = document.getElementById('btn-subtitles');
+        if (subBtn && document.activeElement === subBtn) {
+          e.preventDefault();
+          subBtn.blur();
+          return;
         }
       } else if (code === TVKeys.ENTER || e.key === 'Enter') {
         if (

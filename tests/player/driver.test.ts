@@ -167,7 +167,9 @@ describe('TizenAvplayDriver', () => {
       prepareAsync: vi.fn((cb: () => void) => cb && cb()),
       play: vi.fn(),
       pause: vi.fn(),
-      seekTo: vi.fn(),
+      seekTo: vi.fn((_ms: number, successCb?: () => void) => {
+        if (successCb) successCb();
+      }),
       stop: vi.fn(),
       close: vi.fn(),
       getDuration: vi.fn(() => 60000),
@@ -250,7 +252,6 @@ describe('TizenAvplayDriver', () => {
     // Now invoke the pending callback
     prepareSuccessCb?.();
 
-    expect(mockAvplay.seekTo).not.toHaveBeenCalled();
     expect(mockAvplay.play).not.toHaveBeenCalled();
     expect(stateSpy).not.toHaveBeenCalled();
   });

@@ -157,58 +157,63 @@ export function PlayerOSD({
     >
       <div className="flex justify-between items-center">
         <h2 className="text-3xl font-bold text-white drop-shadow-md">{title}</h2>
-        <div className="flex items-center gap-6">
-          {hasSubtitles && (
-            focusCtx ? (
-              <TVButton
-                id="btn-subtitles"
-                groupId="player-osd"
-                variant={selectedSubtitleId ? 'primary' : 'secondary'}
-                onClick={handleOpenSubtitles}
-                onEnter={handleOpenSubtitles}
-                data-testid="subtitles-button"
-                aria-label="Subtitles"
-                className="pointer-events-auto px-5 py-2.5 text-lg"
-              >
-                <span className="font-bold border border-current px-1.5 py-0.5 rounded text-xs">CC</span>
-                <span>Subtitles</span>
-              </TVButton>
-            ) : (
-              <button
-                id="btn-subtitles"
-                type="button"
-                data-testid="subtitles-button"
-                aria-label="Subtitles"
-                onClick={handleOpenSubtitles}
-                className={`pointer-events-auto px-5 py-2.5 rounded-xl font-semibold text-lg flex items-center gap-2 cursor-pointer transition-all duration-150 outline-none ${
-                  selectedSubtitleId
-                    ? 'bg-[#D43F15] text-[#F5E5E5]'
-                    : 'bg-[#3B1111] text-[#F5E5E5] border border-[rgba(245,229,229,0.08)] hover:bg-[#4A1616] focus:ring-4 focus:ring-[#FFB800]/50'
-                }`}
-              >
-                <span className="font-bold border border-current px-1.5 py-0.5 rounded text-xs">CC</span>
-                <span>Subtitles</span>
-              </button>
-            )
-          )}
-          <div className="text-[#5C3C3C] text-lg uppercase tracking-widest">{playerState}</div>
-        </div>
+        <div className="text-[#5C3C3C] text-lg uppercase tracking-widest">{playerState}</div>
       </div>
 
       <div className="flex flex-col gap-3">
-        <div className="relative w-full h-3 bg-[#3B1111]/80 rounded-full">
-          <div
-            className="h-full bg-[#FF6B00] rounded-full transition-all duration-200"
-            style={{ width: `${progressPercent}%` }}
-          />
-          <div
-            className="absolute top-1/2 -translate-y-1/2 w-5 h-5 bg-[#FFB800] rounded-full shadow-md transition-all duration-200 -ml-2.5"
-            style={{ left: `${progressPercent}%` }}
-          />
-        </div>
-        <div className="flex justify-between text-[#F5E5E5]/80 font-mono text-lg">
-          <span>{formatTime(positionMs)}</span>
-          <span>{formatTime(durationMs)}</span>
+        <div className="flex items-center gap-6">
+          <div className="flex-1 flex flex-col gap-2">
+            <div className="relative w-full h-3 bg-[#3B1111]/80 rounded-full">
+              <div
+                className="h-full bg-[#FF6B00] rounded-full transition-all duration-200"
+                style={{ width: `${progressPercent}%` }}
+              />
+              <div
+                className="absolute top-1/2 -translate-y-1/2 w-5 h-5 bg-[#FFB800] rounded-full shadow-md transition-all duration-200 -ml-2.5"
+                style={{ left: `${progressPercent}%` }}
+              />
+            </div>
+            <div className="flex justify-between text-[#F5E5E5]/80 font-mono text-lg">
+              <span>{formatTime(positionMs)}</span>
+              <span>{formatTime(durationMs)}</span>
+            </div>
+          </div>
+
+          {playerState === 'paused' && hasSubtitles && (
+            <div className="shrink-0 pb-6">
+              {focusCtx ? (
+                <TVButton
+                  id="btn-subtitles"
+                  groupId="player-osd"
+                  variant={selectedSubtitleId ? 'primary' : 'secondary'}
+                  onClick={handleOpenSubtitles}
+                  onEnter={handleOpenSubtitles}
+                  data-testid="subtitles-button"
+                  aria-label="Subtitles"
+                  className="pointer-events-auto !px-6 !py-3 !text-xl font-bold rounded-2xl gap-3"
+                >
+                  <span className="font-bold border border-current px-2 py-0.5 rounded text-sm">CC</span>
+                  <span>Subtitles</span>
+                </TVButton>
+              ) : (
+                <button
+                  id="btn-subtitles"
+                  type="button"
+                  data-testid="subtitles-button"
+                  aria-label="Subtitles"
+                  onClick={handleOpenSubtitles}
+                  className={`pointer-events-auto px-6 py-3 rounded-2xl font-bold text-xl flex items-center gap-3 cursor-pointer transition-all duration-150 outline-none ${
+                    selectedSubtitleId
+                      ? 'bg-[#D43F15] text-[#F5E5E5]'
+                      : 'bg-[#3B1111] text-[#F5E5E5] border border-[rgba(245,229,229,0.08)] hover:bg-[#4A1616] focus:ring-4 focus:ring-[#FFB800]/50'
+                  }`}
+                >
+                  <span className="font-bold border border-current px-2 py-0.5 rounded text-sm">CC</span>
+                  <span>Subtitles</span>
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

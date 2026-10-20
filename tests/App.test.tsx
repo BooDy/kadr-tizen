@@ -65,19 +65,30 @@ vi.mock('../src/api/subtitles', () => ({
   ]),
 }));
 
-vi.mock('../src/player/avplay-driver', () => ({
-  createPlayerDriver: () => ({
-    init: vi.fn().mockResolvedValue(undefined),
-    play: vi.fn(),
-    pause: vi.fn(),
-    seekTo: vi.fn(),
-    destroy: vi.fn(),
-    setSubtitleTrack: vi.fn(),
-    onTimeUpdate: vi.fn(),
-    onStateChange: vi.fn(),
-    onError: vi.fn(),
-  }),
-}));
+vi.mock('../src/player/avplay-driver', () => {
+  let stateCb: ((state: string) => void) | null = null;
+  return {
+    createPlayerDriver: () => ({
+      init: vi.fn().mockImplementation(async () => {
+        stateCb?.('playing');
+      }),
+      play: vi.fn(() => {
+        stateCb?.('playing');
+      }),
+      pause: vi.fn(() => {
+        stateCb?.('paused');
+      }),
+      seekTo: vi.fn(),
+      destroy: vi.fn(),
+      setSubtitleTrack: vi.fn(),
+      onTimeUpdate: vi.fn(),
+      onStateChange: vi.fn((cb) => {
+        stateCb = cb;
+      }),
+      onError: vi.fn(),
+    }),
+  };
+});
 
 const mockProfiles: ProfileCard[] = [
   { id: 'user-1', username: 'Alice', role: 'admin' },
@@ -884,6 +895,13 @@ describe('App State Machine & Router', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Playing')).toBeInTheDocument();
+    });
+
+    // Pause playback so subtitles button appears
+    fireEvent.keyDown(window, { key: 'k', code: 'KeyK' });
+
+    await waitFor(() => {
+      expect(screen.getByText('paused')).toBeInTheDocument();
       expect(screen.getByTestId('subtitles-button')).toBeInTheDocument();
     });
 
