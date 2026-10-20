@@ -235,6 +235,9 @@ export default function App() {
               serverUrl={serverUrl || ''}
               onSelectItem={handleOpenDetail}
               onPlayItem={handlePlayItem}
+              onBrowseFolder={(libraryId, folderPath) => {
+                setFolderBrowserState({ libraryId, path: folderPath || '' });
+              }}
               onLockedLibrary={(libraryId) => {
                 setUnlockLibraryId(libraryId);
               }}

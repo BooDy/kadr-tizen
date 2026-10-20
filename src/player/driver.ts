@@ -5,7 +5,7 @@ export interface PlayerDriver {
   init(container: HTMLElement, streamUrl: string, startMs: number): Promise<void>;
   play(): void;
   pause(): void;
-  seekTo(ms: number): void;
+  seekTo(ms: number, onComplete?: () => void): void;
   destroy(): void;
   setSubtitleTrack(trackUrl: string | null): void;
   onTimeUpdate(callback: (posMs: number, durationMs: number) => void): void;

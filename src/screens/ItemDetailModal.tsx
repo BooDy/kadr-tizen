@@ -116,15 +116,26 @@ export function ItemDetailModal({
       }
 
       if (seasons.length > 0) {
-        const current = focusedId;
+        const activeDomId = typeof document !== 'undefined' ? document.activeElement?.id || '' : '';
+        const current = focusedId || activeDomId;
+        const isDetailAction =
+          current.startsWith('detail-') ||
+          activeDomId.startsWith('detail-') ||
+          current === 'item-detail-modal';
+        const isSeasonTab =
+          current.startsWith('season-tab-') ||
+          activeDomId.startsWith('season-tab-');
+        const isEpisodeCard =
+          current.startsWith('episode-card-') ||
+          activeDomId.startsWith('episode-card-');
 
         // Down Navigation
         if (code === TVKeys.DOWN || e.key === 'ArrowDown') {
-          if (current && (current.startsWith('detail-') || current === 'item-detail-modal')) {
+          if (isDetailAction) {
             e.preventDefault();
             e.stopImmediatePropagation();
             setFocusedId(`season-tab-${selectedSeason}`);
-          } else if (current && current.startsWith('season-tab-')) {
+          } else if (isSeasonTab) {
             const seasonEps = episodes.filter((ep) => ep.season === selectedSeason);
             if (seasonEps.length > 0) {
               e.preventDefault();
@@ -135,11 +146,11 @@ export function ItemDetailModal({
         } 
         // Up Navigation
         else if (code === TVKeys.UP || e.key === 'ArrowUp') {
-          if (current && current.startsWith('episode-card-')) {
+          if (isEpisodeCard) {
             e.preventDefault();
             e.stopImmediatePropagation();
             setFocusedId(`season-tab-${selectedSeason}`);
-          } else if (current && current.startsWith('season-tab-')) {
+          } else if (isSeasonTab) {
             e.preventDefault();
             e.stopImmediatePropagation();
             setFocusedId(primaryBtnId);
@@ -147,10 +158,11 @@ export function ItemDetailModal({
         }
         // Left Navigation on Season Tabs
         else if (code === TVKeys.LEFT || e.key === 'ArrowLeft') {
-          if (current && current.startsWith('season-tab-')) {
+          const tabId = current.startsWith('season-tab-') ? current : (activeDomId.startsWith('season-tab-') ? activeDomId : '');
+          if (tabId) {
             e.preventDefault();
             e.stopImmediatePropagation();
-            const seasonNum = parseInt(current.replace('season-tab-', ''), 10);
+            const seasonNum = parseInt(tabId.replace('season-tab-', ''), 10);
             const currentIdx = seasons.indexOf(seasonNum);
             if (currentIdx > 0) {
               const prevSeason = seasons[currentIdx - 1];
@@ -160,10 +172,11 @@ export function ItemDetailModal({
         }
         // Right Navigation on Season Tabs
         else if (code === TVKeys.RIGHT || e.key === 'ArrowRight') {
-          if (current && current.startsWith('season-tab-')) {
+          const tabId = current.startsWith('season-tab-') ? current : (activeDomId.startsWith('season-tab-') ? activeDomId : '');
+          if (tabId) {
             e.preventDefault();
             e.stopImmediatePropagation();
-            const seasonNum = parseInt(current.replace('season-tab-', ''), 10);
+            const seasonNum = parseInt(tabId.replace('season-tab-', ''), 10);
             const currentIdx = seasons.indexOf(seasonNum);
             if (currentIdx >= 0 && currentIdx < seasons.length - 1) {
               const nextSeason = seasons[currentIdx + 1];
@@ -173,10 +186,11 @@ export function ItemDetailModal({
         }
         // Enter Navigation on Season Tabs: Commit Season Switch
         else if (code === TVKeys.ENTER || e.key === 'Enter') {
-          if (current && current.startsWith('season-tab-')) {
+          const tabId = current.startsWith('season-tab-') ? current : (activeDomId.startsWith('season-tab-') ? activeDomId : '');
+          if (tabId) {
             e.preventDefault();
             e.stopImmediatePropagation();
-            const seasonNum = parseInt(current.replace('season-tab-', ''), 10);
+            const seasonNum = parseInt(tabId.replace('season-tab-', ''), 10);
             if (!isNaN(seasonNum) && seasonNum !== selectedSeason) {
               setSelectedSeason(seasonNum);
             }
@@ -185,8 +199,8 @@ export function ItemDetailModal({
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
   }, [
     isOpen,
     onClose,
@@ -219,64 +233,62 @@ export function ItemDetailModal({
       role="dialog"
       aria-modal="true"
       aria-label={resolvedTitle}
-      className="fixed inset-0 bg-[#2A0A0A]/90 backdrop-blur-xl flex items-center justify-center z-[60] p-6 select-none"
+      className="fixed inset-0 w-screen h-screen bg-[#1F0707] z-[60] flex flex-col p-14 select-none overflow-hidden"
     >
       {backdrop && (
         <img
           src={backdrop}
           alt={resolvedTitle}
-          className="absolute inset-0 w-full h-full object-cover opacity-25"
+          className="absolute inset-0 w-full h-full object-cover opacity-20 pointer-events-none"
         />
       )}
-      <div
-        className={`relative ${
-          isShow && seasons.length > 0 ? 'w-[1400px] max-w-[94vw] max-h-[960px] p-8' : 'w-[1240px] max-w-[90vw] max-h-[920px] p-10'
-        } flex flex-col bg-[#3B1111] border border-[rgba(245,229,229,0.08)] rounded-3xl shadow-2xl overflow-y-auto scrollbar-none`}
-      >
+      <div className="absolute inset-0 bg-gradient-to-t from-[#1F0707] via-[#1F0707]/90 to-[#1F0707]/75 pointer-events-none" />
+
+      <div className="relative z-10 flex flex-col w-full h-full justify-between overflow-hidden">
         <div className="flex flex-row items-start w-full">
           {poster && (
             <img
               src={poster}
               alt={resolvedTitle}
               className={`${
-                isShow && seasons.length > 0 ? 'w-52 h-[290px]' : 'w-72 h-[420px]'
-              } object-cover rounded-2xl shadow-xl border border-[rgba(245,229,229,0.08)] shrink-0 mr-10`}
+                isShow && seasons.length > 0 ? 'w-64 h-[360px]' : 'w-80 h-[460px]'
+              } object-cover rounded-2xl shadow-2xl border border-[rgba(245,229,229,0.12)] shrink-0 mr-10`}
             />
           )}
           <div
             className={`flex flex-col justify-between flex-1 min-w-0 ${
-              isShow && seasons.length > 0 ? 'h-[290px]' : 'h-[420px]'
+              isShow && seasons.length > 0 ? 'h-[360px]' : 'h-[460px]'
             }`}
           >
             <div>
-              <div className="flex items-center mb-2 text-[#F5E5E5]/70 font-semibold text-lg">
-                {resolvedReleaseYear && <span className="mr-3">{resolvedReleaseYear}</span>}
-                {durationMins && <span className="mr-3">• {durationMins}m</span>}
+              <div className="flex items-center mb-3 text-[#F5E5E5]/70 font-semibold text-2xl">
+                {resolvedReleaseYear && <span className="mr-4">{resolvedReleaseYear}</span>}
+                {durationMins && <span className="mr-4">• {durationMins}m</span>}
                 {resolvedResolution && (
-                  <span className="mr-3 px-2 py-0.5 bg-[#FFB800]/20 border border-[#FFB800]/30 rounded text-xs text-[#FFB800] font-bold">
+                  <span className="mr-4 px-3 py-1 bg-[#FFB800]/20 border border-[#FFB800]/30 rounded text-base text-[#FFB800] font-bold">
                     {resolvedResolution}
                   </span>
                 )}
               </div>
               <h2
                 className={`${
-                  isShow && seasons.length > 0 ? 'text-4xl font-extrabold mb-2' : 'text-5xl font-black mb-4'
-                } text-[#F5E5E5] leading-tight truncate`}
+                  isShow && seasons.length > 0 ? 'text-5xl font-black mb-3' : 'text-6xl font-black mb-5'
+                } text-[#F5E5E5] leading-tight tracking-tight truncate`}
               >
                 {resolvedTitle}
               </h2>
               {resolvedOverview && (
                 <p
                   className={`text-[#F5E5E5]/80 ${
-                    isShow && seasons.length > 0 ? 'text-base line-clamp-3 mb-2 max-w-3xl' : 'text-lg line-clamp-4 max-w-2xl'
-                  } leading-relaxed`}
+                    isShow && seasons.length > 0 ? 'text-xl line-clamp-3 mb-4 max-w-4xl' : 'text-2xl line-clamp-4 max-w-5xl'
+                  } leading-relaxed font-normal`}
                 >
                   {resolvedOverview}
                 </p>
               )}
             </div>
 
-            <div className="flex mt-auto flex-row items-center flex-wrap gap-3">
+            <div className="flex mt-auto flex-row items-center flex-wrap gap-4">
               {isShow && nextEpisode ? (
                 isEpisodeResume ? (
                   <TVButton
@@ -286,10 +298,10 @@ export function ItemDetailModal({
                     variant="primary"
                     onEnter={() => onPlay(nextEpisode.id, nextEpisodeResumeMs)}
                     onClick={() => onPlay(nextEpisode.id, nextEpisodeResumeMs)}
-                    className="mr-4 mb-2"
+                    className="!py-4 !px-8 !text-2xl font-bold rounded-2xl gap-4 mr-4 mb-2"
                     autoFocus
                   >
-                    <Play className="w-6 h-6 fill-current mr-3" />
+                    <Play className="w-7 h-7 fill-current mr-3" />
                     Resume Next
                   </TVButton>
                 ) : (
@@ -300,10 +312,10 @@ export function ItemDetailModal({
                     variant="primary"
                     onEnter={() => onPlay(nextEpisode.id, 0)}
                     onClick={() => onPlay(nextEpisode.id, 0)}
-                    className="mr-4 mb-2"
+                    className="!py-4 !px-8 !text-2xl font-bold rounded-2xl gap-4 mr-4 mb-2"
                     autoFocus
                   >
-                    <Play className="w-6 h-6 fill-current mr-3" />
+                    <Play className="w-7 h-7 fill-current mr-3" />
                     Play
                   </TVButton>
                 )
@@ -316,10 +328,10 @@ export function ItemDetailModal({
                     variant="primary"
                     onEnter={() => onPlay(resolvedId!, resolvedResumeMs)}
                     onClick={() => onPlay(resolvedId!, resolvedResumeMs)}
-                    className="mr-4 mb-2"
+                    className="!py-4 !px-8 !text-2xl font-bold rounded-2xl gap-4 mr-4 mb-2"
                     autoFocus
                   >
-                    <Play className="w-6 h-6 fill-current mr-3" />
+                    <Play className="w-7 h-7 fill-current mr-3" />
                     Resume ({resumeMins}m)
                   </TVButton>
                   <TVButton
@@ -329,9 +341,9 @@ export function ItemDetailModal({
                     variant="secondary"
                     onEnter={() => onPlay(resolvedId!, 0)}
                     onClick={() => onPlay(resolvedId!, 0)}
-                    className="mr-4 mb-2"
+                    className="!py-4 !px-8 !text-2xl font-bold rounded-2xl gap-4 mr-4 mb-2"
                   >
-                    <RotateCcw className="w-6 h-6 mr-3" /> Play from Beginning
+                    <RotateCcw className="w-7 h-7 mr-3" /> Play from Beginning
                   </TVButton>
                 </>
               ) : (
@@ -342,10 +354,10 @@ export function ItemDetailModal({
                   variant="primary"
                   onEnter={() => onPlay(resolvedId!, 0)}
                   onClick={() => onPlay(resolvedId!, 0)}
-                  className="mr-4 mb-2"
+                  className="!py-4 !px-8 !text-2xl font-bold rounded-2xl gap-4 mr-4 mb-2"
                   autoFocus
                 >
-                  <Play className="w-6 h-6 fill-current mr-3" /> Play
+                  <Play className="w-7 h-7 fill-current mr-3" /> Play
                 </TVButton>
               )}
 
@@ -359,9 +371,9 @@ export function ItemDetailModal({
                   variant="secondary"
                   onEnter={() => onBrowseFolder?.(resolvedLibraryId!, resolvedFolderPath!)}
                   onClick={() => onBrowseFolder?.(resolvedLibraryId!, resolvedFolderPath!)}
-                  className="mr-4 mb-2"
+                  className="!py-4 !px-8 !text-2xl font-bold rounded-2xl gap-4 mr-4 mb-2"
                 >
-                  <Folder className="w-6 h-6 mr-3" /> Browse Folder
+                  <Folder className="w-7 h-7 mr-3" /> Browse Folder
                 </TVButton>
               )}
 
@@ -380,17 +392,17 @@ export function ItemDetailModal({
                 variant="secondary"
                 onEnter={onClose}
                 onClick={onClose}
-                className="mr-4 mb-2"
+                className="!py-4 !px-8 !text-2xl font-bold rounded-2xl gap-4 mr-4 mb-2"
               >
-                <X className="w-6 h-6 mr-3" /> Back
+                <X className="w-7 h-7 mr-3" /> Back
               </TVButton>
             </div>
           </div>
         </div>
 
         {seasons.length > 0 && (
-          <div className="flex flex-col mt-6 pt-5 border-t border-[rgba(245,229,229,0.08)]">
-            <div className="flex items-center overflow-x-auto pb-2 mb-3 scrollbar-none">
+          <div className="flex flex-col mt-6 pt-5 border-t border-[rgba(245,229,229,0.12)]">
+            <div className="flex items-center overflow-x-auto pb-3 mb-3 scrollbar-none">
               {seasons.map((season, idx) => (
                 <TVButton
                   key={season}
@@ -401,7 +413,7 @@ export function ItemDetailModal({
                   onClick={() => setSelectedSeason(season)}
                   onEnter={() => setSelectedSeason(season)}
                   onFocus={() => setFocusedId(`season-tab-${season}`)}
-                  className="!px-6 !py-2.5 !text-base rounded-full mr-3 shrink-0"
+                  className="!px-8 !py-3.5 !text-2xl font-bold rounded-xl mr-3 shrink-0"
                 >
                   Season {season}
                 </TVButton>
@@ -412,7 +424,7 @@ export function ItemDetailModal({
               {episodes
                 .filter((ep) => ep.season === selectedSeason)
                 .map((ep, idx) => (
-                  <div key={ep.id} className="shrink-0 mr-5">
+                  <div key={ep.id} className="shrink-0 mr-6">
                     <TVCard
                       id={`episode-card-${ep.id}`}
                       groupId={`season-episodes-${selectedSeason}`}

@@ -83,9 +83,10 @@ export class Html5PlayerDriver implements PlayerDriver {
     }
   }
 
-  seekTo(ms: number): void {
+  seekTo(ms: number, onComplete?: () => void): void {
     if (this.video) {
       this.video.currentTime = Math.max(0, ms / 1000);
+      onComplete?.();
     }
   }
 

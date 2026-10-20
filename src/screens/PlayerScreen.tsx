@@ -202,6 +202,7 @@ export function PlayerScreen({
   const [seekHud, setSeekHud] = useState<{ label: string; targetMs: number; direction: 'forward' | 'backward' } | null>(null);
   const seekHudTimerRef = useRef<NodeJS.Timeout | null>(null);
   const seekDebounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const seekLockUntilMsRef = useRef<number>(0);
   const consecutiveFfCountRef = useRef(0);
   const consecutiveRewCountRef = useRef(0);
 
@@ -212,6 +213,7 @@ export function PlayerScreen({
     const targetMs = Math.max(0, Math.min(dur, current + deltaMs));
     positionMsRef.current = targetMs;
     setPositionMs(targetMs);
+    seekLockUntilMsRef.current = Date.now() + 2500;
 
     setSeekHud({
       label: stepLabel,
@@ -229,7 +231,10 @@ export function PlayerScreen({
     if (seekDebounceTimerRef.current) clearTimeout(seekDebounceTimerRef.current);
     seekDebounceTimerRef.current = setTimeout(() => {
       seekDebounceTimerRef.current = null;
-      driverRef.current?.seekTo(targetMs);
+      seekLockUntilMsRef.current = Date.now() + 1500;
+      driverRef.current?.seekTo(targetMs, () => {
+        seekLockUntilMsRef.current = 0;
+      });
     }, 300);
   }, [resetOsdTimer]);
 
@@ -309,7 +314,7 @@ export function PlayerScreen({
       }
       setDurationMs(dur);
       durationMsRef.current = dur;
-      if (seekDebounceTimerRef.current === null) {
+      if (seekDebounceTimerRef.current === null && Date.now() >= seekLockUntilMsRef.current) {
         setPositionMs(pos);
         positionMsRef.current = pos;
       }

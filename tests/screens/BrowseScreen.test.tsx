@@ -993,4 +993,68 @@ describe('BrowseScreen', () => {
     });
     expect(screen.queryByText('Home Content')).not.toBeInTheDocument();
   });
+
+  it('renders Browse Folders button on library screen and calls onBrowseFolder when clicked', async () => {
+    vi.spyOn(screensApi, 'fetchScreenLayout').mockImplementation(async (_client, screenId) => {
+      if (screenId === 'movies') return mockMoviesLayout;
+      return mockHomeLayout;
+    });
+
+    const onBrowseFolder = vi.fn();
+    const mockLibraries = [
+      { id: 'lib-movies-1', name: 'Movies', type: 'movie' as const, is_private: false },
+    ];
+
+    render(
+      <FocusProvider>
+        <BrowseScreen
+          client={mockClient}
+          serverUrl="http://localhost:8492"
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+          onSwitchProfile={vi.fn()}
+          onBrowseFolder={onBrowseFolder}
+          libraries={mockLibraries}
+          initialTab="movies"
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Browse Folders/i })).toBeInTheDocument();
+    });
+
+    const browseFoldersBtn = screen.getByRole('button', { name: /Browse Folders/i });
+    fireEvent.click(browseFoldersBtn);
+
+    expect(onBrowseFolder).toHaveBeenCalledTimes(1);
+    expect(onBrowseFolder).toHaveBeenCalledWith('lib-movies-1');
+  });
+
+  it('does not render Browse Folders button on home screen', async () => {
+    vi.spyOn(screensApi, 'fetchScreenLayout').mockImplementation(async (_client, screenId) => {
+      if (screenId === 'movies') return mockMoviesLayout;
+      return mockHomeLayout;
+    });
+
+    render(
+      <FocusProvider>
+        <BrowseScreen
+          client={mockClient}
+          serverUrl="http://localhost:8492"
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+          onSwitchProfile={vi.fn()}
+          initialTab="home"
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Popular Right Now')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByRole('button', { name: /Browse Folders/i })).not.toBeInTheDocument();
+  });
 });
+

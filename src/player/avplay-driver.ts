@@ -123,7 +123,7 @@ export class TizenAvplayDriver implements PlayerDriver {
     this.stateCallback?.('paused');
   }
 
-  seekTo(ms: number): void {
+  seekTo(ms: number, onComplete?: () => void): void {
     if (this.isDestroyed) return;
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -132,15 +132,19 @@ export class TizenAvplayDriver implements PlayerDriver {
         avplay.seekTo(
           Math.max(0, Math.floor(ms)),
           () => {
-            // Seek success
+            onComplete?.();
           },
           (err: any) => {
             console.error('[AVPlay] seekTo error:', err);
+            onComplete?.();
           }
         );
+      } else {
+        onComplete?.();
       }
     } catch (e) {
       console.error('[AVPlay] seekTo exception:', e);
+      onComplete?.();
     }
   }
 

@@ -910,4 +910,31 @@ describe('App State Machine & Router', () => {
       expect(screen.getByRole('button', { name: /^Play$/i })).toBeInTheDocument();
     });
   });
+
+  it('navigates from BrowseScreen library header to FolderBrowserModal via Browse Folders button', async () => {
+    localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
+    localStorage.setItem('kadr_token', 'valid-test-token');
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^Movies$/i })).toBeInTheDocument();
+    });
+
+    // Switch to Movies tab
+    fireEvent.click(screen.getByRole('button', { name: /^Movies$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Browse Folders/i })).toBeInTheDocument();
+    });
+
+    // Click Browse Folders
+    fireEvent.click(screen.getByRole('button', { name: /Browse Folders/i }));
+
+    // FolderBrowserModal opens
+    await waitFor(() => {
+      expect(foldersApi.fetchLibraryFolders).toHaveBeenCalled();
+    });
+  });
 });
+

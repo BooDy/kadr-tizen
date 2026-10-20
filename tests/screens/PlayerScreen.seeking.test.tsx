@@ -141,10 +141,15 @@ describe('PlayerScreen Seeking & Fast Forward', () => {
     act(() => {
       vi.advanceTimersByTime(300);
     });
-    expect(mockDriver.seekTo).toHaveBeenCalledWith(40000);
+    expect(mockDriver.seekTo).toHaveBeenCalledWith(40000, expect.any(Function));
 
-    // Now that debounce timer fired and seekDebounceTimerRef is null,
-    // subsequent onTimeUpdate calls properly update positionMs and the UI
+    // Calling the onComplete callback clears the seek lock
+    const onCompleteCb = mockDriver.seekTo.mock.calls[0][1];
+    act(() => {
+      onCompleteCb?.();
+    });
+
+    // Now onTimeUpdate calls properly update positionMs and the UI
     act(() => {
       onTimeUpdateCb?.(45000, 120000);
     });

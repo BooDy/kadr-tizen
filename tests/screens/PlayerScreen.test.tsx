@@ -254,14 +254,14 @@ describe('PlayerScreen', () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.LEFT }));
       vi.advanceTimersByTime(300);
     });
-    expect(mockDriver.seekTo).toHaveBeenCalledWith(15000);
+    expect(mockDriver.seekTo).toHaveBeenCalledWith(15000, expect.any(Function));
 
     // Press Right (+10s)
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.RIGHT }));
       vi.advanceTimersByTime(300);
     });
-    expect(mockDriver.seekTo).toHaveBeenCalledWith(25000); // 15000 + 10000
+    expect(mockDriver.seekTo).toHaveBeenCalledWith(25000, expect.any(Function)); // 15000 + 10000
   });
 
   it('prevents seeking below 0 and clamps seeking to durationMs', () => {
@@ -284,7 +284,7 @@ describe('PlayerScreen', () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.LEFT }));
       vi.advanceTimersByTime(300);
     });
-    expect(mockDriver.seekTo).toHaveBeenCalledWith(0);
+    expect(mockDriver.seekTo).toHaveBeenCalledWith(0, expect.any(Function));
     expect(getByText('0:00')).toBeInTheDocument();
 
     // Press Right repeatedly past duration (20s) -> should clamp to 20000
@@ -294,7 +294,7 @@ describe('PlayerScreen', () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.RIGHT })); // clamped at 20s
       vi.advanceTimersByTime(300);
     });
-    expect(mockDriver.seekTo).toHaveBeenLastCalledWith(20000);
+    expect(mockDriver.seekTo).toHaveBeenLastCalledWith(20000, expect.any(Function));
     expect(getAllByText('0:20')).toHaveLength(2);
   });
 

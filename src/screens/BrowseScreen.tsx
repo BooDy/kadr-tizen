@@ -5,7 +5,7 @@ import { fetchScreens, fetchScreenLayout } from '../api/screens';
 import { fetchLibraries, LibrarySummary } from '../api/libraries';
 import { WidgetRenderer } from '../components/widgets/WidgetRenderer';
 import { TVButton } from '../components/tv/TVButton';
-import { Home, Film, Tv, Layers, Users, Lock, Unlock, KeyRound, AlertTriangle, RotateCcw, Server } from 'lucide-react';
+import { Home, Film, Tv, Layers, Users, Lock, Unlock, KeyRound, AlertTriangle, RotateCcw, Server, Folder } from 'lucide-react';
 import { useFocusContext } from '../navigation/FocusContext';
 import { TVKeys } from '../navigation/keys';
 
@@ -17,6 +17,7 @@ export interface BrowseScreenProps {
   onSwitchProfile: () => void;
   onSwitchServer?: () => void;
   onLockedLibrary?: (libraryId: string) => void;
+  onBrowseFolder?: (libraryId: string, folderPath?: string) => void;
   initialTab?: string;
   refreshKey?: number;
   libraries?: LibrarySummary[];
@@ -58,7 +59,7 @@ function getFirstFocusableId(layout: ScreenLayout): string | null {
 
 function isLeftmostContentNode(id: string | null, layout: ScreenLayout | null): boolean {
   if (!id) return false;
-  if (id === 'unlock-library-btn' || id === 'retry-layout-btn') return true;
+  if (id === 'unlock-library-btn' || id === 'retry-layout-btn' || id === 'library-browse-folders-btn') return true;
   if (!layout) return false;
   for (const widget of layout.widgets) {
     if (widget.type === 'hero_banner') {
@@ -88,7 +89,7 @@ function isLeftmostContentNode(id: string | null, layout: ScreenLayout | null): 
 
 function isValidContentNode(id: string | null, layout: ScreenLayout | null): boolean {
   if (!id) return false;
-  if (id === 'unlock-library-btn') return true;
+  if (id === 'unlock-library-btn' || id === 'retry-layout-btn' || id === 'library-browse-folders-btn') return true;
   if (!layout) return false;
   for (const widget of layout.widgets) {
     if (widget.type === 'hero_banner' && widget.data) {
@@ -120,6 +121,7 @@ export function BrowseScreen({
   onSwitchProfile,
   onSwitchServer,
   onLockedLibrary,
+  onBrowseFolder,
   initialTab,
   refreshKey,
   libraries: propLibraries,
@@ -340,6 +342,10 @@ export function BrowseScreen({
   const displayScreens = screens.length > 0 ? screens : defaultScreens;
   const currentLibInfo = getLibraryInfo(activeTab);
   const isCurrentScreenLocked = Boolean(currentLibInfo?.isPrivate && !currentLibInfo.isUnlocked);
+  const targetLibId =
+    activeTab !== 'home'
+      ? currentLibInfo?.lib.id || activeTab
+      : null;
 
   return (
     <div className="w-full h-full flex bg-[#2A0A0A] overflow-hidden">
@@ -458,12 +464,33 @@ export function BrowseScreen({
             </TVButton>
           </div>
         ) : layout ? (
-          <WidgetRenderer
-            layout={layout}
-            serverUrl={serverUrl}
-            onSelectItem={onSelectItem}
-            onPlayItem={onPlayItem}
-          />
+          <>
+            {targetLibId && (
+              <div className="flex items-center justify-between mb-8 pb-4 border-b border-[rgba(245,229,229,0.08)]">
+                <div>
+                  <h1 className="text-4xl font-black tracking-tight text-[#F5E5E5]">
+                    {currentLibInfo?.lib.name || screens.find((s) => s.id === activeTab)?.title || activeTab}
+                  </h1>
+                </div>
+                <TVButton
+                  id="library-browse-folders-btn"
+                  groupId="browse-library-header"
+                  variant="secondary"
+                  onClick={() => onBrowseFolder?.(targetLibId)}
+                  onEnter={() => onBrowseFolder?.(targetLibId)}
+                  className="!py-3.5 !px-7 !text-2xl font-bold rounded-2xl gap-3"
+                >
+                  <Folder className="w-7 h-7 mr-2" /> Browse Folders
+                </TVButton>
+              </div>
+            )}
+            <WidgetRenderer
+              layout={layout}
+              serverUrl={serverUrl}
+              onSelectItem={onSelectItem}
+              onPlayItem={onPlayItem}
+            />
+          </>
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center space-y-6">
             <div className="w-20 h-20 rounded-full bg-[#D43F15]/10 border border-[#D43F15]/30 flex items-center justify-center">

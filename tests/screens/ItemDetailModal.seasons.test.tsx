@@ -101,4 +101,43 @@ describe('ItemDetailModal Season Navigation', () => {
 
     expect(document.activeElement).toBe(season1Tab);
   });
+
+  it('navigates Down from action buttons directly to active season tab and Up from season tab back to action button', async () => {
+    render(
+      <FocusProvider>
+        <ItemDetailModal
+          item={mockSeriesItem}
+          isOpen={true}
+          onClose={vi.fn()}
+          onPlay={vi.fn()}
+          serverUrl="http://127.0.0.1:8492"
+        />
+      </FocusProvider>
+    );
+
+    const playBtn = screen.getByRole('button', { name: /^Play$/i });
+    const season1Tab = screen.getByRole('button', { name: /Season 1/i });
+
+    act(() => {
+      playBtn.focus();
+    });
+    expect(document.activeElement).toBe(playBtn);
+
+    // Press Down from Play button
+    await act(async () => {
+      fireEvent.keyDown(window, { keyCode: TVKeys.DOWN });
+    });
+
+    // Should focus Season 1 tab
+    expect(document.activeElement).toBe(season1Tab);
+
+    // Press Up from Season 1 tab
+    await act(async () => {
+      fireEvent.keyDown(window, { keyCode: TVKeys.UP });
+    });
+
+    // Should return focus to Play button
+    expect(document.activeElement).toBe(playBtn);
+  });
 });
+
