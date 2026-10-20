@@ -168,9 +168,20 @@ export default function App() {
       }
     }
     title = title || 'Playing';
-    setActiveItem(null);
     setPlayerItem({ id: itemId, title, startMs: resumeMs });
     setView('player');
+  };
+
+  const handleExitPlayer = async () => {
+    setView('browse');
+    if (!activeItem && playerItem) {
+      try {
+        const detail = await fetchMediaItem(client, playerItem.id);
+        setActiveItem(detail);
+      } catch (e) {
+        console.error('Failed to load item detail on player exit:', e);
+      }
+    }
   };
 
   const handleUnlockPin = async (pin: string) => {
@@ -329,7 +340,7 @@ export default function App() {
             serverUrl={serverUrl || ''}
             token={token || ''}
             initialTimeMs={playerItem.startMs}
-            onExit={() => setView('browse')}
+            onExit={handleExitPlayer}
           />
         )}
       </div>

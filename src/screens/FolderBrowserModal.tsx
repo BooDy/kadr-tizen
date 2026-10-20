@@ -7,7 +7,7 @@ import { useFocusable } from '../navigation/useFocusable';
 import { TVButton } from '../components/tv/TVButton';
 import { TVCard } from '../components/tv/TVCard';
 import { TVKeys } from '../navigation/keys';
-import { Folder, Play, X, Loader2, Lock, ImageIcon } from 'lucide-react';
+import { Folder, Play, Loader2, Lock, ImageIcon, ArrowLeft } from 'lucide-react';
 import { getAuthenticatedImageUrl } from '../utils/imageUrl';
 
 export interface FolderBrowserModalProps {
@@ -228,37 +228,40 @@ export function FolderBrowserModal({
     (!folderData?.images || folderData.images.length === 0);
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#2A0A0A]/90 backdrop-blur-md p-12 flex flex-col text-[#F5E5E5] overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-[#120404] text-[#F5E5E5] flex flex-col p-12 overflow-hidden select-none">
       {/* Header */}
-      <div className="flex flex-col gap-4 border-b border-[rgba(245,229,229,0.08)] pb-6 shrink-0">
+      <div className="flex flex-col gap-5 border-b border-[rgba(245,229,229,0.08)] pb-6 shrink-0">
         <div className="flex items-center justify-between">
-          <h2 className="text-3xl font-extrabold tracking-tight text-[#F5E5E5]">{title}</h2>
-          <TVButton
-            id="folder-browser-close-btn"
-            groupId="folder-browser-modal"
-            variant="secondary"
-            className="px-5 py-2.5 text-base flex items-center gap-2"
-            onClick={onClose}
-            onEnter={onClose}
-          >
-            <X className="w-5 h-5" />
-            <span>Close</span>
-          </TVButton>
+          <div className="flex items-center gap-6">
+            <TVButton
+              id="folder-browser-close-btn"
+              groupId="folder-browser-modal"
+              variant="secondary"
+              aria-label="Close"
+              className="px-6 py-3 text-lg font-bold flex items-center gap-2 rounded-xl"
+              onClick={onClose}
+              onEnter={onClose}
+            >
+              <ArrowLeft className="w-6 h-6 mr-1" />
+              <span>Back</span>
+            </TVButton>
+            <h2 className="text-4xl font-black tracking-tight text-[#F5E5E5]">{title}</h2>
+          </div>
         </div>
 
         {/* Breadcrumbs Bar */}
-        <div className="flex items-center flex-wrap gap-2 text-lg">
+        <div className="flex items-center flex-wrap gap-3 text-xl">
           {folderData?.breadcrumbs && folderData.breadcrumbs.length > 0 ? (
             folderData.breadcrumbs.map((crumb, idx) => {
               const isLast = idx === folderData.breadcrumbs.length - 1;
               return (
-                <div key={crumb.path || `root-${idx}`} className="flex items-center gap-2">
-                  {idx > 0 && <span className="text-[#5C3C3C] font-bold">&gt;</span>}
+                <div key={crumb.path || `root-${idx}`} className="flex items-center gap-3">
+                  {idx > 0 && <span className="text-[#5C3C3C] font-bold text-2xl">&gt;</span>}
                   <TVButton
                     id={`folder-breadcrumb-${idx}`}
                     groupId="folder-browser-modal"
                     variant={isLast ? 'primary' : 'secondary'}
-                    className="px-3 py-1.5 text-sm rounded-lg"
+                    className="px-4 py-2 text-base font-semibold rounded-lg"
                     onClick={() => setCurrentPath(crumb.path)}
                     onEnter={() => setCurrentPath(crumb.path)}
                   >
@@ -323,23 +326,23 @@ export function FolderBrowserModal({
             {folderData.directories && folderData.directories.length > 0 && (
               <div className="space-y-4">
                 <h3 className="text-2xl font-bold text-[#F5E5E5]">Folders</h3>
-                <div className="flex flex-wrap gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
                   {folderData.directories.map((dir, idx) => (
                     <TVButton
                       key={dir.path || idx}
                       id={`folder-dir-${idx}`}
                       groupId="folder-browser-modal"
                       variant="secondary"
-                      className="flex items-center gap-4 p-4 rounded-xl text-left min-w-[220px]"
+                      className="flex items-center gap-4 p-5 rounded-2xl text-left"
                       onClick={() => setCurrentPath(dir.path)}
                       onEnter={() => setCurrentPath(dir.path)}
                     >
-                      <Folder className="w-8 h-8 text-[#FF6B00] shrink-0" />
+                      <Folder className="w-10 h-10 text-[#FF6B00] shrink-0" />
                       <div className="flex flex-col truncate">
-                        <span className="font-semibold text-lg text-[#F5E5E5] truncate">
+                        <span className="font-bold text-xl text-[#F5E5E5] truncate">
                           {dir.name}
                         </span>
-                        <span className="text-sm text-[#5C3C3C]">{dir.item_count} items</span>
+                        <span className="text-base text-[#5C3C3C]">{dir.item_count} items</span>
                       </div>
                     </TVButton>
                   ))}

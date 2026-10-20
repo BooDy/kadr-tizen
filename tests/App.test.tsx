@@ -453,6 +453,14 @@ describe('App State Machine & Router', () => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
       expect(screen.getByText('Dune: Part Two')).toBeInTheDocument();
     });
+
+    // Press Escape to exit PlayerScreen -> must return to item details page
+    fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      expect(screen.getByText('Paul Atreides unites with Chani and the Fremen.')).toBeInTheDocument();
+    });
   });
 
   it('navigates back from ProfileSelectScreen to ServerConnectScreen', async () => {

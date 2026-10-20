@@ -217,7 +217,7 @@ export function PlayerScreen({
     setPositionMs(targetMs);
     seekDirectionRef.current = direction;
     targetSeekMsRef.current = targetMs;
-    seekLockUntilMsRef.current = Date.now() + 4000;
+    seekLockUntilMsRef.current = Date.now() + 5000;
 
     setSeekHud({
       label: stepLabel,
@@ -237,11 +237,8 @@ export function PlayerScreen({
       seekDebounceTimerRef.current = null;
       seekDirectionRef.current = direction;
       targetSeekMsRef.current = targetMs;
-      seekLockUntilMsRef.current = Date.now() + 3000;
-      driverRef.current?.seekTo(targetMs, () => {
-        // Seek submitted to player; allow at most 1s before unlocking if no time update matches
-        seekLockUntilMsRef.current = Math.min(seekLockUntilMsRef.current, Date.now() + 1000);
-      });
+      seekLockUntilMsRef.current = Date.now() + 5000;
+      driverRef.current?.seekTo(targetMs, () => {});
     }, 300);
   }, [resetOsdTimer]);
 
@@ -327,20 +324,21 @@ export function PlayerScreen({
         return;
       }
       if (targetSeekMsRef.current !== null) {
-        if (Date.now() < seekLockUntilMsRef.current) {
-          const dir = seekDirectionRef.current;
-          const target = targetSeekMsRef.current;
-          const isStale =
-            dir === 'forward'
-              ? pos < target - 2000
-              : dir === 'backward'
-              ? pos > target + 2000
-              : false;
-          if (isStale) {
-            // Drop stale timestamp from before seek completed
-            return;
-          }
+        const dir = seekDirectionRef.current;
+        const target = targetSeekMsRef.current;
+        const isLockActive = Date.now() < seekLockUntilMsRef.current;
+        const isStale =
+          dir === 'forward'
+            ? pos < target - 2000
+            : dir === 'backward'
+            ? pos > target + 2000
+            : false;
+
+        if (isLockActive && isStale) {
+          // Drop stale timestamp from before seek completed
+          return;
         }
+
         targetSeekMsRef.current = null;
         seekDirectionRef.current = null;
       }

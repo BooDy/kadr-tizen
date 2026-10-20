@@ -143,21 +143,45 @@ export class TizenAvplayDriver implements PlayerDriver {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const avplay = (window as any).webapis?.avplay;
-      if (avplay && typeof avplay.seekTo === 'function') {
-        avplay.seekTo(
-          Math.max(0, Math.floor(ms)),
-          () => {
-            onComplete?.();
-          },
-          (err: any) => {
-            console.error('[AVPlay] seekTo error:', err);
-            onComplete?.();
-          }
-        );
-      } else {
+      if (!avplay || typeof avplay.seekTo !== 'function') {
         onComplete?.();
+        return;
       }
-    } catch (e) {
+
+      const targetMs = Math.max(100, Math.floor(ms));
+
+      avplay.seekTo(
+        targetMs,
+        () => {
+          onComplete?.();
+        },
+        (err: any) => {
+          console.warn('[AVPlay] seekTo error, trying relative jump fallback:', err);
+          try {
+            const cur = typeof avplay.getCurrentTime === 'function' ? avplay.getCurrentTime() : 0;
+            const diff = targetMs - cur;
+            if (diff > 0 && typeof avplay.jumpForward === 'function') {
+              avplay.jumpForward(
+                diff,
+                () => onComplete?.(),
+                () => onComplete?.()
+              );
+              return;
+            } else if (diff < 0 && typeof avplay.jumpBackward === 'function') {
+              avplay.jumpBackward(
+                Math.abs(diff),
+                () => onComplete?.(),
+                () => onComplete?.()
+              );
+              return;
+            }
+          } catch {
+            // Ignore
+          }
+          onComplete?.();
+        }
+      );
+    } catch (e: any) {
       console.error('[AVPlay] seekTo exception:', e);
       onComplete?.();
     }
