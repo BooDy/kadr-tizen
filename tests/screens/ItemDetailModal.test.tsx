@@ -708,9 +708,9 @@ describe('ItemDetailModal', () => {
       const posterImg = screen.getAllByAltText('Severance').find((img) => img.getAttribute('src')?.includes('poster'));
       expect(posterImg?.className).toContain('mr-10');
 
-      // Action button has mr-4
+      // Action button has !py-6
       const resumeBtn = screen.getByRole('button', { name: /Resume Next/i });
-      expect(resumeBtn.className).toContain('mr-4');
+      expect(resumeBtn.className).toContain('!py-6');
 
       // Season tab has mr-3
       const seasonTab1 = screen.getByRole('button', { name: /Season 1/i });
@@ -744,6 +744,60 @@ describe('ItemDetailModal', () => {
       expect(screen.getByText('Nested Card Movie')).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: /^Play$/i }));
       expect(onPlay).toHaveBeenCalledWith(99, 0);
+    });
+
+    it('renders primary video action buttons with enlarged padding, gap-8 spacing, and text-4xl font size', async () => {
+      const { rerender } = render(
+        <FocusProvider>
+          <ItemDetailModal
+            item={{ id: 10, title: 'Big Movie', type: 'movie', library_id: 1, path: '/movies/big.mkv' } as any}
+            serverUrl="http://localhost:8492"
+            onClose={vi.fn()}
+            onPlay={vi.fn()}
+          />
+        </FocusProvider>
+      );
+      const playBtn = screen.getByRole('button', { name: /play/i });
+      expect(playBtn.className).toContain('!py-6');
+      expect(playBtn.className).toContain('!px-12');
+      expect(playBtn.className).toContain('!text-4xl');
+      expect(playBtn.parentElement?.className).toContain('gap-8');
+
+      // Test with resume position and folder path
+      rerender(
+        <FocusProvider>
+          <ItemDetailModal
+            item={{
+              id: 10,
+              title: 'Big Movie',
+              type: 'movie',
+              library_id: 'lib-1',
+              folder_path: '/movies',
+              resume_position_ms: 120000,
+            } as any}
+            serverUrl="http://localhost:8492"
+            onClose={vi.fn()}
+            onPlay={vi.fn()}
+            onBrowseFolder={vi.fn()}
+          />
+        </FocusProvider>
+      );
+
+      const resumeBtn = screen.getByRole('button', { name: /resume/i });
+      const restartBtn = screen.getByRole('button', { name: /play from beginning/i });
+      const browseBtn = screen.getByRole('button', { name: /browse folder/i });
+
+      expect(resumeBtn.className).toContain('!py-6');
+      expect(resumeBtn.className).toContain('!px-12');
+      expect(resumeBtn.className).toContain('!text-4xl');
+
+      expect(restartBtn.className).toContain('!py-6');
+      expect(restartBtn.className).toContain('!px-12');
+      expect(restartBtn.className).toContain('!text-4xl');
+
+      expect(browseBtn.className).toContain('!py-6');
+      expect(browseBtn.className).toContain('!px-12');
+      expect(browseBtn.className).toContain('!text-4xl');
     });
   });
 });

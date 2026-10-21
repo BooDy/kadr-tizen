@@ -288,7 +288,7 @@ export function ItemDetailModal({
               )}
             </div>
 
-            <div className="flex mt-auto flex-row items-center flex-wrap gap-4">
+            <div className="flex mt-auto flex-row items-center flex-wrap gap-8 mb-4">
               {isShow && nextEpisode ? (
                 isEpisodeResume ? (
                   <TVButton
@@ -298,10 +298,10 @@ export function ItemDetailModal({
                     variant="primary"
                     onEnter={() => onPlay(nextEpisode.id, nextEpisodeResumeMs)}
                     onClick={() => onPlay(nextEpisode.id, nextEpisodeResumeMs)}
-                    className="!py-4 !px-8 !text-2xl font-bold rounded-2xl gap-4 mr-4 mb-2"
+                    className="!py-6 !px-12 !text-4xl font-extrabold rounded-2xl gap-5"
                     autoFocus
                   >
-                    <Play className="w-7 h-7 fill-current mr-3" />
+                    <Play className="w-10 h-10 fill-current mr-4" />
                     Resume Next
                   </TVButton>
                 ) : (
@@ -312,10 +312,10 @@ export function ItemDetailModal({
                     variant="primary"
                     onEnter={() => onPlay(nextEpisode.id, 0)}
                     onClick={() => onPlay(nextEpisode.id, 0)}
-                    className="!py-4 !px-8 !text-2xl font-bold rounded-2xl gap-4 mr-4 mb-2"
+                    className="!py-6 !px-12 !text-4xl font-extrabold rounded-2xl gap-5"
                     autoFocus
                   >
-                    <Play className="w-7 h-7 fill-current mr-3" />
+                    <Play className="w-10 h-10 fill-current mr-4" />
                     Play
                   </TVButton>
                 )
@@ -328,10 +328,10 @@ export function ItemDetailModal({
                     variant="primary"
                     onEnter={() => onPlay(resolvedId!, resolvedResumeMs)}
                     onClick={() => onPlay(resolvedId!, resolvedResumeMs)}
-                    className="!py-4 !px-8 !text-2xl font-bold rounded-2xl gap-4 mr-4 mb-2"
+                    className="!py-6 !px-12 !text-4xl font-extrabold rounded-2xl gap-5"
                     autoFocus
                   >
-                    <Play className="w-7 h-7 fill-current mr-3" />
+                    <Play className="w-10 h-10 fill-current mr-4" />
                     Resume ({resumeMins}m)
                   </TVButton>
                   <TVButton
@@ -341,9 +341,9 @@ export function ItemDetailModal({
                     variant="secondary"
                     onEnter={() => onPlay(resolvedId!, 0)}
                     onClick={() => onPlay(resolvedId!, 0)}
-                    className="!py-4 !px-8 !text-2xl font-bold rounded-2xl gap-4 mr-4 mb-2"
+                    className="!py-6 !px-12 !text-4xl font-extrabold rounded-2xl gap-5"
                   >
-                    <RotateCcw className="w-7 h-7 mr-3" /> Play from Beginning
+                    <RotateCcw className="w-10 h-10 mr-4" /> Play from Beginning
                   </TVButton>
                 </>
               ) : (
@@ -354,10 +354,10 @@ export function ItemDetailModal({
                   variant="primary"
                   onEnter={() => onPlay(resolvedId!, 0)}
                   onClick={() => onPlay(resolvedId!, 0)}
-                  className="!py-4 !px-8 !text-2xl font-bold rounded-2xl gap-4 mr-4 mb-2"
+                  className="!py-6 !px-12 !text-4xl font-extrabold rounded-2xl gap-5"
                   autoFocus
                 >
-                  <Play className="w-7 h-7 fill-current mr-3" /> Play
+                  <Play className="w-10 h-10 fill-current mr-4" /> Play
                 </TVButton>
               )}
 
@@ -371,9 +371,9 @@ export function ItemDetailModal({
                   variant="secondary"
                   onEnter={() => onBrowseFolder?.(resolvedLibraryId!, resolvedFolderPath!)}
                   onClick={() => onBrowseFolder?.(resolvedLibraryId!, resolvedFolderPath!)}
-                  className="!py-4 !px-8 !text-2xl font-bold rounded-2xl gap-4 mr-4 mb-2"
+                  className="!py-6 !px-12 !text-4xl font-extrabold rounded-2xl gap-5"
                 >
-                  <Folder className="w-7 h-7 mr-3" /> Browse Folder
+                  <Folder className="w-10 h-10 mr-4" /> Browse Folder
                 </TVButton>
               )}
 
