@@ -774,7 +774,7 @@ export function PlayerScreen({
               )}
             </div>
 
-            <div className="flex items-center gap-4">
+            <div className="flex flex-col space-y-6 w-full">
               {focusCtx ? (
                 <TVButton
                   id="player-error-retry-btn"
@@ -784,7 +784,7 @@ export function PlayerScreen({
                   autoFocus={useHls}
                   onClick={() => handleRetry()}
                   onEnter={() => handleRetry()}
-                  className="px-6 py-4 text-lg font-bold"
+                  className="w-full !py-6 !px-10 !text-2xl font-bold rounded-2xl"
                 >
                   <RotateCcw className="w-6 h-6 mr-2" /> Retry Playback
                 </TVButton>
@@ -794,7 +794,7 @@ export function PlayerScreen({
                   type="button"
                   autoFocus={useHls}
                   onClick={() => handleRetry()}
-                  className={`px-6 py-4 rounded-xl font-bold text-lg flex items-center justify-center cursor-pointer select-none ${
+                  className={`w-full !py-6 !px-10 !text-2xl font-bold rounded-2xl flex items-center justify-center cursor-pointer select-none ${
                     useHls ? 'bg-[#FF6B00] text-white' : 'bg-[#3B1111] text-[#F5E5E5] border border-[rgba(245,229,229,0.08)]'
                   }`}
                 >
@@ -812,7 +812,7 @@ export function PlayerScreen({
                     autoFocus
                     onClick={() => handleRetry(true)}
                     onEnter={() => handleRetry(true)}
-                    className="px-6 py-4 text-lg font-bold bg-[#FF6B00]"
+                    className="w-full !py-6 !px-10 !text-2xl font-bold rounded-2xl bg-[#FF6B00]"
                   >
                     <Layers className="w-6 h-6 mr-2" /> Play with Transcoding (HLS)
                   </TVButton>
@@ -822,7 +822,7 @@ export function PlayerScreen({
                     type="button"
                     autoFocus
                     onClick={() => handleRetry(true)}
-                    className="px-6 py-4 rounded-xl font-bold text-lg flex items-center justify-center cursor-pointer select-none bg-[#FF6B00] text-white"
+                    className="w-full !py-6 !px-10 !text-2xl font-bold rounded-2xl flex items-center justify-center cursor-pointer select-none bg-[#FF6B00] text-white"
                   >
                     <Layers className="w-6 h-6 mr-2" /> Play with Transcoding (HLS)
                   </button>
@@ -838,7 +838,7 @@ export function PlayerScreen({
                     variant="secondary"
                     onClick={handleSwitchToHtml5}
                     onEnter={handleSwitchToHtml5}
-                    className="px-6 py-4 text-lg font-bold"
+                    className="w-full !py-6 !px-10 !text-2xl font-bold rounded-2xl"
                   >
                     <MonitorPlay className="w-6 h-6 mr-2" /> Try HTML5 Video Player
                   </TVButton>
@@ -847,7 +847,7 @@ export function PlayerScreen({
                     id="player-error-html5-btn"
                     type="button"
                     onClick={handleSwitchToHtml5}
-                    className="px-6 py-4 rounded-xl font-bold text-lg flex items-center justify-center cursor-pointer select-none bg-[#3B1111] text-[#F5E5E5] border border-[rgba(245,229,229,0.08)]"
+                    className="w-full !py-6 !px-10 !text-2xl font-bold rounded-2xl flex items-center justify-center cursor-pointer select-none bg-[#3B1111] text-[#F5E5E5] border border-[rgba(245,229,229,0.08)]"
                   >
                     <MonitorPlay className="w-6 h-6 mr-2" /> Try HTML5 Video Player
                   </button>
@@ -862,7 +862,7 @@ export function PlayerScreen({
                   variant="secondary"
                   onClick={onExit}
                   onEnter={onExit}
-                  className="px-6 py-4 text-lg font-bold ml-auto"
+                  className="w-full !py-6 !px-10 !text-2xl font-bold rounded-2xl"
                 >
                   <ArrowLeft className="w-6 h-6 mr-2" /> Exit to Browse
                 </TVButton>
@@ -871,7 +871,7 @@ export function PlayerScreen({
                   id="player-error-exit-btn"
                   type="button"
                   onClick={onExit}
-                  className="px-6 py-4 rounded-xl font-bold text-lg flex items-center justify-center cursor-pointer select-none bg-[#3B1111] text-[#F5E5E5] border border-[rgba(245,229,229,0.08)] ml-auto"
+                  className="w-full !py-6 !px-10 !text-2xl font-bold rounded-2xl flex items-center justify-center cursor-pointer select-none bg-[#3B1111] text-[#F5E5E5] border border-[rgba(245,229,229,0.08)]"
                 >
                   <ArrowLeft className="w-6 h-6 mr-2" /> Exit to Browse
                 </button>

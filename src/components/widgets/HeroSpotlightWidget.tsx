@@ -70,16 +70,17 @@ export function HeroSpotlightWidget({ widget, serverUrl, onPlay, onDetails }: He
             </p>
           )}
 
-          <div className="flex gap-4">
+          <div className="flex gap-8">
             <TVButton
               id={`hero-play-${widget.id}`}
               groupId="hero"
               variant="primary"
               onEnter={() => onPlay(item.id, resumeMs)}
               onClick={() => onPlay(item.id, resumeMs)}
+              className="!px-12 !py-6 !text-3xl font-extrabold rounded-2xl gap-4"
               autoFocus
             >
-              <Play className="w-6 h-6 fill-current" />
+              <Play className="w-10 h-10 fill-current" />
               {hasResume ? 'Resume' : 'Play'}
             </TVButton>
             <TVButton
@@ -87,8 +88,9 @@ export function HeroSpotlightWidget({ widget, serverUrl, onPlay, onDetails }: He
               groupId="hero"
               variant="secondary"
               onEnter={() => onDetails(item.id)}
+              className="!px-12 !py-6 !text-3xl font-extrabold rounded-2xl gap-4"
             >
-              <Info className="w-6 h-6" /> Details
+              <Info className="w-10 h-10" /> Details
             </TVButton>
           </div>
         </div>
