@@ -4,6 +4,26 @@ export interface CompatibilityResult {
   warnings: string[];
 }
 
+export interface PlaybackStreamOptions {
+  serverUrl: string;
+  itemId: number | string;
+  token?: string;
+  unlockTokens?: string[];
+  forceHls?: boolean;
+  forceHtml5?: boolean;
+  videoCodec?: string;
+  audioCodec?: string;
+  container?: string;
+  startSeconds?: number;
+  maxHeight?: number;
+}
+
+export interface PlaybackUrlResult {
+  url: string;
+  isHls: boolean;
+  reasons: string[];
+}
+
 export const KNOWN_COMPATIBILITY_INFO = {
   supportedVideo: ['h264', 'avc', 'hevc', 'h265', 'vp9', 'mpeg4'],
   unsupportedVideo: ['av1', 'hi10p', 'vc1', 'rv40'],
@@ -16,7 +36,8 @@ export const KNOWN_COMPATIBILITY_INFO = {
 export function checkMediaCompatibility(
   videoCodec?: string,
   audioCodec?: string,
-  container?: string
+  container?: string,
+  forceHtml5?: boolean
 ): CompatibilityResult {
   const v = videoCodec?.toLowerCase().trim() || '';
   const a = audioCodec?.toLowerCase().trim() || '';
@@ -45,6 +66,10 @@ export function checkMediaCompatibility(
     reasons.push(`Container format "${container}" is not supported.`);
   }
 
+  if (forceHtml5 && c && (c === 'mkv' || c === 'avi')) {
+    reasons.push(`HTML5 video element does not support ${c.toUpperCase()} containers directly.`);
+  }
+
   return {
     isSupported: reasons.length === 0,
     reasons,
@@ -55,7 +80,50 @@ export function checkMediaCompatibility(
 export function isSupportedOnSamsungTv(
   videoCodec?: string,
   audioCodec?: string,
-  container?: string
+  container?: string,
+  forceHtml5?: boolean
 ): boolean {
-  return checkMediaCompatibility(videoCodec, audioCodec, container).isSupported;
+  return checkMediaCompatibility(videoCodec, audioCodec, container, forceHtml5).isSupported;
+}
+
+export function getPlaybackUrl(options: PlaybackStreamOptions): PlaybackUrlResult {
+  const cleanBase = options.serverUrl.replace(/\/+$/, '');
+  const compat = checkMediaCompatibility(
+    options.videoCodec,
+    options.audioCodec,
+    options.container,
+    options.forceHtml5
+  );
+
+  const isHls = Boolean(options.forceHls || !compat.isSupported);
+  const params = new URLSearchParams();
+
+  if (isHls) {
+    params.set('video_codec', 'h264');
+    params.set('audio_codec', 'aac');
+    if (options.maxHeight) {
+      params.set('max_height', String(options.maxHeight));
+    }
+    if (options.startSeconds !== undefined && options.startSeconds > 0) {
+      params.set('start_time', options.startSeconds.toFixed(3));
+    }
+  }
+
+  if (options.token) {
+    params.set('token', options.token);
+  }
+  if (options.unlockTokens && options.unlockTokens.length > 0) {
+    params.set('unlocked', options.unlockTokens.join(','));
+  }
+
+  const queryStr = params.toString() ? `?${params.toString()}` : '';
+  const url = isHls
+    ? `${cleanBase}/api/v1/media/${options.itemId}/hls/master.m3u8${queryStr}`
+    : `${cleanBase}/api/v1/stream/${options.itemId}${queryStr}`;
+
+  return {
+    url,
+    isHls,
+    reasons: compat.reasons,
+  };
 }

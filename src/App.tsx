@@ -25,7 +25,12 @@ export default function App() {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('kadr_token'));
   const [profiles, setProfiles] = useState<ProfileCard[]>([]);
   const [activeItem, setActiveItem] = useState<MediaItemDetail | null>(null);
-  const [playerItem, setPlayerItem] = useState<{ id: number | string; title: string; startMs: number } | null>(null);
+  const [playerItem, setPlayerItem] = useState<{
+    id: number | string;
+    title: string;
+    startMs: number;
+    technical?: MediaItemDetail['technical'];
+  } | null>(null);
   const [folderBrowserState, setFolderBrowserState] = useState<{ libraryId: string; path: string } | null>(null);
   const [imageViewerState, setImageViewerState] = useState<{
     images: FolderImage[];
@@ -148,18 +153,25 @@ export default function App() {
     }
   };
 
-  const handlePlayItem = (itemId: number | string, resumeMs = 0, titleOverride?: string) => {
+  const handlePlayItem = (
+    itemId: number | string,
+    resumeMs = 0,
+    titleOverride?: string,
+    technicalOverride?: MediaItemDetail['technical']
+  ) => {
     if (itemId === undefined || itemId === null || itemId === '' || itemId === 'undefined') {
       console.error('[App] Cannot play item with invalid id:', itemId);
       return;
     }
     let title = titleOverride;
-    if (!title && activeItem) {
+    let technical = technicalOverride;
+    if (activeItem) {
       if (activeItem.id === itemId) {
-        title = activeItem.title || activeItem.card?.title;
+        if (!title) title = activeItem.title || activeItem.card?.title;
+        if (!technical) technical = activeItem.technical;
       } else if (activeItem.episodes) {
         const ep = activeItem.episodes.find((e) => e.id === itemId);
-        if (ep?.title) {
+        if (ep?.title && !title) {
           title = ep.title;
         }
       }
@@ -168,7 +180,7 @@ export default function App() {
       }
     }
     title = title || 'Playing';
-    setPlayerItem({ id: itemId, title, startMs: resumeMs });
+    setPlayerItem({ id: itemId, title, startMs: resumeMs, technical });
     setView('player');
   };
 
@@ -340,6 +352,7 @@ export default function App() {
             serverUrl={serverUrl || ''}
             token={token || ''}
             initialTimeMs={playerItem.startMs}
+            technical={playerItem.technical}
             onExit={handleExitPlayer}
           />
         )}

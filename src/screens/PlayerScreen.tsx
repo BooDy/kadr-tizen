@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, useCallback, useMemo, useContext } from 'react';
 import { createPlayerDriver, PlayerDriver, PlayerState } from '../player/driver';
 import { ErrorQRCode, DiagnosticPayload } from '../components/player/ErrorQRCode';
-import { KNOWN_COMPATIBILITY_INFO } from '../player/compatibility';
+import { KNOWN_COMPATIBILITY_INFO, isSupportedOnSamsungTv, getPlaybackUrl } from '../player/compatibility';
 import { reportPlaybackProgress } from '../api/playback';
 import { ApiClient } from '../api/client';
 import { fetchItemSubtitles } from '../api/subtitles';
+import { fetchMediaItem, MediaItemDetail } from '../api/items';
 import { SubtitleTrack } from '../types/kadr';
 import { PlaybackSessionManager } from '../player/session';
 import { TVKeys } from '../navigation/keys';
@@ -12,7 +13,7 @@ import { FocusContext } from '../navigation/FocusContext';
 import { PlayerOSD } from '../components/osd/PlayerOSD';
 import { SubtitleModal } from '../components/player/SubtitleModal';
 import { TVButton } from '../components/tv/TVButton';
-import { AlertTriangle, RotateCcw, MonitorPlay, ArrowLeft, FastForward, Rewind } from 'lucide-react';
+import { AlertTriangle, RotateCcw, MonitorPlay, ArrowLeft, FastForward, Rewind, Layers } from 'lucide-react';
 
 export function formatTime(seconds: number): string {
   const totalSecs = Math.max(0, Math.floor(seconds));
@@ -34,6 +35,7 @@ export interface PlayerScreenProps {
   token: string;
   initialTimeMs?: number;
   initialResumeMs?: number;
+  technical?: MediaItemDetail['technical'];
   client?: ApiClient;
   apiClient?: ApiClient;
   onExit: () => void;
@@ -46,6 +48,7 @@ export function PlayerScreen({
   token,
   initialTimeMs = 0,
   initialResumeMs,
+  technical,
   client,
   apiClient: apiClientProp,
   onExit,
@@ -62,6 +65,33 @@ export function PlayerScreen({
   const [playbackError, setPlaybackError] = useState<PlaybackErrorInfo | null>(null);
   const [forceHtml5, setForceHtml5] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+
+  const [technicalInfo, setTechnicalInfo] = useState<MediaItemDetail['technical'] | undefined>(technical);
+  const technicalInfoRef = useRef(technicalInfo);
+  technicalInfoRef.current = technicalInfo;
+
+  const [knownDurationMs, setKnownDurationMs] = useState<number>(0);
+  const knownDurationMsRef = useRef(knownDurationMs);
+  knownDurationMsRef.current = knownDurationMs;
+
+  const [useHls, setUseHls] = useState<boolean>(() => {
+    if (technical) {
+      return !isSupportedOnSamsungTv(
+        technical.video_codec,
+        technical.audio_codec,
+        technical.container,
+        false
+      );
+    }
+    return false;
+  });
+  const [hlsSeekOffsetMs, setHlsSeekOffsetMs] = useState<number>(0);
+
+  const isHlsRef = useRef(useHls);
+  isHlsRef.current = useHls;
+
+  const streamStartOffsetMsRef = useRef(0);
+  const rawStreamDurationRef = useRef(0);
 
   const playbackErrorRef = useRef(playbackError);
   playbackErrorRef.current = playbackError;
@@ -91,7 +121,44 @@ export function PlayerScreen({
   const sessionManager = useMemo(() => new PlaybackSessionManager(apiClient), [apiClient]);
   const hasActiveSessionRef = useRef(false);
 
-  const handleRetry = useCallback(() => {
+  // Fetch media item details (technical codecs + accurate duration)
+  useEffect(() => {
+    let isMounted = true;
+    const numericItemId = typeof itemId === 'number' ? itemId : parseInt(String(itemId), 10);
+    if (!isNaN(numericItemId)) {
+      fetchMediaItem(apiClient, numericItemId)
+        .then((detail) => {
+          if (!isMounted) return;
+          if (detail.technical) {
+            setTechnicalInfo(detail.technical);
+            if (!isSupportedOnSamsungTv(
+              detail.technical.video_codec,
+              detail.technical.audio_codec,
+              detail.technical.container,
+              forceHtml5
+            )) {
+              setUseHls(true);
+            }
+          }
+          if (detail.duration_ms) {
+            setKnownDurationMs(detail.duration_ms);
+          } else if (detail.duration_seconds) {
+            setKnownDurationMs(detail.duration_seconds * 1000);
+          }
+        })
+        .catch((err) => {
+          console.warn('[PlayerScreen] Failed to fetch media item detail:', err);
+        });
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [itemId, apiClient, forceHtml5]);
+
+  const handleRetry = useCallback((retryWithHls?: boolean) => {
+    if (retryWithHls !== undefined) {
+      setUseHls(retryWithHls);
+    }
     setPlaybackError(null);
     setPlayerState('buffering');
     setReloadKey((k) => k + 1);
@@ -238,7 +305,18 @@ export function PlayerScreen({
       seekDirectionRef.current = direction;
       targetSeekMsRef.current = targetMs;
       seekLockUntilMsRef.current = Date.now() + 5000;
-      driverRef.current?.seekTo(targetMs, () => {});
+
+      if (isHlsRef.current) {
+        const relativeSeekMs = targetMs - streamStartOffsetMsRef.current;
+        if (relativeSeekMs >= 0 && relativeSeekMs <= rawStreamDurationRef.current) {
+          driverRef.current?.seekTo(relativeSeekMs, () => {});
+        } else {
+          setHlsSeekOffsetMs(targetMs);
+          setReloadKey((k) => k + 1);
+        }
+      } else {
+        driverRef.current?.seekTo(targetMs, () => {});
+      }
     }, 300);
   }, [resetOsdTimer]);
 
@@ -285,16 +363,26 @@ export function PlayerScreen({
       return;
     }
 
-    const queryParams = new URLSearchParams();
-    if (token) {
-      queryParams.set('token', token);
-    }
-    const unlockTokens = apiClient.getUnlockTokens ? apiClient.getUnlockTokens() : [];
-    if (unlockTokens.length > 0) {
-      queryParams.set('unlocked', unlockTokens.join(','));
-    }
-    const queryString = queryParams.toString() ? `?${queryParams.toString()}` : '';
-    const streamUrl = `${cleanServerUrl}/api/v1/stream/${itemId}${queryString}`;
+    const activeStartMs = hlsSeekOffsetMs > 0 ? hlsSeekOffsetMs : initialResume;
+    const streamStartOffsetMs = useHls && activeStartMs > 0 ? activeStartMs : 0;
+    streamStartOffsetMsRef.current = streamStartOffsetMs;
+
+    const playbackResult = getPlaybackUrl({
+      serverUrl: cleanServerUrl,
+      itemId,
+      token,
+      unlockTokens: apiClient.getUnlockTokens ? apiClient.getUnlockTokens() : [],
+      forceHls: useHls,
+      forceHtml5,
+      videoCodec: technicalInfoRef.current?.video_codec || technical?.video_codec,
+      audioCodec: technicalInfoRef.current?.audio_codec || technical?.audio_codec,
+      container: technicalInfoRef.current?.container || technical?.container,
+      startSeconds: streamStartOffsetMs > 0 ? streamStartOffsetMs / 1000 : 0,
+    });
+    const streamUrl = playbackResult.url;
+    const isHls = playbackResult.isHls;
+    isHlsRef.current = isHls;
+
     const driver = createPlayerDriver(forceHtml5);
     driverRef.current = driver;
 
@@ -316,22 +404,25 @@ export function PlayerScreen({
       if (pos > 0) {
         clearTimeout(bufferWatchdog);
       }
-      setDurationMs(dur);
-      durationMsRef.current = dur;
+      rawStreamDurationRef.current = dur;
+      const effectiveDur = knownDurationMsRef.current > 0 ? knownDurationMsRef.current : (streamStartOffsetMs + dur);
+      setDurationMs(effectiveDur);
+      durationMsRef.current = effectiveDur;
 
       // When seeking is in progress, ignore stale time updates
       if (seekDebounceTimerRef.current !== null) {
         return;
       }
+      const effectivePos = streamStartOffsetMs + pos;
       if (targetSeekMsRef.current !== null) {
         const dir = seekDirectionRef.current;
         const target = targetSeekMsRef.current;
         const isLockActive = Date.now() < seekLockUntilMsRef.current;
         const isStale =
           dir === 'forward'
-            ? pos < target - 2000
+            ? effectivePos < target - 2000
             : dir === 'backward'
-            ? pos > target + 2000
+            ? effectivePos > target + 2000
             : false;
 
         if (isLockActive && isStale) {
@@ -343,8 +434,8 @@ export function PlayerScreen({
         seekDirectionRef.current = null;
       }
 
-      setPositionMs(pos);
-      positionMsRef.current = pos;
+      setPositionMs(effectivePos);
+      positionMsRef.current = effectivePos;
     });
 
     driver.onStateChange((state) => {
@@ -367,7 +458,8 @@ export function PlayerScreen({
       });
     });
 
-    driver.init(containerRef.current, streamUrl, initialResume).catch((err) => {
+    const initialDriverTime = isHls && streamStartOffsetMs > 0 ? 0 : activeStartMs;
+    driver.init(containerRef.current, streamUrl, initialDriverTime).catch((err) => {
       clearTimeout(bufferWatchdog);
       console.error('[PlayerScreen] Driver init failed:', err);
       setPlayerState('error');
@@ -437,7 +529,18 @@ export function PlayerScreen({
       }
       driver.destroy();
     };
-  }, [itemId, serverUrl, token, initialResume, sessionManager, reloadKey, forceHtml5]);
+  }, [
+    itemId,
+    serverUrl,
+    token,
+    initialResume,
+    sessionManager,
+    reloadKey,
+    forceHtml5,
+    useHls,
+    hlsSeekOffsetMs,
+    technical,
+  ]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -677,10 +780,10 @@ export function PlayerScreen({
                   id="player-error-retry-btn"
                   groupId="player-error"
                   order={1}
-                  variant="primary"
-                  autoFocus
-                  onClick={handleRetry}
-                  onEnter={handleRetry}
+                  variant={useHls ? "primary" : "secondary"}
+                  autoFocus={useHls}
+                  onClick={() => handleRetry()}
+                  onEnter={() => handleRetry()}
                   className="px-6 py-4 text-lg font-bold"
                 >
                   <RotateCcw className="w-6 h-6 mr-2" /> Retry Playback
@@ -689,12 +792,41 @@ export function PlayerScreen({
                 <button
                   id="player-error-retry-btn"
                   type="button"
-                  autoFocus
-                  onClick={handleRetry}
-                  className="px-6 py-4 rounded-xl font-bold text-lg flex items-center justify-center cursor-pointer select-none bg-[#FF6B00] text-white"
+                  autoFocus={useHls}
+                  onClick={() => handleRetry()}
+                  className={`px-6 py-4 rounded-xl font-bold text-lg flex items-center justify-center cursor-pointer select-none ${
+                    useHls ? 'bg-[#FF6B00] text-white' : 'bg-[#3B1111] text-[#F5E5E5] border border-[rgba(245,229,229,0.08)]'
+                  }`}
                 >
                   <RotateCcw className="w-6 h-6 mr-2" /> Retry Playback
                 </button>
+              )}
+
+              {!useHls && (
+                focusCtx ? (
+                  <TVButton
+                    id="player-error-hls-btn"
+                    groupId="player-error"
+                    order={2}
+                    variant="primary"
+                    autoFocus
+                    onClick={() => handleRetry(true)}
+                    onEnter={() => handleRetry(true)}
+                    className="px-6 py-4 text-lg font-bold bg-[#FF6B00]"
+                  >
+                    <Layers className="w-6 h-6 mr-2" /> Play with Transcoding (HLS)
+                  </TVButton>
+                ) : (
+                  <button
+                    id="player-error-hls-btn"
+                    type="button"
+                    autoFocus
+                    onClick={() => handleRetry(true)}
+                    className="px-6 py-4 rounded-xl font-bold text-lg flex items-center justify-center cursor-pointer select-none bg-[#FF6B00] text-white"
+                  >
+                    <Layers className="w-6 h-6 mr-2" /> Play with Transcoding (HLS)
+                  </button>
+                )
               )}
 
               {playbackError.driverName.includes('AVPlay') && (
@@ -702,7 +834,7 @@ export function PlayerScreen({
                   <TVButton
                     id="player-error-html5-btn"
                     groupId="player-error"
-                    order={2}
+                    order={3}
                     variant="secondary"
                     onClick={handleSwitchToHtml5}
                     onEnter={handleSwitchToHtml5}
@@ -726,7 +858,7 @@ export function PlayerScreen({
                 <TVButton
                   id="player-error-exit-btn"
                   groupId="player-error"
-                  order={3}
+                  order={4}
                   variant="secondary"
                   onClick={onExit}
                   onEnter={onExit}

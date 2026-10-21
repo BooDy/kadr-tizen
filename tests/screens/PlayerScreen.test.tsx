@@ -1041,11 +1041,18 @@ describe('PlayerScreen', () => {
       expect(screen.getByText('Playback Error')).toBeInTheDocument();
 
       const retryBtn = screen.getByRole('button', { name: /Retry Playback/i });
+      const hlsBtn = screen.getByRole('button', { name: /Play with Transcoding \(HLS\)/i });
       const html5Btn = screen.getByRole('button', { name: /Try HTML5 Video Player/i });
       const exitBtn = screen.getByRole('button', { name: /Exit to Browse/i });
 
       // Retry Playback is initially focused
       expect(retryBtn).toHaveClass('tv-focus-ring');
+
+      // Navigate Right -> Play with Transcoding (HLS)
+      act(() => {
+        fireEvent.keyDown(window, { keyCode: TVKeys.RIGHT, key: 'ArrowRight' });
+      });
+      expect(hlsBtn).toHaveClass('tv-focus-ring');
 
       // Navigate Right -> Try HTML5 Video Player
       act(() => {
