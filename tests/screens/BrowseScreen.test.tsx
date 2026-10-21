@@ -168,6 +168,7 @@ describe('BrowseScreen', () => {
     await waitFor(() => {
       expect(screen.getByText('Anime')).toBeInTheDocument();
       expect(screen.getByText('Home Featured Movie')).toBeInTheDocument();
+      expect(document.activeElement?.id).toBe('hero-play-hero-home');
     });
 
     // Move to sidebar and down to anime
@@ -328,6 +329,7 @@ describe('BrowseScreen', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Home Featured Movie')).toBeInTheDocument();
+      expect(document.activeElement?.id).toBe('hero-play-hero-home');
     });
 
     // Move focus from content to sidebar
@@ -690,6 +692,7 @@ describe('BrowseScreen', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Home Featured Movie')).toBeInTheDocument();
+      expect(document.activeElement?.id).toBe('hero-play-hero-home');
     });
 
     // Move to sidebar
