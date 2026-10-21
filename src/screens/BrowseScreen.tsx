@@ -163,6 +163,15 @@ export function BrowseScreen({
   const lastContentFocusedIdRef = useRef<string | null>(null);
 
   useEffect(() => {
+    if (focusedId && (focusedId.startsWith('nav-screen-') || focusedId === 'nav-switch-profile')) {
+      const el = document.getElementById(focusedId);
+      if (el && typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+    }
+  }, [focusedId]);
+
+  useEffect(() => {
     let cancelled = false;
     fetchScreens(client)
       .then((data) => {
@@ -356,82 +365,86 @@ export function BrowseScreen({
           isSidebarFocused ? 'w-96' : 'w-28'
         } hover:w-96 focus-within:w-96 transition-all duration-200 bg-[#3B1111] border-r border-[rgba(245,229,229,0.08)] p-4 flex flex-col justify-between z-40 group`}
       >
-        <div className="flex flex-col">
-          <div className="h-24 flex items-center justify-center mb-8">
-            <img
-              src="./kadr-logo.png"
-              alt="Kadr"
-              className="h-14 w-auto object-contain"
-              style={{ height: '56px', width: 'auto', maxHeight: '56px' }}
-              height="56"
-            />
-          </div>
-          <div className="flex flex-col space-y-4">
-            {displayScreens.map((screenItem, index) => {
-              const IconComponent = getScreenIcon(screenItem.id);
-              const isActive = activeTab === screenItem.id;
-              const info = getLibraryInfo(screenItem.id);
+        <div className="h-24 flex items-center justify-center mb-8 shrink-0">
+          <img
+            src="./kadr-logo.png"
+            alt="Kadr"
+            className="h-14 w-auto object-contain"
+            style={{ height: '56px', width: 'auto', maxHeight: '56px' }}
+            height="56"
+          />
+        </div>
 
-              return (
-                <TVButton
-                  key={screenItem.id}
-                  id={`nav-screen-${screenItem.id}`}
-                  groupId="sidebar"
-                  order={index + 1}
-                  variant={isActive ? 'nav-active' : 'nav-inactive'}
-                  onEnter={() => handleSelectScreen(screenItem.id)}
-                  onClick={() => handleSelectScreen(screenItem.id)}
-                  className="w-full justify-start px-5 py-5 my-1"
-                >
-                  {info?.isPrivate ? (
-                    info.isUnlocked ? (
-                      <Unlock className="w-9 h-9 shrink-0 mr-4 text-[#FF6B00]" />
-                    ) : (
-                      <Lock className="w-9 h-9 shrink-0 mr-4 text-[#FFB800]" />
-                    )
+        <div
+          data-testid="sidebar-items-container"
+          className="flex-1 overflow-y-auto scrollbar-none flex flex-col gap-[148px] py-4"
+        >
+          {displayScreens.map((screenItem, index) => {
+            const IconComponent = getScreenIcon(screenItem.id);
+            const isActive = activeTab === screenItem.id;
+            const info = getLibraryInfo(screenItem.id);
+
+            return (
+              <TVButton
+                key={screenItem.id}
+                id={`nav-screen-${screenItem.id}`}
+                groupId="sidebar"
+                order={index + 1}
+                variant={isActive ? 'nav-active' : 'nav-inactive'}
+                onEnter={() => handleSelectScreen(screenItem.id)}
+                onClick={() => handleSelectScreen(screenItem.id)}
+                className="w-full justify-start px-5 py-5 shrink-0"
+              >
+                {info?.isPrivate ? (
+                  info.isUnlocked ? (
+                    <Unlock className="w-9 h-9 shrink-0 mr-4 text-[#FF6B00]" />
                   ) : (
-                    <IconComponent className="w-9 h-9 shrink-0 mr-4" />
-                  )}
+                    <Lock className="w-9 h-9 shrink-0 mr-4 text-[#FFB800]" />
+                  )
+                ) : (
+                  <IconComponent className="w-9 h-9 shrink-0 mr-4" />
+                )}
+                <span
+                  className={`${
+                    isSidebarFocused ? 'inline' : 'hidden group-hover:inline group-focus-within:inline'
+                  } text-3xl font-extrabold tracking-wide truncate`}
+                >
+                  {screenItem.title}
+                </span>
+                {info?.isPrivate && !info.isUnlocked && (
                   <span
                     className={`${
                       isSidebarFocused ? 'inline' : 'hidden group-hover:inline group-focus-within:inline'
-                    } text-3xl font-extrabold tracking-wide truncate`}
+                    } ml-auto text-sm px-3 py-1 rounded bg-[#FFB800]/20 text-[#FFB800] border border-[#FFB800]/30 font-bold`}
                   >
-                    {screenItem.title}
+                    Locked
                   </span>
-                  {info?.isPrivate && !info.isUnlocked && (
-                    <span
-                      className={`${
-                        isSidebarFocused ? 'inline' : 'hidden group-hover:inline group-focus-within:inline'
-                      } ml-auto text-sm px-3 py-1 rounded bg-[#FFB800]/20 text-[#FFB800] border border-[#FFB800]/30 font-bold`}
-                    >
-                      Locked
-                    </span>
-                  )}
-                </TVButton>
-              );
-            })}
-          </div>
+                )}
+              </TVButton>
+            );
+          })}
         </div>
 
-        <TVButton
-          id="nav-switch-profile"
-          groupId="sidebar"
-          order={displayScreens.length + 1}
-          variant="nav-inactive"
-          onEnter={onSwitchProfile}
-          onClick={onSwitchProfile}
-          className="w-full justify-start px-5 py-5 mt-auto"
-        >
-          <Users className="w-9 h-9 shrink-0 mr-4" />
-          <span
-            className={`${
-              isSidebarFocused ? 'inline' : 'hidden group-hover:inline group-focus-within:inline'
-            } text-3xl font-extrabold tracking-wide truncate`}
+        <div className="pt-4 border-t border-[rgba(245,229,229,0.08)] shrink-0">
+          <TVButton
+            id="nav-switch-profile"
+            groupId="sidebar"
+            order={displayScreens.length + 1}
+            variant="nav-inactive"
+            onEnter={onSwitchProfile}
+            onClick={onSwitchProfile}
+            className="w-full justify-start px-5 py-5"
           >
-            Profiles
-          </span>
-        </TVButton>
+            <Users className="w-9 h-9 shrink-0 mr-4" />
+            <span
+              className={`${
+                isSidebarFocused ? 'inline' : 'hidden group-hover:inline group-focus-within:inline'
+              } text-3xl font-extrabold tracking-wide truncate`}
+            >
+              Profiles
+            </span>
+          </TVButton>
+        </div>
       </nav>
 
       {/* Main Content Area */}

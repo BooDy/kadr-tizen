@@ -285,6 +285,60 @@ describe('BrowseScreen', () => {
     });
   });
 
+  it('renders sidebar navigation items with 2x item height spacing (148px gap) in an auto-scroll container', async () => {
+    vi.spyOn(screensApi, 'fetchScreenLayout').mockResolvedValue(mockHomeLayout);
+
+    render(
+      <FocusProvider>
+        <BrowseScreen
+          client={mockClient}
+          serverUrl="http://localhost:8492"
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+          onSwitchProfile={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('sidebar-items-container')).toBeInTheDocument();
+    });
+    const container = screen.getByTestId('sidebar-items-container');
+    expect(container.className).toContain('gap-[148px]');
+    expect(container.className).toContain('overflow-y-auto');
+    expect(container.className).toContain('scrollbar-none');
+  });
+
+  it('calls scrollIntoView when a sidebar button receives focus', async () => {
+    vi.spyOn(screensApi, 'fetchScreenLayout').mockResolvedValue(mockHomeLayout);
+    const scrollIntoViewMock = vi.fn();
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoViewMock;
+
+    render(
+      <FocusProvider>
+        <BrowseScreen
+          client={mockClient}
+          serverUrl="http://localhost:8492"
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+          onSwitchProfile={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Home Featured Movie')).toBeInTheDocument();
+    });
+
+    // Move focus from content to sidebar
+    fireEvent.keyDown(window, { key: 'ArrowLeft', keyCode: TVKeys.LEFT });
+
+    expect(scrollIntoViewMock).toHaveBeenCalledWith({
+      block: 'nearest',
+      behavior: 'smooth',
+    });
+  });
+
   it('switches tabs to Movies and Shows when sidebar buttons are activated', async () => {
     const fetchSpy = vi
       .spyOn(screensApi, 'fetchScreenLayout')
