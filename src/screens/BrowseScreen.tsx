@@ -377,7 +377,7 @@ export function BrowseScreen({
 
         <div
           data-testid="sidebar-items-container"
-          className="flex-1 overflow-y-auto scrollbar-none flex flex-col gap-[148px] py-4"
+          className="flex-1 overflow-y-auto scrollbar-none flex flex-col gap-8 py-4"
         >
           {displayScreens.map((screenItem, index) => {
             const IconComponent = getScreenIcon(screenItem.id);

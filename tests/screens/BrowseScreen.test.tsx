@@ -286,7 +286,7 @@ describe('BrowseScreen', () => {
     });
   });
 
-  it('renders sidebar navigation items with 2x item height spacing (148px gap) in an auto-scroll container', async () => {
+  it('renders sidebar navigation items with 32px spacing (gap-8) in an auto-scroll container', async () => {
     vi.spyOn(screensApi, 'fetchScreenLayout').mockResolvedValue(mockHomeLayout);
 
     render(
@@ -305,7 +305,8 @@ describe('BrowseScreen', () => {
       expect(screen.getByTestId('sidebar-items-container')).toBeInTheDocument();
     });
     const container = screen.getByTestId('sidebar-items-container');
-    expect(container.className).toContain('gap-[148px]');
+    expect(container.className).toContain('gap-8');
+    expect(container.className).not.toContain('gap-[148px]');
     expect(container.className).toContain('overflow-y-auto');
     expect(container.className).toContain('scrollbar-none');
   });
