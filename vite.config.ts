@@ -8,6 +8,7 @@ import postcss from 'postcss';
 function tizenClassicBundlePlugin() {
   return {
     name: 'vite-plugin-tizen-classic-bundle',
+    apply: 'build' as const,
     async generateBundle(this: any, _options: any, bundle: any) {
       const appJs = bundle['assets/app.js'];
       if (appJs && appJs.type === 'chunk') {
