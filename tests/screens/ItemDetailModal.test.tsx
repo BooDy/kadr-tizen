@@ -504,13 +504,13 @@ describe('ItemDetailModal', () => {
       // Half Loop has 0.3 playback progress -> Math.round(0.3 * 100) = 30
       const ep2Card = screen.getByText('Half Loop');
       fireEvent.click(ep2Card);
-      expect(onPlay).toHaveBeenCalledWith(207, 30);
+      expect(onPlay).toHaveBeenCalledWith(207, 30, 'Half Loop', undefined, expect.any(Array), 1);
 
       // Switch to Season 2 and click episode with no progress
       fireEvent.click(screen.getByText('Season 2'));
       const s2Ep1Card = screen.getByText('Season 2 Premiere');
       fireEvent.click(s2Ep1Card);
-      expect(onPlay).toHaveBeenCalledWith(301, 0);
+      expect(onPlay).toHaveBeenCalledWith(301, 0, 'Season 2 Premiere', undefined, expect.any(Array), 2);
     });
 
     it('renders primary Resume Next button targeting the first in-progress episode', () => {
@@ -532,7 +532,7 @@ describe('ItemDetailModal', () => {
       expect(resumeBtn).toBeInTheDocument();
       fireEvent.click(resumeBtn);
       // Episode 207 is first unfinished/in-progress episode
-      expect(onPlay).toHaveBeenCalledWith(207, 30);
+      expect(onPlay).toHaveBeenCalledWith(207, 30, 'Half Loop', undefined, expect.any(Array), 1);
     });
 
     it('renders primary Play button when all episodes are unwatched', () => {
@@ -571,7 +571,7 @@ describe('ItemDetailModal', () => {
       const playBtn = screen.getByRole('button', { name: /^Play$/i });
       expect(playBtn).toBeInTheDocument();
       fireEvent.click(playBtn);
-      expect(onPlay).toHaveBeenCalledWith(206, 0);
+      expect(onPlay).toHaveBeenCalledWith(206, 0, 'Episode 1', undefined, expect.any(Array), 0);
     });
 
     it('does not render Browse Folder button when library_id or folder_path is missing', () => {

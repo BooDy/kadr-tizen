@@ -5,12 +5,20 @@ import { TVButton } from '../components/tv/TVButton';
 import { TVCard } from '../components/tv/TVCard';
 import { TVKeys } from '../navigation/keys';
 import { Play, RotateCcw, X, Folder } from 'lucide-react';
+import { PlaylistItem } from './PlayerScreen';
 
 export interface ItemDetailModalProps {
   isOpen?: boolean;
   item: MediaItemDetail | null;
   serverUrl: string;
-  onPlay: (itemId: number | string, resumeMs?: number, title?: string) => void;
+  onPlay: (
+    itemId: number | string,
+    resumeMs?: number,
+    title?: string,
+    technical?: MediaItemDetail['technical'],
+    playlist?: PlaylistItem[],
+    currentIndex?: number
+  ) => void;
   onClose: () => void;
   onBrowseFolder?: (libraryId: string, folderPath: string) => void;
 }
@@ -98,6 +106,23 @@ export function ItemDetailModal({
     : resolvedResumeMs && resolvedResumeMs > 0
     ? 'detail-resume-btn'
     : 'detail-play-btn';
+
+  const episodePlaylist: PlaylistItem[] = useMemo(() => {
+    if (!episodes || episodes.length === 0) return [];
+    const sorted = [...episodes].sort((a, b) =>
+      a.season !== b.season ? a.season - b.season : a.episode - b.episode
+    );
+    return sorted.map((ep) => ({
+      id: ep.id,
+      title: ep.title,
+    }));
+  }, [episodes]);
+
+  const nextEpisodeIndex = useMemo(() => {
+    if (!nextEpisode || episodePlaylist.length === 0) return undefined;
+    const idx = episodePlaylist.findIndex((p) => String(p.id) === String(nextEpisode.id));
+    return idx >= 0 ? idx : undefined;
+  }, [nextEpisode, episodePlaylist]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -296,8 +321,26 @@ export function ItemDetailModal({
                     groupId="item-detail-modal"
                     order={1}
                     variant="primary"
-                    onEnter={() => onPlay(nextEpisode.id, nextEpisodeResumeMs)}
-                    onClick={() => onPlay(nextEpisode.id, nextEpisodeResumeMs)}
+                    onEnter={() =>
+                      onPlay(
+                        nextEpisode.id,
+                        nextEpisodeResumeMs,
+                        nextEpisode.title,
+                        undefined,
+                        episodePlaylist.length > 0 ? episodePlaylist : undefined,
+                        nextEpisodeIndex
+                      )
+                    }
+                    onClick={() =>
+                      onPlay(
+                        nextEpisode.id,
+                        nextEpisodeResumeMs,
+                        nextEpisode.title,
+                        undefined,
+                        episodePlaylist.length > 0 ? episodePlaylist : undefined,
+                        nextEpisodeIndex
+                      )
+                    }
                     className="!py-6 !px-12 !text-4xl font-extrabold rounded-2xl gap-5"
                     autoFocus
                   >
@@ -310,8 +353,26 @@ export function ItemDetailModal({
                     groupId="item-detail-modal"
                     order={1}
                     variant="primary"
-                    onEnter={() => onPlay(nextEpisode.id, 0)}
-                    onClick={() => onPlay(nextEpisode.id, 0)}
+                    onEnter={() =>
+                      onPlay(
+                        nextEpisode.id,
+                        0,
+                        nextEpisode.title,
+                        undefined,
+                        episodePlaylist.length > 0 ? episodePlaylist : undefined,
+                        nextEpisodeIndex
+                      )
+                    }
+                    onClick={() =>
+                      onPlay(
+                        nextEpisode.id,
+                        0,
+                        nextEpisode.title,
+                        undefined,
+                        episodePlaylist.length > 0 ? episodePlaylist : undefined,
+                        nextEpisodeIndex
+                      )
+                    }
                     className="!py-6 !px-12 !text-4xl font-extrabold rounded-2xl gap-5"
                     autoFocus
                   >
@@ -441,14 +502,19 @@ export function ItemDetailModal({
                           : undefined
                       }
                       badge={ep.badge}
-                      onSelect={() =>
+                      onSelect={() => {
+                        const idx = episodePlaylist.findIndex((p) => String(p.id) === String(ep.id));
                         onPlay(
                           ep.id,
                           (ep.playback_progress || 0) > 0
                             ? Math.round(ep.playback_progress! * 100)
-                            : 0
-                        )
-                      }
+                            : 0,
+                          ep.title,
+                          undefined,
+                          episodePlaylist.length > 0 ? episodePlaylist : undefined,
+                          idx >= 0 ? idx : undefined
+                        );
+                      }}
                     />
                   </div>
                 ))}

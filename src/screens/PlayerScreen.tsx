@@ -28,6 +28,12 @@ export interface PlaybackErrorInfo {
   driverName: string;
 }
 
+export interface PlaylistItem {
+  id: number | string;
+  title: string;
+  technical?: MediaItemDetail['technical'];
+}
+
 export interface PlayerScreenProps {
   itemId: number | string;
   title?: string;
@@ -38,6 +44,10 @@ export interface PlayerScreenProps {
   technical?: MediaItemDetail['technical'];
   client?: ApiClient;
   apiClient?: ApiClient;
+  playlist?: PlaylistItem[];
+  currentIndex?: number;
+  onNext?: () => void;
+  onPrevious?: () => void;
   onExit: () => void;
 }
 
@@ -51,6 +61,10 @@ export function PlayerScreen({
   technical,
   client,
   apiClient: apiClientProp,
+  playlist,
+  currentIndex,
+  onNext,
+  onPrevious,
   onExit,
 }: PlayerScreenProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -220,6 +234,62 @@ export function PlayerScreen({
   const playerStateRef = useRef(playerState);
   playerStateRef.current = playerState;
 
+  const hasPrevious = currentIndex !== undefined ? currentIndex > 0 : Boolean(onPrevious);
+  const hasNext =
+    currentIndex !== undefined && playlist ? currentIndex < playlist.length - 1 : Boolean(onNext);
+
+  const onNextRef = useRef(onNext);
+  onNextRef.current = onNext;
+  const onPreviousRef = useRef(onPrevious);
+  onPreviousRef.current = onPrevious;
+  const hasNextRef = useRef(hasNext);
+  hasNextRef.current = hasNext;
+  const hasPreviousRef = useRef(hasPrevious);
+  hasPreviousRef.current = hasPrevious;
+
+  const [autoAdvanceCountdown, setAutoAdvanceCountdown] = useState<number | null>(null);
+  const autoAdvanceCountdownRef = useRef(autoAdvanceCountdown);
+  autoAdvanceCountdownRef.current = autoAdvanceCountdown;
+  const autoAdvanceDismissedRef = useRef(false);
+
+  useEffect(() => {
+    autoAdvanceDismissedRef.current = false;
+    setAutoAdvanceCountdown(null);
+  }, [itemId]);
+
+  useEffect(() => {
+    if (autoAdvanceDismissedRef.current) return;
+    if (!hasNext || !onNext) return;
+    if (autoAdvanceCountdown !== null) return;
+
+    const isNearEnd = durationMs > 0 && positionMs >= durationMs - 1500;
+    const isEnded = playerState === 'ended';
+
+    if (isEnded || isNearEnd) {
+      setAutoAdvanceCountdown(5);
+    }
+  }, [playerState, positionMs, durationMs, hasNext, onNext, autoAdvanceCountdown]);
+
+  useEffect(() => {
+    if (autoAdvanceCountdown === null) return;
+
+    const interval = setInterval(() => {
+      setAutoAdvanceCountdown((prev) => {
+        if (prev === null) return null;
+        if (prev <= 1) {
+          clearInterval(interval);
+          autoAdvanceDismissedRef.current = true;
+          sessionManager.updateProgress(Math.floor(positionMsRef.current / 1000));
+          onNextRef.current?.();
+          return null;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [autoAdvanceCountdown !== null, sessionManager]);
+
   // Fetch subtitles on mount / item change
   useEffect(() => {
     let isMounted = true;
@@ -290,6 +360,14 @@ export function PlayerScreen({
     seekDirectionRef.current = direction;
     targetSeekMsRef.current = targetMs;
     seekLockUntilMsRef.current = Date.now() + 5000;
+
+    if (
+      autoAdvanceCountdownRef.current !== null &&
+      durationMsRef.current > 0 &&
+      targetMs < durationMsRef.current - 1500
+    ) {
+      setAutoAdvanceCountdown(null);
+    }
 
     setSeekHud({
       label: stepLabel,
@@ -566,6 +644,63 @@ export function PlayerScreen({
 
       resetOsdTimer();
 
+      if (autoAdvanceCountdownRef.current !== null) {
+        if (code === TVKeys.ENTER || e.key === 'Enter') {
+          e.preventDefault();
+          autoAdvanceDismissedRef.current = true;
+          setAutoAdvanceCountdown(null);
+          sessionManager.updateProgress(Math.floor(positionMsRef.current / 1000));
+          onNextRef.current?.();
+          return;
+        }
+        if (
+          code === TVKeys.BACK_TIZEN ||
+          code === TVKeys.BACK_WEB ||
+          code === TVKeys.BACKSPACE ||
+          e.key === 'Escape'
+        ) {
+          e.preventDefault();
+          setAutoAdvanceCountdown(null);
+          autoAdvanceDismissedRef.current = true;
+          return;
+        }
+      }
+
+      const isModalOpen =
+        isSubtitlePopupOpenRef.current || isSubtitleModalOpenRef.current;
+
+      if (!isModalOpen) {
+        if (
+          code === TVKeys.MEDIA_TRACK_NEXT ||
+          e.key === 'MediaTrackNext' ||
+          code === TVKeys.CH_UP ||
+          e.key === 'ChannelUp'
+        ) {
+          if (hasNextRef.current && onNextRef.current) {
+            e.preventDefault();
+            autoAdvanceDismissedRef.current = true;
+            setAutoAdvanceCountdown(null);
+            sessionManager.updateProgress(Math.floor(positionMsRef.current / 1000));
+            onNextRef.current();
+            return;
+          }
+        } else if (
+          code === TVKeys.MEDIA_TRACK_PREVIOUS ||
+          e.key === 'MediaTrackPrevious' ||
+          code === TVKeys.CH_DOWN ||
+          e.key === 'ChannelDown'
+        ) {
+          if (hasPreviousRef.current && onPreviousRef.current) {
+            e.preventDefault();
+            autoAdvanceDismissedRef.current = true;
+            setAutoAdvanceCountdown(null);
+            sessionManager.updateProgress(Math.floor(positionMsRef.current / 1000));
+            onPreviousRef.current();
+            return;
+          }
+        }
+      }
+
       if (
         code === TVKeys.PLAY_PAUSE ||
         code === TVKeys.PLAY ||
@@ -676,6 +811,10 @@ export function PlayerScreen({
         onPopupOpenChange={setIsSubtitlePopupOpen}
         onOpenSubtitleModal={() => setIsSubtitleModalOpen(true)}
         onOpenSubtitles={() => setIsSubtitleModalOpen(true)}
+        hasPrevious={hasPrevious}
+        hasNext={hasNext}
+        onPrevious={onPrevious}
+        onNext={onNext}
       />
 
       <SubtitleModal
@@ -708,6 +847,25 @@ export function PlayerScreen({
           <span className="text-[#F5E5E5]/60 text-lg font-normal">
             ({formatTime(seekHud.targetMs / 1000)} / {formatTime(durationMs / 1000)})
           </span>
+        </div>
+      )}
+
+      {autoAdvanceCountdown !== null && (
+        <div
+          data-testid="auto-advance-overlay"
+          className="fixed bottom-24 right-16 z-50 bg-[#3B1111]/95 backdrop-blur-md border border-[rgba(245,229,229,0.2)] p-6 rounded-2xl shadow-2xl flex flex-col items-center gap-3 animate-fade-in pointer-events-auto"
+        >
+          <div className="text-sm uppercase tracking-wider text-[#FFB800] font-bold">
+            Up Next
+          </div>
+          <div className="text-2xl font-bold text-[#F5E5E5]">
+            Next episode in {autoAdvanceCountdown}s...
+          </div>
+          <div className="text-xs text-[#F5E5E5]/60 flex items-center gap-4 mt-1">
+            <span>Press <strong className="text-white">Enter</strong> to play now</span>
+            <span>•</span>
+            <span>Press <strong className="text-white">Back</strong> to cancel</span>
+          </div>
         </div>
       )}
 

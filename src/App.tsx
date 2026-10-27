@@ -13,7 +13,7 @@ import { ItemDetailModal } from './screens/ItemDetailModal';
 import { FolderBrowserModal } from './screens/FolderBrowserModal';
 import { ImageViewerModal } from './screens/ImageViewerModal';
 import { PinPadModal } from './components/pin/PinPadModal';
-import { PlayerScreen } from './screens/PlayerScreen';
+import { PlayerScreen, PlaylistItem } from './screens/PlayerScreen';
 import { WifiOff } from 'lucide-react';
 
 export type AppView = 'connect' | 'profiles' | 'browse' | 'player';
@@ -30,6 +30,8 @@ export default function App() {
     title: string;
     startMs: number;
     technical?: MediaItemDetail['technical'];
+    playlist?: PlaylistItem[];
+    currentIndex?: number;
   } | null>(null);
   const [folderBrowserState, setFolderBrowserState] = useState<{ libraryId: string; path: string } | null>(null);
   const [imageViewerState, setImageViewerState] = useState<{
@@ -157,7 +159,9 @@ export default function App() {
     itemId: number | string,
     resumeMs = 0,
     titleOverride?: string,
-    technicalOverride?: MediaItemDetail['technical']
+    technicalOverride?: MediaItemDetail['technical'],
+    playlistOverride?: PlaylistItem[],
+    currentIndexOverride?: number
   ) => {
     if (itemId === undefined || itemId === null || itemId === '' || itemId === 'undefined') {
       console.error('[App] Cannot play item with invalid id:', itemId);
@@ -165,6 +169,9 @@ export default function App() {
     }
     let title = titleOverride;
     let technical = technicalOverride;
+    let playlist = playlistOverride;
+    let currentIndex = currentIndexOverride;
+
     if (activeItem) {
       if (String(activeItem.id) === String(itemId)) {
         if (!title) title = activeItem.title || activeItem.card?.title;
@@ -178,10 +185,63 @@ export default function App() {
       if (!title) {
         title = activeItem.title || activeItem.card?.title;
       }
+
+      if (!playlist && activeItem.episodes && activeItem.episodes.length > 0) {
+        const sorted = [...activeItem.episodes].sort((a, b) =>
+          a.season !== b.season ? a.season - b.season : a.episode - b.episode
+        );
+        playlist = sorted.map((e) => ({
+          id: e.id,
+          title: e.title,
+        }));
+        const idx = playlist.findIndex((p) => String(p.id) === String(itemId));
+        if (idx >= 0) {
+          currentIndex = idx;
+        }
+      }
     }
     title = title || 'Playing';
-    setPlayerItem({ id: itemId, title, startMs: resumeMs, technical });
+    setPlayerItem({
+      id: itemId,
+      title,
+      startMs: resumeMs,
+      technical,
+      playlist,
+      currentIndex,
+    });
     setView('player');
+  };
+
+  const handleNextEpisode = () => {
+    if (!playerItem?.playlist || playerItem.currentIndex === undefined) return;
+    const nextIdx = playerItem.currentIndex + 1;
+    if (nextIdx < playerItem.playlist.length) {
+      const nextItem = playerItem.playlist[nextIdx];
+      handlePlayItem(
+        nextItem.id,
+        0,
+        nextItem.title,
+        nextItem.technical,
+        playerItem.playlist,
+        nextIdx
+      );
+    }
+  };
+
+  const handlePreviousEpisode = () => {
+    if (!playerItem?.playlist || playerItem.currentIndex === undefined) return;
+    const prevIdx = playerItem.currentIndex - 1;
+    if (prevIdx >= 0) {
+      const prevItem = playerItem.playlist[prevIdx];
+      handlePlayItem(
+        prevItem.id,
+        0,
+        prevItem.title,
+        prevItem.technical,
+        playerItem.playlist,
+        prevIdx
+      );
+    }
   };
 
   const handleExitPlayer = async () => {
@@ -353,6 +413,22 @@ export default function App() {
             token={token || ''}
             initialTimeMs={playerItem.startMs}
             technical={playerItem.technical}
+            playlist={playerItem.playlist}
+            currentIndex={playerItem.currentIndex}
+            onNext={
+              playerItem.playlist &&
+              playerItem.currentIndex !== undefined &&
+              playerItem.currentIndex < playerItem.playlist.length - 1
+                ? handleNextEpisode
+                : undefined
+            }
+            onPrevious={
+              playerItem.playlist &&
+              playerItem.currentIndex !== undefined &&
+              playerItem.currentIndex > 0
+                ? handlePreviousEpisode
+                : undefined
+            }
             onExit={handleExitPlayer}
           />
         )}
