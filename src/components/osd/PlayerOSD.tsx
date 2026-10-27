@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useContext } from 'react';
+import { SkipBack, SkipForward } from 'lucide-react';
 import { PlayerState } from '../../player/driver';
 import { SubtitleTrack } from '../../types/kadr';
 import { TVKeys } from '../../navigation/keys';
@@ -17,6 +18,10 @@ export interface PlayerOSDProps {
   onPopupOpenChange?: (isOpen: boolean) => void;
   onOpenSubtitleModal?: () => void;
   onOpenSubtitles?: () => void;
+  hasPrevious?: boolean;
+  hasNext?: boolean;
+  onPrevious?: () => void;
+  onNext?: () => void;
 }
 
 export function formatTime(ms: number): string {
@@ -38,6 +43,10 @@ export function PlayerOSD({
   onPopupOpenChange,
   onOpenSubtitleModal,
   onOpenSubtitles,
+  hasPrevious,
+  hasNext,
+  onPrevious,
+  onNext,
 }: PlayerOSDProps) {
   const [isPopupOpen, setIsPopupOpen] = useState(false);
   const focusCtx = useContext(FocusContext);
@@ -147,6 +156,9 @@ export function PlayerOSD({
 
   if (!visible && !isPopupOpen) return null;
 
+  const isPrevDisabled = hasPrevious === false;
+  const isNextDisabled = hasNext === false;
+
   const progressPercent =
     durationMs > 0 ? Math.min(100, Math.max(0, (positionMs / durationMs) * 100)) : 0;
 
@@ -179,38 +191,141 @@ export function PlayerOSD({
             </div>
           </div>
 
-          {playerState === 'paused' && hasSubtitles && (
-            <div className="shrink-0 pb-6">
-              {focusCtx ? (
-                <TVButton
-                  id="btn-subtitles"
-                  groupId="player-osd"
-                  variant={selectedSubtitleId ? 'primary' : 'secondary'}
-                  onClick={handleOpenSubtitles}
-                  onEnter={handleOpenSubtitles}
-                  data-testid="subtitles-button"
-                  aria-label="Subtitles"
-                  className="pointer-events-auto !px-6 !py-3 !text-xl font-bold rounded-2xl gap-3"
-                >
-                  <span className="font-bold border border-current px-2 py-0.5 rounded text-sm">CC</span>
-                  <span>Subtitles</span>
-                </TVButton>
-              ) : (
-                <button
-                  id="btn-subtitles"
-                  type="button"
-                  data-testid="subtitles-button"
-                  aria-label="Subtitles"
-                  onClick={handleOpenSubtitles}
-                  className={`pointer-events-auto px-6 py-3 rounded-2xl font-bold text-xl flex items-center gap-3 cursor-pointer transition-all duration-150 outline-none ${
-                    selectedSubtitleId
-                      ? 'bg-[#D43F15] text-[#F5E5E5]'
-                      : 'bg-[#3B1111] text-[#F5E5E5] border border-[rgba(245,229,229,0.08)] hover:bg-[#4A1616] focus:ring-4 focus:ring-[#FFB800]/50'
-                  }`}
-                >
-                  <span className="font-bold border border-current px-2 py-0.5 rounded text-sm">CC</span>
-                  <span>Subtitles</span>
-                </button>
+          {(onPrevious || onNext || (playerState === 'paused' && hasSubtitles)) && (
+            <div className="flex items-center gap-4 shrink-0 pb-6">
+              {onPrevious &&
+                (focusCtx ? (
+                  <TVButton
+                    id="btn-previous-episode"
+                    groupId="player-osd"
+                    order={1}
+                    variant="secondary"
+                    disabled={isPrevDisabled}
+                    onClick={onPrevious}
+                    onEnter={onPrevious}
+                    onKeyDown={(e) => {
+                      if (!isPrevDisabled && (e.key === 'Enter' || e.keyCode === TVKeys.ENTER)) {
+                        e.preventDefault();
+                        onPrevious?.();
+                      }
+                    }}
+                    data-testid="player-osd-previous-btn"
+                    aria-label="Previous"
+                    className={`pointer-events-auto !px-6 !py-3 !text-xl font-bold rounded-2xl gap-3 ${
+                      isPrevDisabled ? 'opacity-40 pointer-events-none' : ''
+                    }`}
+                  >
+                    <SkipBack className="w-5 h-5" />
+                    <span>Prev</span>
+                  </TVButton>
+                ) : (
+                  <button
+                    id="btn-previous-episode"
+                    type="button"
+                    data-testid="player-osd-previous-btn"
+                    aria-label="Previous"
+                    disabled={isPrevDisabled}
+                    onClick={!isPrevDisabled ? onPrevious : undefined}
+                    onKeyDown={(e) => {
+                      if (!isPrevDisabled && (e.key === 'Enter' || e.keyCode === TVKeys.ENTER)) {
+                        e.preventDefault();
+                        onPrevious?.();
+                      }
+                    }}
+                    className={`pointer-events-auto px-6 py-3 rounded-2xl font-bold text-xl flex items-center gap-3 transition-all duration-150 outline-none bg-[#3B1111] text-[#F5E5E5] border border-[rgba(245,229,229,0.08)] ${
+                      isPrevDisabled
+                        ? 'opacity-40 pointer-events-none cursor-not-allowed'
+                        : 'cursor-pointer hover:bg-[#4A1616] focus:ring-4 focus:ring-[#FFB800]/50'
+                    }`}
+                  >
+                    <SkipBack className="w-5 h-5" />
+                    <span>Prev</span>
+                  </button>
+                ))}
+
+              {onNext &&
+                (focusCtx ? (
+                  <TVButton
+                    id="btn-next-episode"
+                    groupId="player-osd"
+                    order={2}
+                    variant="secondary"
+                    disabled={isNextDisabled}
+                    onClick={onNext}
+                    onEnter={onNext}
+                    onKeyDown={(e) => {
+                      if (!isNextDisabled && (e.key === 'Enter' || e.keyCode === TVKeys.ENTER)) {
+                        e.preventDefault();
+                        onNext?.();
+                      }
+                    }}
+                    data-testid="player-osd-next-btn"
+                    aria-label="Next"
+                    className={`pointer-events-auto !px-6 !py-3 !text-xl font-bold rounded-2xl gap-3 ${
+                      isNextDisabled ? 'opacity-40 pointer-events-none' : ''
+                    }`}
+                  >
+                    <SkipForward className="w-5 h-5" />
+                    <span>Next</span>
+                  </TVButton>
+                ) : (
+                  <button
+                    id="btn-next-episode"
+                    type="button"
+                    data-testid="player-osd-next-btn"
+                    aria-label="Next"
+                    disabled={isNextDisabled}
+                    onClick={!isNextDisabled ? onNext : undefined}
+                    onKeyDown={(e) => {
+                      if (!isNextDisabled && (e.key === 'Enter' || e.keyCode === TVKeys.ENTER)) {
+                        e.preventDefault();
+                        onNext?.();
+                      }
+                    }}
+                    className={`pointer-events-auto px-6 py-3 rounded-2xl font-bold text-xl flex items-center gap-3 transition-all duration-150 outline-none bg-[#3B1111] text-[#F5E5E5] border border-[rgba(245,229,229,0.08)] ${
+                      isNextDisabled
+                        ? 'opacity-40 pointer-events-none cursor-not-allowed'
+                        : 'cursor-pointer hover:bg-[#4A1616] focus:ring-4 focus:ring-[#FFB800]/50'
+                    }`}
+                  >
+                    <SkipForward className="w-5 h-5" />
+                    <span>Next</span>
+                  </button>
+                ))}
+
+              {playerState === 'paused' && hasSubtitles && (
+                focusCtx ? (
+                  <TVButton
+                    id="btn-subtitles"
+                    groupId="player-osd"
+                    order={3}
+                    variant={selectedSubtitleId ? 'primary' : 'secondary'}
+                    onClick={handleOpenSubtitles}
+                    onEnter={handleOpenSubtitles}
+                    data-testid="subtitles-button"
+                    aria-label="Subtitles"
+                    className="pointer-events-auto !px-6 !py-3 !text-xl font-bold rounded-2xl gap-3"
+                  >
+                    <span className="font-bold border border-current px-2 py-0.5 rounded text-sm">CC</span>
+                    <span>Subtitles</span>
+                  </TVButton>
+                ) : (
+                  <button
+                    id="btn-subtitles"
+                    type="button"
+                    data-testid="subtitles-button"
+                    aria-label="Subtitles"
+                    onClick={handleOpenSubtitles}
+                    className={`pointer-events-auto px-6 py-3 rounded-2xl font-bold text-xl flex items-center gap-3 cursor-pointer transition-all duration-150 outline-none ${
+                      selectedSubtitleId
+                        ? 'bg-[#D43F15] text-[#F5E5E5]'
+                        : 'bg-[#3B1111] text-[#F5E5E5] border border-[rgba(245,229,229,0.08)] hover:bg-[#4A1616] focus:ring-4 focus:ring-[#FFB800]/50'
+                    }`}
+                  >
+                    <span className="font-bold border border-current px-2 py-0.5 rounded text-sm">CC</span>
+                    <span>Subtitles</span>
+                  </button>
+                )
               )}
             </div>
           )}

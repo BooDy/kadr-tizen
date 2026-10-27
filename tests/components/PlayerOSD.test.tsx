@@ -370,4 +370,172 @@ describe('PlayerOSD', () => {
       expect(queryByTestId('subtitles-popup')).not.toBeInTheDocument();
     });
   });
+
+  describe('Playlist Navigation (Previous & Next Buttons)', () => {
+    it('renders Previous and Next buttons when onPrevious and onNext are provided', () => {
+      const onPrev = vi.fn();
+      const onNext = vi.fn();
+
+      const { getByTestId, queryByTestId, rerender } = render(
+        <PlayerOSD
+          title="Episode 2"
+          playerState="playing"
+          positionMs={10000}
+          durationMs={60000}
+          visible={true}
+          onPrevious={onPrev}
+          onNext={onNext}
+        />
+      );
+
+      const prevBtn = getByTestId('player-osd-previous-btn');
+      const nextBtn = getByTestId('player-osd-next-btn');
+
+      expect(prevBtn).toBeInTheDocument();
+      expect(nextBtn).toBeInTheDocument();
+      expect(prevBtn).toHaveAttribute('id', 'btn-previous-episode');
+      expect(nextBtn).toHaveAttribute('id', 'btn-next-episode');
+      expect(prevBtn).toHaveTextContent(/prev/i);
+      expect(nextBtn).toHaveTextContent(/next/i);
+
+      // Verify buttons are absent when callbacks are omitted
+      rerender(
+        <PlayerOSD
+          title="Episode 2"
+          playerState="playing"
+          positionMs={10000}
+          durationMs={60000}
+          visible={true}
+        />
+      );
+
+      expect(queryByTestId('player-osd-previous-btn')).not.toBeInTheDocument();
+      expect(queryByTestId('player-osd-next-btn')).not.toBeInTheDocument();
+    });
+
+    it('Previous button is disabled when hasPrevious === false', () => {
+      const onPrev = vi.fn();
+      const { getByTestId } = render(
+        <PlayerOSD
+          title="Episode 1"
+          playerState="playing"
+          positionMs={0}
+          durationMs={60000}
+          visible={true}
+          onPrevious={onPrev}
+          hasPrevious={false}
+        />
+      );
+
+      const prevBtn = getByTestId('player-osd-previous-btn');
+      expect(prevBtn).toBeDisabled();
+      expect(prevBtn.className).toMatch(/opacity-40|opacity-50/);
+      expect(prevBtn.className).toContain('pointer-events-none');
+
+      fireEvent.click(prevBtn);
+      expect(onPrev).not.toHaveBeenCalled();
+    });
+
+    it('Next button is disabled when hasNext === false', () => {
+      const onNext = vi.fn();
+      const { getByTestId } = render(
+        <PlayerOSD
+          title="Episode Finale"
+          playerState="playing"
+          positionMs={0}
+          durationMs={60000}
+          visible={true}
+          onNext={onNext}
+          hasNext={false}
+        />
+      );
+
+      const nextBtn = getByTestId('player-osd-next-btn');
+      expect(nextBtn).toBeDisabled();
+      expect(nextBtn.className).toMatch(/opacity-40|opacity-50/);
+      expect(nextBtn.className).toContain('pointer-events-none');
+
+      fireEvent.click(nextBtn);
+      expect(onNext).not.toHaveBeenCalled();
+    });
+
+    it('clicking or pressing Enter on Next/Previous buttons fires onNext and onPrevious', () => {
+      const onPrev = vi.fn();
+      const onNext = vi.fn();
+
+      const { getByTestId } = render(
+        <PlayerOSD
+          title="Episode 2"
+          playerState="playing"
+          positionMs={10000}
+          durationMs={60000}
+          visible={true}
+          hasPrevious={true}
+          hasNext={true}
+          onPrevious={onPrev}
+          onNext={onNext}
+        />
+      );
+
+      const prevBtn = getByTestId('player-osd-previous-btn');
+      const nextBtn = getByTestId('player-osd-next-btn');
+
+      // Click Previous
+      fireEvent.click(prevBtn);
+      expect(onPrev).toHaveBeenCalledTimes(1);
+
+      // Click Next
+      fireEvent.click(nextBtn);
+      expect(onNext).toHaveBeenCalledTimes(1);
+
+      // Keyboard Enter on Previous
+      fireEvent.keyDown(prevBtn, { key: 'Enter' });
+      expect(onPrev).toHaveBeenCalledTimes(2);
+
+      // Keyboard Enter on Next
+      fireEvent.keyDown(nextBtn, { key: 'Enter' });
+      expect(onNext).toHaveBeenCalledTimes(2);
+    });
+
+    it('integrates with FocusProvider and TV D-Pad activation for Next/Previous buttons', () => {
+      const onPrev = vi.fn();
+      const onNext = vi.fn();
+
+      const { getByTestId } = render(
+        <FocusProvider>
+          <PlayerOSD
+            title="Episode 2"
+            playerState="playing"
+            positionMs={10000}
+            durationMs={60000}
+            visible={true}
+            hasPrevious={true}
+            hasNext={true}
+            onPrevious={onPrev}
+            onNext={onNext}
+          />
+        </FocusProvider>
+      );
+
+      const prevBtn = getByTestId('player-osd-previous-btn');
+      const nextBtn = getByTestId('player-osd-next-btn');
+
+      expect(prevBtn).toHaveAttribute('id', 'btn-previous-episode');
+      expect(nextBtn).toHaveAttribute('id', 'btn-next-episode');
+
+      // TV button click
+      fireEvent.click(prevBtn);
+      expect(onPrev).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(nextBtn);
+      expect(onNext).toHaveBeenCalledTimes(1);
+
+      // Direct Enter key
+      fireEvent.keyDown(prevBtn, { key: 'Enter', keyCode: TVKeys.ENTER });
+      expect(onPrev).toHaveBeenCalledTimes(2);
+
+      fireEvent.keyDown(nextBtn, { key: 'Enter', keyCode: TVKeys.ENTER });
+      expect(onNext).toHaveBeenCalledTimes(2);
+    });
+  });
 });
