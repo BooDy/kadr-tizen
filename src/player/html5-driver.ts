@@ -1,8 +1,10 @@
 import { PlayerDriver, PlayerState } from './driver';
+import Hls from 'hls.js';
 
 export class Html5PlayerDriver implements PlayerDriver {
   readonly name = 'HTML5 Video';
   private video: HTMLVideoElement | null = null;
+  private hls: Hls | null = null;
   private timeCallback?: (posMs: number, durationMs: number) => void;
   private stateCallback?: (state: PlayerState) => void;
   private errorCallback?: (error: string) => void;
@@ -10,8 +12,39 @@ export class Html5PlayerDriver implements PlayerDriver {
   async init(container: HTMLElement, streamUrl: string, startMs: number): Promise<void> {
     this.video = document.createElement('video');
     this.video.className = 'w-full h-full object-contain bg-black';
-    this.video.src = streamUrl;
     this.video.preload = 'auto';
+
+    const isHls = streamUrl.includes('.m3u8') || streamUrl.includes('/hls/');
+    if (isHls && Hls.isSupported()) {
+      const hls = new Hls({
+        startPosition: startMs > 0 ? startMs / 1000 : -1,
+        enableWorker: true,
+      });
+      this.hls = hls;
+      hls.loadSource(streamUrl);
+      hls.attachMedia(this.video);
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (data.fatal) {
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              hls.startLoad();
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              hls.recoverMediaError();
+              break;
+            default:
+              this.errorCallback?.(`HLS Error: ${data.details || 'Fatal playback error'}`);
+              hls.destroy();
+              break;
+          }
+        }
+      });
+    } else {
+      this.video.src = streamUrl;
+      if (startMs > 0) {
+        this.video.currentTime = startMs / 1000;
+      }
+    }
 
     this.video.addEventListener('timeupdate', () => {
       if (this.video && this.timeCallback) {
@@ -125,6 +158,14 @@ export class Html5PlayerDriver implements PlayerDriver {
   }
 
   destroy(): void {
+    if (this.hls) {
+      try {
+        this.hls.destroy();
+      } catch {
+        // Ignored
+      }
+      this.hls = null;
+    }
     if (this.video) {
       try {
         this.video.pause();

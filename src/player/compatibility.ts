@@ -66,8 +66,16 @@ export function checkMediaCompatibility(
     reasons.push(`Container format "${container}" is not supported.`);
   }
 
-  if (forceHtml5 && c && (c === 'mkv' || c === 'avi')) {
-    reasons.push(`HTML5 video element does not support ${c.toUpperCase()} containers directly.`);
+  if (forceHtml5) {
+    if (c && (c === 'mkv' || c === 'avi' || c === 'ts')) {
+      reasons.push(`HTML5 video element does not support ${c.toUpperCase()} containers directly.`);
+    }
+    if (a && (a.includes('eac3') || a.includes('ac3') || a.includes('dts') || a.includes('truehd'))) {
+      reasons.push(`HTML5 video element does not support ${a.toUpperCase()} audio codec directly.`);
+    }
+    if (v && (v.includes('hevc') || v.includes('h265') || v.includes('hi10p'))) {
+      reasons.push(`HTML5 video element does not support ${v.toUpperCase()} video codec directly in browsers.`);
+    }
   }
 
   return {

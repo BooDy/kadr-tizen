@@ -166,11 +166,11 @@ export default function App() {
     let title = titleOverride;
     let technical = technicalOverride;
     if (activeItem) {
-      if (activeItem.id === itemId) {
+      if (String(activeItem.id) === String(itemId)) {
         if (!title) title = activeItem.title || activeItem.card?.title;
         if (!technical) technical = activeItem.technical;
       } else if (activeItem.episodes) {
-        const ep = activeItem.episodes.find((e) => e.id === itemId);
+        const ep = activeItem.episodes.find((e) => String(e.id) === String(itemId));
         if (ep?.title && !title) {
           title = ep.title;
         }

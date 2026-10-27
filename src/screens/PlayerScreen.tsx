@@ -63,6 +63,11 @@ export function PlayerScreen({
   const [subtitles, setSubtitles] = useState<SubtitleTrack[]>([]);
   const [selectedSubtitleId, setSelectedSubtitleId] = useState<number | null>(null);
   const [playbackError, setPlaybackError] = useState<PlaybackErrorInfo | null>(null);
+  const isBrowserEnv =
+    typeof window !== 'undefined' &&
+    !(window as any).webapis?.avplay &&
+    !(window as any).tizen &&
+    (typeof process === 'undefined' || process.env?.NODE_ENV !== 'test');
   const [forceHtml5, setForceHtml5] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -80,7 +85,7 @@ export function PlayerScreen({
         technical.video_codec,
         technical.audio_codec,
         technical.container,
-        false
+        isBrowserEnv
       );
     }
     return false;
@@ -135,7 +140,7 @@ export function PlayerScreen({
               detail.technical.video_codec,
               detail.technical.audio_codec,
               detail.technical.container,
-              forceHtml5
+              forceHtml5 || isBrowserEnv
             )) {
               setUseHls(true);
             }
@@ -373,7 +378,7 @@ export function PlayerScreen({
       token,
       unlockTokens: apiClient.getUnlockTokens ? apiClient.getUnlockTokens() : [],
       forceHls: useHls,
-      forceHtml5,
+      forceHtml5: forceHtml5 || isBrowserEnv,
       videoCodec: technicalInfoRef.current?.video_codec || technical?.video_codec,
       audioCodec: technicalInfoRef.current?.audio_codec || technical?.audio_codec,
       container: technicalInfoRef.current?.container || technical?.container,
