@@ -13,13 +13,18 @@ import { FocusContext } from '../navigation/FocusContext';
 import { PlayerOSD } from '../components/osd/PlayerOSD';
 import { SubtitleModal } from '../components/player/SubtitleModal';
 import { TVButton } from '../components/tv/TVButton';
-import { AlertTriangle, RotateCcw, MonitorPlay, ArrowLeft, FastForward, Rewind, Layers } from 'lucide-react';
+import { AlertTriangle, RotateCcw, MonitorPlay, ArrowLeft, FastForward, Rewind, Layers, Info } from 'lucide-react';
 
 export function formatTime(seconds: number): string {
   const totalSecs = Math.max(0, Math.floor(seconds));
   const m = Math.floor(totalSecs / 60);
   const s = totalSecs % 60;
   return `${m}:${s < 10 ? '0' : ''}${s}`;
+}
+
+export function redactStreamUrl(url: string): string {
+  if (!url) return '';
+  return url.replace(/([?&](?:token|unlock_tokens?)=)[^&#]+/gi, '$1[REDACTED]');
 }
 
 export interface PlaybackErrorInfo {
@@ -85,6 +90,9 @@ export function PlayerScreen({
     (typeof process === 'undefined' || process.env?.NODE_ENV !== 'test');
   const [forceHtml5, setForceHtml5] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const showDetailsModalRef = useRef(showDetailsModal);
+  showDetailsModalRef.current = showDetailsModal;
 
   const [technicalInfo, setTechnicalInfo] = useState<MediaItemDetail['technical'] | undefined>(technical);
   const technicalInfoRef = useRef(technicalInfo);
@@ -180,6 +188,7 @@ export function PlayerScreen({
       setUseHls(retryWithHls);
     }
     setPlaybackError(null);
+    setShowDetailsModal(false);
     setPlayerState('buffering');
     setReloadKey((k) => k + 1);
   }, []);
@@ -187,6 +196,7 @@ export function PlayerScreen({
   const handleSwitchToHtml5 = useCallback(() => {
     setForceHtml5(true);
     setPlaybackError(null);
+    setShowDetailsModal(false);
     setPlayerState('buffering');
     setReloadKey((k) => k + 1);
   }, []);
@@ -217,6 +227,26 @@ export function PlayerScreen({
   }, [playbackError, itemId, title]);
 
   useEffect(() => {
+    if (!diagnosticPayload) return;
+    const hostname =
+      (typeof window !== 'undefined' && window.location?.hostname) || '127.0.0.1';
+    const logUrl = `http://${hostname}:9999/log`;
+    if (typeof fetch === 'function') {
+      try {
+        fetch(logUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(diagnosticPayload),
+        }).catch(() => {
+          // Silently catch network errors (logger not active)
+        });
+      } catch {
+        // Silently catch
+      }
+    }
+  }, [diagnosticPayload]);
+
+  useEffect(() => {
     if (playbackError && focusCtxRef.current) {
       focusCtxRef.current.pushTrap('player-error');
       focusCtxRef.current.setFocusedId('player-error-retry-btn');
@@ -225,6 +255,17 @@ export function PlayerScreen({
       };
     }
   }, [playbackError]);
+
+  useEffect(() => {
+    if (showDetailsModal && focusCtxRef.current) {
+      focusCtxRef.current.pushTrap('player-error-details');
+      focusCtxRef.current.setFocusedId('player-error-details-close-btn');
+      return () => {
+        focusCtxRef.current?.popTrap();
+        focusCtxRef.current?.setFocusedId('player-error-details-btn');
+      };
+    }
+  }, [showDetailsModal]);
 
   const positionMsRef = useRef(positionMs);
   positionMsRef.current = positionMs;
@@ -256,6 +297,7 @@ export function PlayerScreen({
   useEffect(() => {
     autoAdvanceDismissedRef.current = false;
     setAutoAdvanceCountdown(null);
+    setShowDetailsModal(false);
   }, [itemId]);
 
   useEffect(() => {
@@ -700,7 +742,11 @@ export function PlayerScreen({
           e.key === 'Escape'
         ) {
           e.preventDefault();
-          onExit();
+          if (showDetailsModalRef.current) {
+            setShowDetailsModal(false);
+          } else {
+            onExit();
+          }
         }
         return;
       }
@@ -1115,6 +1161,131 @@ export function PlayerScreen({
                   className="w-full !py-6 !px-10 !text-2xl font-bold rounded-2xl flex items-center justify-center cursor-pointer select-none bg-[#3B1111] text-[#F5E5E5] border border-[rgba(245,229,229,0.08)]"
                 >
                   <ArrowLeft className="w-6 h-6 mr-2" /> Exit to Browse
+                </button>
+              )}
+
+              {focusCtx ? (
+                <TVButton
+                  id="player-error-details-btn"
+                  data-testid="player-error-details-btn"
+                  groupId="player-error"
+                  order={5}
+                  variant="secondary"
+                  onClick={() => setShowDetailsModal(true)}
+                  onEnter={() => setShowDetailsModal(true)}
+                  className="w-full !py-6 !px-10 !text-2xl font-bold rounded-2xl"
+                >
+                  <Info className="w-6 h-6 mr-2" /> View Technical Details
+                </TVButton>
+              ) : (
+                <button
+                  id="player-error-details-btn"
+                  data-testid="player-error-details-btn"
+                  type="button"
+                  onClick={() => setShowDetailsModal(true)}
+                  className="w-full !py-6 !px-10 !text-2xl font-bold rounded-2xl flex items-center justify-center cursor-pointer select-none bg-[#3B1111] text-[#F5E5E5] border border-[rgba(245,229,229,0.08)]"
+                >
+                  <Info className="w-6 h-6 mr-2" /> View Technical Details
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDetailsModal && playbackError && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Technical Diagnostic Details"
+          data-testid="player-error-details-modal"
+          className="fixed inset-0 z-[60] bg-[#1A0505]/95 backdrop-blur-md flex items-center justify-center p-12 select-none"
+        >
+          <div className="bg-[#2A0A0A] border-2 border-[#FF6B00]/40 rounded-3xl p-8 max-w-4xl w-full shadow-2xl flex flex-col max-h-[85vh]">
+            <div className="flex items-center justify-between pb-4 border-b border-[rgba(245,229,229,0.1)] mb-6">
+              <div className="flex items-center gap-3">
+                <Info className="w-8 h-8 text-[#FF6B00]" />
+                <h3 className="text-2xl font-bold text-[#F5E5E5]">
+                  Technical Diagnostic Details
+                </h3>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto font-mono text-sm space-y-4 text-[#F5E5E5]/90 pr-2">
+              <div className="grid grid-cols-2 gap-4 bg-[#3B1111]/50 p-4 rounded-xl border border-[rgba(245,229,229,0.08)]">
+                <div>
+                  <span className="text-[#FFB800] font-bold block text-xs uppercase tracking-wider mb-1">Item ID</span>
+                  <span className="text-[#F5E5E5]">{itemId}</span>
+                </div>
+                <div>
+                  <span className="text-[#FFB800] font-bold block text-xs uppercase tracking-wider mb-1">Title</span>
+                  <span className="text-[#F5E5E5]">{title || 'Unknown'}</span>
+                </div>
+                <div>
+                  <span className="text-[#FFB800] font-bold block text-xs uppercase tracking-wider mb-1">HTTP Status Code</span>
+                  <span className="text-[#F5E5E5]">{playbackError.statusCode || 'N/A'}</span>
+                </div>
+                <div>
+                  <span className="text-[#FFB800] font-bold block text-xs uppercase tracking-wider mb-1">Player Engine</span>
+                  <span className="text-[#F5E5E5]">{playbackError.driverName}</span>
+                </div>
+                <div>
+                  <span className="text-[#FFB800] font-bold block text-xs uppercase tracking-wider mb-1">Timestamp</span>
+                  <span className="text-[#F5E5E5]">{diagnosticPayload?.timestamp || new Date().toISOString()}</span>
+                </div>
+                <div>
+                  <span className="text-[#FFB800] font-bold block text-xs uppercase tracking-wider mb-1">Platform</span>
+                  <span className="text-[#F5E5E5]">
+                    {diagnosticPayload?.tv_model || 'Unknown TV'} (Tizen {diagnosticPayload?.tizen_version || '5.5'})
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-[#3B1111]/50 p-4 rounded-xl border border-[rgba(245,229,229,0.08)]">
+                <span className="text-[#FFB800] font-bold block text-xs uppercase tracking-wider mb-1">Error Message</span>
+                <p className="text-[#D43F15] whitespace-pre-wrap break-words">{playbackError.message}</p>
+              </div>
+
+              <div className="bg-[#3B1111]/50 p-4 rounded-xl border border-[rgba(245,229,229,0.08)]">
+                <span className="text-[#FFB800] font-bold block text-xs uppercase tracking-wider mb-1">Stream URL (Redacted)</span>
+                <p className="break-all text-[#F5E5E5]/80">{redactStreamUrl(playbackError.streamUrl)}</p>
+              </div>
+
+              <div className="bg-[#3B1111]/50 p-4 rounded-xl border border-[rgba(245,229,229,0.08)]">
+                <span className="text-[#FFB800] font-bold block text-xs uppercase tracking-wider mb-1">Resolution Guidance / Stack Trace</span>
+                <p className="text-xs text-[#F5E5E5]/70 whitespace-pre-wrap">
+                  {playbackError.statusCode === 404 || playbackError.message.includes('Media File Missing')
+                    ? 'Media file missing on server storage. Check file paths and server storage mounts.'
+                    : 'Stream failed to play or buffer timed out. If the media uses an unsupported audio/video codec (e.g. DTS audio or AV1 video), transcode via HLS or use HTML5 fallback.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="pt-6 mt-4 border-t border-[rgba(245,229,229,0.1)]">
+              {focusCtx ? (
+                <TVButton
+                  id="player-error-details-close-btn"
+                  data-testid="player-error-details-close-btn"
+                  groupId="player-error-details"
+                  order={1}
+                  autoFocus
+                  variant="primary"
+                  onClick={() => setShowDetailsModal(false)}
+                  onEnter={() => setShowDetailsModal(false)}
+                  className="w-full !py-4 !px-8 !text-xl font-bold rounded-xl"
+                >
+                  Close
+                </TVButton>
+              ) : (
+                <button
+                  id="player-error-details-close-btn"
+                  data-testid="player-error-details-close-btn"
+                  type="button"
+                  autoFocus
+                  onClick={() => setShowDetailsModal(false)}
+                  className="w-full !py-4 !px-8 !text-xl font-bold rounded-xl bg-[#FF6B00] text-white flex items-center justify-center cursor-pointer select-none"
+                >
+                  Close
                 </button>
               )}
             </div>

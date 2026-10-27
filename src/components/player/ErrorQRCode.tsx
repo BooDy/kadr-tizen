@@ -15,16 +15,32 @@ export interface DiagnosticPayload {
   timestamp: string;
 }
 
+export function formatCompactDiagnosticText(payload: DiagnosticPayload): string {
+  const cleanError = (payload.error || '').replace(/[\r\n]+/g, ' ').trim();
+  const shortError = cleanError.length > 40 ? cleanError.slice(0, 40) : cleanError;
+  return `KADR ERR | #${payload.item_id} | ${payload.driver || 'Unknown'} | ${shortError}`;
+}
+
 export function ErrorQRCode({ payload }: { payload: DiagnosticPayload }) {
   const qrSvg = useMemo(() => {
     try {
-      const text = JSON.stringify(payload);
+      const text = formatCompactDiagnosticText(payload);
       let svg = '';
-      QRCode.toString(text, { type: 'svg', margin: 1, width: 200, color: { dark: '#000000', light: '#FFFFFF' } }, (err, string) => {
-        if (!err && string) {
-          svg = string;
+      QRCode.toString(
+        text,
+        {
+          type: 'svg',
+          errorCorrectionLevel: 'L',
+          margin: 1,
+          width: 220,
+          color: { dark: '#000000', light: '#FFFFFF' },
+        },
+        (err, string) => {
+          if (!err && string) {
+            svg = string;
+          }
         }
-      });
+      );
       return svg;
     } catch {
       return '';
@@ -39,10 +55,10 @@ export function ErrorQRCode({ payload }: { payload: DiagnosticPayload }) {
       {qrSvg ? (
         <div
           dangerouslySetInnerHTML={{ __html: qrSvg }}
-          className="w-[200px] h-[200px] flex items-center justify-center [&>svg]:w-full [&>svg]:h-full"
+          className="w-[220px] h-[220px] flex items-center justify-center [&>svg]:w-full [&>svg]:h-full"
         />
       ) : (
-        <div className="w-[200px] h-[200px] flex items-center justify-center text-black font-bold">
+        <div className="w-[220px] h-[220px] flex items-center justify-center text-black font-bold">
           QR Code Unavailable
         </div>
       )}
