@@ -415,20 +415,8 @@ export default function App() {
             technical={playerItem.technical}
             playlist={playerItem.playlist}
             currentIndex={playerItem.currentIndex}
-            onNext={
-              playerItem.playlist &&
-              playerItem.currentIndex !== undefined &&
-              playerItem.currentIndex < playerItem.playlist.length - 1
-                ? handleNextEpisode
-                : undefined
-            }
-            onPrevious={
-              playerItem.playlist &&
-              playerItem.currentIndex !== undefined &&
-              playerItem.currentIndex > 0
-                ? handlePreviousEpisode
-                : undefined
-            }
+            onNext={playerItem.playlist ? handleNextEpisode : undefined}
+            onPrevious={playerItem.playlist ? handlePreviousEpisode : undefined}
             onExit={handleExitPlayer}
           />
         )}

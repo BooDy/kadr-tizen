@@ -228,8 +228,15 @@ export function PlayerScreen({
 
   useEffect(() => {
     if (!diagnosticPayload) return;
-    const hostname =
-      (typeof window !== 'undefined' && window.location?.hostname) || '127.0.0.1';
+    const hostname = (() => {
+      try {
+        const parsed = new URL(serverUrl);
+        if (parsed.hostname && parsed.hostname !== 'localhost' && parsed.hostname !== '127.0.0.1') {
+          return parsed.hostname;
+        }
+      } catch {}
+      return (typeof window !== 'undefined' && window.location?.hostname) || '127.0.0.1';
+    })();
     const logUrl = `http://${hostname}:9999/log`;
     if (typeof fetch === 'function') {
       try {
@@ -244,7 +251,7 @@ export function PlayerScreen({
         // Silently catch
       }
     }
-  }, [diagnosticPayload]);
+  }, [diagnosticPayload, serverUrl]);
 
   useEffect(() => {
     if (playbackError && focusCtxRef.current) {
@@ -300,12 +307,14 @@ export function PlayerScreen({
     setShowDetailsModal(false);
   }, [itemId]);
 
+  // Handle auto-advance trigger near media end
   useEffect(() => {
     if (autoAdvanceDismissedRef.current) return;
     if (!hasNext || !onNext) return;
     if (autoAdvanceCountdown !== null) return;
 
-    const isNearEnd = durationMs > 0 && positionMs >= durationMs - 1500;
+    const isPaused = playerState === 'paused' || playerState === 'error';
+    const isNearEnd = !isPaused && durationMs > 0 && positionMs >= durationMs - 1500;
     const isEnded = playerState === 'ended';
 
     if (isEnded || isNearEnd) {
@@ -313,6 +322,7 @@ export function PlayerScreen({
     }
   }, [playerState, positionMs, durationMs, hasNext, onNext, autoAdvanceCountdown]);
 
+  // Countdown timer for auto-advance (pure state decrement)
   useEffect(() => {
     if (autoAdvanceCountdown === null) return;
 
@@ -321,17 +331,24 @@ export function PlayerScreen({
         if (prev === null) return null;
         if (prev <= 1) {
           clearInterval(interval);
-          autoAdvanceDismissedRef.current = true;
-          sessionManager.updateProgress(Math.floor(positionMsRef.current / 1000));
-          onNextRef.current?.();
-          return null;
+          return 0;
         }
         return prev - 1;
       });
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [autoAdvanceCountdown !== null, sessionManager]);
+  }, [autoAdvanceCountdown !== null]);
+
+  // Trigger navigation when countdown hits 0 cleanly outside setState
+  useEffect(() => {
+    if (autoAdvanceCountdown === 0) {
+      autoAdvanceDismissedRef.current = true;
+      setAutoAdvanceCountdown(null);
+      sessionManager.updateProgress(Math.floor(positionMsRef.current / 1000));
+      onNextRef.current?.();
+    }
+  }, [autoAdvanceCountdown, sessionManager]);
 
   // Fetch subtitles on mount / item change
   useEffect(() => {
@@ -636,6 +653,14 @@ export function PlayerScreen({
             statusCode: 404,
           });
           return;
+        }
+
+        if (probeRes.ok) {
+          try {
+            probeRes.body?.cancel?.();
+          } catch {
+            // Ignored
+          }
         }
       } catch (err: any) {
         if (!isMounted || probeAbortController.signal.aborted) {
