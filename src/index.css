@@ -24,13 +24,13 @@
   }
 }
 
-/* 10-foot TV Focus Glow */
+/* 10-foot TV Focus Ring — GPU-composited transform only (no box-shadow animation on Mali GPU) */
 .tv-focus-ring {
   outline: none;
-  box-shadow: 0 0 0 3px #FFB800, 0 0 28px rgba(255, 184, 0, 0.55);
-  transform: scale(1.05);
+  box-shadow: 0 0 0 3px #FFB800, 0 0 12px rgba(255, 184, 0, 0.5);
+  transform: scale(1.04);
   z-index: 30;
-  transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.15s ease-out;
+  transition: transform 75ms ease-out;
 }
 
 /* Button icon spacing fallback for Chromium 69 */
@@ -54,4 +54,3 @@ button svg:only-child {
   -ms-overflow-style: none !important;
   scrollbar-width: none !important;
 }
-

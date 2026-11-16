@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { useFocusable } from '../../navigation/useFocusable';
 
 export interface TVCardProps {
@@ -15,7 +16,7 @@ export interface TVCardProps {
   'data-testid'?: string;
 }
 
-export function TVCard({
+export const TVCard = memo(function TVCard({
   id,
   groupId,
   title,
@@ -45,25 +46,33 @@ export function TVCard({
       tabIndex={-1}
       role="button"
       onClick={onSelect}
-      className={`relative flex flex-col rounded-2xl overflow-hidden bg-[#3B1111] border border-[rgba(245,229,229,0.08)] cursor-pointer transition-transform duration-200 shrink-0 w-56 ${
-        isFocused ? 'tv-focus-ring' : 'scale-100 opacity-90'
+      className={`relative flex flex-col rounded-2xl overflow-hidden bg-[#3B1111] border cursor-pointer transition-transform duration-75 shrink-0 w-56 ${
+        isFocused
+          ? 'tv-focus-ring border-[#FFB800]'
+          : 'border-[rgba(245,229,229,0.08)] scale-100 opacity-95'
       } ${className}`}
     >
       <div className="w-56 h-80 bg-[#2A0A0A] relative overflow-hidden">
         {imageUrl ? (
-          <img src={imageUrl} alt={title} className="w-full h-full object-cover" />
+          <img
+            src={imageUrl}
+            alt={title}
+            loading="lazy"
+            decoding="async"
+            className="w-full h-full object-cover"
+          />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-4xl font-bold text-[#5C3C3C]">
             {title.slice(0, 1)}
           </div>
         )}
         {badge && (
-          <span className="absolute top-2 right-2 bg-[#D43F15]/90 text-white text-xs font-bold px-2 py-1 rounded">
+          <span className="absolute top-2 right-2 bg-[#D43F15] text-white text-xs font-bold px-2 py-1 rounded">
             {badge}
           </span>
         )}
         {progressPercent !== undefined && progressPercent > 0 && (
-          <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-black/60">
+          <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-black/75">
             <div
               className="h-full bg-[#FF6B00]"
               style={{ width: `${Math.min(100, progressPercent)}%` }}
@@ -77,4 +86,4 @@ export function TVCard({
       </div>
     </div>
   );
-}
+});

@@ -9,9 +9,12 @@ import * as foldersApi from '../src/api/folders';
 import * as librariesApi from '../src/api/libraries';
 import * as eventsApi from '../src/api/events';
 import * as subtitlesApi from '../src/api/subtitles';
+import * as playlistsApi from '../src/api/playlists';
 import { MediaItemDetail } from '../src/api/items';
+import { ApiClient } from '../src/api/client';
 import { ScreenLayout } from '../src/types/ast';
 import { ProfileCard, LibraryFolderResponse } from '../src/types/kadr';
+import { TVKeys } from '../src/navigation/keys';
 
 vi.mock('../src/api/discovery', () => ({
   discoverLocalServers: vi.fn(),
@@ -45,6 +48,23 @@ vi.mock('../src/api/events', () => ({
   subscribeEvents: vi.fn(),
 }));
 
+vi.mock('../src/api/playlists', async () => {
+  const actual = await vi.importActual<typeof import('../src/api/playlists')>(
+    '../src/api/playlists'
+  );
+  return {
+    ...actual,
+    fetchPlaylists: vi.fn().mockResolvedValue([]),
+    createPlaylist: vi.fn(),
+    fetchPlaylistDetail: vi.fn(),
+    updatePlaylist: vi.fn(),
+    deletePlaylist: vi.fn(),
+    addPlaylistItems: vi.fn(),
+    removePlaylistItem: vi.fn(),
+    reorderPlaylistItems: vi.fn(),
+  };
+});
+
 vi.mock('../src/api/playback', () => ({
   reportPlaybackProgress: vi.fn(),
 }));
@@ -65,25 +85,29 @@ vi.mock('../src/api/subtitles', () => ({
   ]),
 }));
 
+let driverStateCb: ((state: string) => void) | null = null;
+let driverTimeCb: ((pos: number, dur: number) => void) | null = null;
+
 vi.mock('../src/player/avplay-driver', () => {
-  let stateCb: ((state: string) => void) | null = null;
   return {
     createPlayerDriver: () => ({
       init: vi.fn().mockImplementation(async () => {
-        stateCb?.('playing');
+        driverStateCb?.('playing');
       }),
       play: vi.fn(() => {
-        stateCb?.('playing');
+        driverStateCb?.('playing');
       }),
       pause: vi.fn(() => {
-        stateCb?.('paused');
+        driverStateCb?.('paused');
       }),
       seekTo: vi.fn(),
       destroy: vi.fn(),
       setSubtitleTrack: vi.fn(),
-      onTimeUpdate: vi.fn(),
+      onTimeUpdate: vi.fn((cb) => {
+        driverTimeCb = cb;
+      }),
       onStateChange: vi.fn((cb) => {
-        stateCb = cb;
+        driverStateCb = cb;
       }),
       onError: vi.fn(),
     }),
@@ -198,9 +222,42 @@ const mockFolderResponse: LibraryFolderResponse = {
 };
 
 describe('App State Machine & Router', () => {
+  async function renderAuthenticatedApp(token = 'valid-test-token') {
+    vi.mocked(auth.authenticatePin).mockResolvedValueOnce({
+      success: true,
+      data: {
+        token,
+        user_id: 'user-1',
+        username: 'Alice',
+        role: 'admin',
+      },
+    });
+
+    const utils = render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Alice')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('Alice'));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Enter PIN for Alice/i)).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(window, { key: '1', keyCode: 49 });
+    fireEvent.keyDown(window, { key: '2', keyCode: 50 });
+    fireEvent.keyDown(window, { key: '3', keyCode: 51 });
+    fireEvent.keyDown(window, { key: '4', keyCode: 52 });
+
+    return utils;
+  }
+
   beforeEach(() => {
     localStorage.clear();
     vi.restoreAllMocks();
+    driverStateCb = null;
+    driverTimeCb = null;
     vi.mocked(discovery.discoverLocalServers).mockResolvedValue([]);
     vi.mocked(auth.listProfiles).mockResolvedValue(mockProfiles);
     vi.mocked(screensApi.fetchScreens).mockResolvedValue([
@@ -215,7 +272,9 @@ describe('App State Machine & Router', () => {
     });
     vi.mocked(foldersApi.fetchLibraryFolders).mockResolvedValue(mockFolderResponse);
     vi.mocked(librariesApi.fetchLibraries).mockResolvedValue([]);
+    vi.mocked(playlistsApi.fetchPlaylists).mockResolvedValue([]);
     vi.mocked(eventsApi.subscribeEvents).mockReturnValue(vi.fn());
+    vi.spyOn(ApiClient.prototype, 'fetchText').mockResolvedValue('WEBVTT\n\n');
     vi.mocked(subtitlesApi.fetchItemSubtitles).mockResolvedValue([
       {
         id: 1,
@@ -266,18 +325,24 @@ describe('App State Machine & Router', () => {
     });
   });
 
-  it('renders BrowseScreen directly when both server and token are cached', async () => {
+  it('always renders ProfileSelectScreen on startup even if a token was previously cached in localStorage, without flashing BrowseScreen or running discovery', async () => {
     localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
     localStorage.setItem('kadr_server_name', 'My Kadr');
-    localStorage.setItem('kadr_token', 'valid-test-token');
+    localStorage.setItem('kadr_token', 'stale-admin-token');
 
     render(<App />);
 
+    expect(screen.getByText("Who's watching?")).toBeInTheDocument();
+    expect(screen.queryByText('Hero Dune Feature')).not.toBeInTheDocument();
+    expect(discovery.discoverLocalServers).not.toHaveBeenCalled();
+    expect(screensApi.fetchScreens).not.toHaveBeenCalled();
+    expect(screensApi.fetchScreenLayout).not.toHaveBeenCalled();
+
     await waitFor(() => {
-      expect(screen.getByText('Hero Dune Feature')).toBeInTheDocument();
+      expect(screen.getByText('Alice')).toBeInTheDocument();
+      expect(screen.getByText('Bob')).toBeInTheDocument();
     });
-    expect(screen.getByText('Trending Dune Part Two')).toBeInTheDocument();
-    expect(screen.getByText('Home')).toBeInTheDocument();
+    expect(localStorage.getItem('kadr_token')).toBeNull();
   });
 
   it('selects server from ServerConnectScreen, caches it, and advances to ProfileSelectScreen', async () => {
@@ -353,9 +418,8 @@ describe('App State Machine & Router', () => {
 
   it('switches profile from BrowseScreen, clearing token and returning to ProfileSelectScreen', async () => {
     localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
-    localStorage.setItem('kadr_token', 'valid-test-token');
 
-    render(<App />);
+    await renderAuthenticatedApp();
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Profiles/i })).toBeInTheDocument();
@@ -372,9 +436,8 @@ describe('App State Machine & Router', () => {
 
   it('opens and closes ItemDetailModal from BrowseScreen', async () => {
     localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
-    localStorage.setItem('kadr_token', 'valid-test-token');
 
-    render(<App />);
+    await renderAuthenticatedApp();
 
     await waitFor(() => {
       expect(screen.getByText('Trending')).toBeInTheDocument();
@@ -403,9 +466,8 @@ describe('App State Machine & Router', () => {
 
   it('plays item directly from BrowseScreen into PlayerScreen and exits back to BrowseScreen', async () => {
     localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
-    localStorage.setItem('kadr_token', 'valid-test-token');
 
-    render(<App />);
+    await renderAuthenticatedApp();
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /^Play$/i })).toBeInTheDocument();
@@ -419,7 +481,8 @@ describe('App State Machine & Router', () => {
       expect(screen.getByText('Playing')).toBeInTheDocument();
     });
 
-    // Press Escape to exit PlayerScreen
+    // Press Escape twice: first hides OSD, second exits PlayerScreen
+    fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
     fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
 
     await waitFor(() => {
@@ -429,9 +492,8 @@ describe('App State Machine & Router', () => {
 
   it('plays item from ItemDetailModal into PlayerScreen', async () => {
     localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
-    localStorage.setItem('kadr_token', 'valid-test-token');
 
-    render(<App />);
+    await renderAuthenticatedApp();
 
     await waitFor(() => {
       expect(screen.getByText('Trending')).toBeInTheDocument();
@@ -454,7 +516,8 @@ describe('App State Machine & Router', () => {
       expect(screen.getByText('Dune: Part Two')).toBeInTheDocument();
     });
 
-    // Press Escape to exit PlayerScreen -> must return to item details page
+    // Press Escape twice: first hides OSD, second exits PlayerScreen -> must return to item details page
+    fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
     fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
 
     await waitFor(() => {
@@ -482,9 +545,8 @@ describe('App State Machine & Router', () => {
 
   it('displays reconnection overlay when network goes offline and hides when back online', async () => {
     localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
-    localStorage.setItem('kadr_token', 'valid-test-token');
 
-    render(<App />);
+    await renderAuthenticatedApp();
 
     await waitFor(() => {
       expect(screen.getByText('Home')).toBeInTheDocument();
@@ -508,9 +570,8 @@ describe('App State Machine & Router', () => {
 
   it('suppresses remote key events when reconnection overlay is displayed', async () => {
     localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
-    localStorage.setItem('kadr_token', 'valid-test-token');
 
-    render(<App />);
+    await renderAuthenticatedApp();
 
     await waitFor(() => {
       expect(screen.getByText('Home')).toBeInTheDocument();
@@ -541,9 +602,8 @@ describe('App State Machine & Router', () => {
 
   it('navigates from ItemDetailModal to FolderBrowserModal via Browse Folder and opens item detail', async () => {
     localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
-    localStorage.setItem('kadr_token', 'valid-test-token');
 
-    render(<App />);
+    await renderAuthenticatedApp();
 
     await waitFor(() => {
       expect(screen.getByText('Trending')).toBeInTheDocument();
@@ -589,9 +649,8 @@ describe('App State Machine & Router', () => {
 
   it('opens ImageViewerModal from FolderBrowserModal for single image and for slideshow', async () => {
     localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
-    localStorage.setItem('kadr_token', 'valid-test-token');
 
-    render(<App />);
+    await renderAuthenticatedApp();
 
     await waitFor(() => {
       expect(screen.getByText('Trending Dune Part Two')).toBeInTheDocument();
@@ -666,7 +725,6 @@ describe('App State Machine & Router', () => {
 
   it('unlocks private library via PinPadModal and triggers folder re-fetch', async () => {
     localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
-    localStorage.setItem('kadr_token', 'valid-test-token');
 
     // First fetch fails with 403 / LIBRARY_LOCKED
     const lockedErr = new Error('HTTP error 403: LIBRARY_LOCKED');
@@ -680,7 +738,7 @@ describe('App State Machine & Router', () => {
       unlock_token: 'unlock-token-999',
     });
 
-    render(<App />);
+    await renderAuthenticatedApp();
 
     await waitFor(() => {
       expect(screen.getByText('Trending Dune Part Two')).toBeInTheDocument();
@@ -723,7 +781,6 @@ describe('App State Machine & Router', () => {
 
   it('subscribes to SSE events on connect, dispatches events, and unbinds on logout', async () => {
     localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
-    localStorage.setItem('kadr_token', 'valid-test-token');
 
     let eventCallback: ((type: string, payload: unknown) => void) | null = null;
     const mockUnsubscribe = vi.fn();
@@ -733,7 +790,7 @@ describe('App State Machine & Router', () => {
       return mockUnsubscribe;
     });
 
-    render(<App />);
+    await renderAuthenticatedApp();
 
     await waitFor(() => {
       expect(eventsApi.subscribeEvents).toHaveBeenCalledWith(
@@ -777,8 +834,10 @@ describe('App State Machine & Router', () => {
     });
 
     // Close folder browser modal
-    fireEvent.click(screen.getByRole('button', { name: /Close/i }));
+    // Back steps up one folder at a time and closes the browser once the library root is reached
     await waitFor(() => {
+      const backBtn = screen.queryByRole('button', { name: /^(Back|Close)$/i });
+      if (backBtn) fireEvent.click(backBtn);
       expect(screen.queryByRole('heading', { name: 'Movies Library' })).not.toBeInTheDocument();
     });
 
@@ -793,7 +852,6 @@ describe('App State Machine & Router', () => {
 
   it('unlocks private library directly from BrowseScreen sidebar via PinPadModal and refreshes screen layout', async () => {
     localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
-    localStorage.setItem('kadr_token', 'valid-test-token');
 
     vi.mocked(screensApi.fetchScreens).mockResolvedValue([
       { id: 'home', title: 'Home' },
@@ -808,7 +866,7 @@ describe('App State Machine & Router', () => {
       unlock_token: 'vault-unlock-token-123',
     });
 
-    render(<App />);
+    await renderAuthenticatedApp();
 
     await waitFor(() => {
       expect(screen.getByText('Vault')).toBeInTheDocument();
@@ -844,9 +902,8 @@ describe('App State Machine & Router', () => {
 
   it('navigates series seasons in ItemDetailModal and plays selected episode into PlayerScreen', async () => {
     localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
-    localStorage.setItem('kadr_token', 'valid-test-token');
 
-    render(<App />);
+    await renderAuthenticatedApp();
 
     await waitFor(() => {
       expect(screen.getByText('Trending Severance Series')).toBeInTheDocument();
@@ -879,20 +936,20 @@ describe('App State Machine & Router', () => {
       expect(screen.getByText('Episode 201')).toBeInTheDocument();
     });
 
-    // Press Escape to exit PlayerScreen
+    // Press Escape twice: first hides OSD, second exits PlayerScreen
+    fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
     fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
 
     await waitFor(() => {
-      expect(screen.queryByText('Episode 201')).not.toBeInTheDocument();
-      expect(screen.getByText('Trending Severance Series')).toBeInTheDocument();
+      expect(screen.getByRole('dialog', { name: 'Severance' })).toBeInTheDocument();
+      expect(screen.getByText('Episode 201')).toBeInTheDocument();
     });
   });
 
   it('opens and closes SubtitleModal from PlayerScreen and handles back navigation', async () => {
     localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
-    localStorage.setItem('kadr_token', 'valid-test-token');
 
-    render(<App />);
+    await renderAuthenticatedApp();
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /^Play$/i })).toBeInTheDocument();
@@ -927,9 +984,11 @@ describe('App State Machine & Router', () => {
 
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'Subtitles' })).not.toBeInTheDocument();
+      expect(screen.getByText('Playing')).toBeInTheDocument();
     });
 
-    // Press Escape to exit PlayerScreen
+    // Press Escape twice: first hides OSD when paused, second exits PlayerScreen
+    fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
     fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
 
     await waitFor(() => {
@@ -939,9 +998,8 @@ describe('App State Machine & Router', () => {
 
   it('navigates from BrowseScreen library header to FolderBrowserModal via Browse Folders button', async () => {
     localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
-    localStorage.setItem('kadr_token', 'valid-test-token');
 
-    render(<App />);
+    await renderAuthenticatedApp();
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /^Movies$/i })).toBeInTheDocument();
@@ -960,6 +1018,677 @@ describe('App State Machine & Router', () => {
     // FolderBrowserModal opens
     await waitFor(() => {
       expect(foldersApi.fetchLibraryFolders).toHaveBeenCalled();
+    });
+  });
+
+  it('plays playlist queue from PlaylistsView -> PlaylistDetailModal -> PlayerScreen and handles playlist:updated SSE events', async () => {
+    localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
+
+    let sseHandler: ((type: string, payload: unknown) => void) | null = null;
+    vi.mocked(eventsApi.subscribeEvents).mockImplementation((_url, _token, onEvent) => {
+      sseHandler = onEvent;
+      return vi.fn();
+    });
+
+    const summary = {
+      id: 'pl-e2e-1',
+      name: 'Alice Weekend Queue',
+      owner_user_id: 'user-1',
+      owner_username: 'Alice',
+      is_public: false,
+      is_editable: true,
+      visible_item_count: 2,
+      locked_item_count: 0,
+      total_duration_seconds: 7200,
+      cover_poster_urls: ['/poster1.jpg'],
+      created_at: 1730000000,
+      updated_at: 1730001000,
+    };
+
+    vi.mocked(playlistsApi.fetchPlaylists).mockResolvedValue([summary]);
+    vi.mocked(playlistsApi.fetchPlaylistDetail).mockResolvedValue({
+      summary,
+      items: [
+        {
+          position: 0,
+          added_at: 1730000100,
+          duration_seconds: 3600,
+          resume_position_seconds: 600,
+          card: {
+            id: 501,
+            title: 'Queue Film One',
+            media_type: 'movie',
+          },
+        },
+        {
+          position: 1,
+          added_at: 1730000200,
+          duration_seconds: 3600,
+          resume_position_seconds: 120,
+          card: {
+            id: 502,
+            title: 'Queue Film Two',
+            media_type: 'movie',
+          },
+        },
+      ],
+    });
+
+    await renderAuthenticatedApp();
+
+    await waitFor(() => {
+      expect(document.getElementById('nav-screen-playlists')).not.toBeNull();
+    });
+
+    fireEvent.click(document.getElementById('nav-screen-playlists')!);
+
+    await waitFor(() => {
+      expect(screen.getByText('Alice Weekend Queue')).toBeInTheDocument();
+    });
+
+    // Open PlaylistDetailModal
+    fireEvent.click(screen.getByTestId('playlist-card-pl-e2e-1'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Queue Film One')).toBeInTheDocument();
+      expect(screen.getByText('Queue Film Two')).toBeInTheDocument();
+    });
+
+    // Play All -> opens PlayerScreen with Queue Film One
+    fireEvent.click(document.getElementById('playlist-play-all-btn')!);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(screen.getByText('Queue Film One')).toBeInTheDocument();
+    });
+
+    // Exit player via Escape: first hides OSD, second exits -> returns directly to PlaylistDetailModal and refreshes it
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+    });
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: 'Alice Weekend Queue' })).toBeInTheDocument();
+    });
+    expect(vi.mocked(playlistsApi.fetchPlaylistDetail).mock.calls.length).toBeGreaterThanOrEqual(2);
+
+    // Emit SSE playlist:updated with action: 'deleted' -> closes open PlaylistDetailModal
+    await act(async () => {
+      sseHandler?.('playlist:updated', {
+        playlist_id: 'pl-e2e-1',
+        user_id: 'user-1',
+        action: 'deleted',
+        timestamp: 1730002000,
+      });
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('dialog', { name: 'Alice Weekend Queue' })
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it('adds a folder to an existing playlist from FolderBrowserModal via Add Folder to Playlist', async () => {
+    localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
+
+    const targetSummary = {
+      id: 'pl-folder-dest',
+      name: 'Folder Target Playlist',
+      owner_user_id: 'user-1',
+      owner_username: 'Alice',
+      is_public: false,
+      is_editable: true,
+      visible_item_count: 0,
+      locked_item_count: 0,
+      total_duration_seconds: 0,
+      cover_poster_urls: [],
+      created_at: 1730000000,
+      updated_at: 1730001000,
+    };
+    vi.mocked(playlistsApi.fetchPlaylists).mockResolvedValue([targetSummary]);
+    vi.mocked(playlistsApi.addPlaylistItems).mockResolvedValue({
+      added_count: 3,
+      skipped_duplicate_count: 0,
+      summary: targetSummary,
+    });
+
+    await renderAuthenticatedApp();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^Movies$/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /^Movies$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Browse Folders/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Browse Folders/i }));
+
+    await waitFor(() => {
+      expect(document.getElementById('folder-add-to-playlist-btn')).not.toBeNull();
+    });
+
+    fireEvent.click(document.getElementById('folder-add-to-playlist-btn')!);
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: 'Add to Playlist' })).toBeInTheDocument();
+      expect(screen.getByText('Folder Target Playlist')).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('add-to-playlist-option-pl-folder-dest'));
+    });
+
+    expect(playlistsApi.addPlaylistItems).toHaveBeenCalledWith(
+      expect.anything(),
+      'pl-folder-dest',
+      {
+        folder: {
+          library_id: 'movies',
+          path: '',
+          recursive: false,
+        },
+      }
+    );
+  });
+
+  it('retains exact folder item selection & visible focus indicator on FolderBrowserModal -> click item -> ItemDetailModal -> Back -> Enter even across SSE layout:changed refreshes, and supports CH_DOWN/CH_UP fast jump', async () => {
+    localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
+
+    let sseHandler: ((type: string, payload: unknown) => void) | null = null;
+    vi.mocked(eventsApi.subscribeEvents).mockImplementation((_url, _token, onEvent) => {
+      sseHandler = onEvent;
+      return vi.fn();
+    });
+
+    const largeMoviesFolder: LibraryFolderResponse = {
+      library_id: 'movies',
+      library_name: 'Movies Library',
+      current_path: '',
+      breadcrumbs: [{ name: 'Movies Library', path: '' }],
+      directories: [],
+      // 36 items = 6 rows of 6 columns (700..735)
+      items: Array.from({ length: 36 }, (_, idx) => ({
+        id: 700 + idx,
+        title: `Folder Film ${idx}`,
+        subtitle: '2025',
+        media_type: 'movie',
+      })),
+      images: [],
+    };
+
+    vi.mocked(foldersApi.fetchLibraryFolders).mockResolvedValue(largeMoviesFolder);
+    vi.mocked(items.fetchMediaItem).mockImplementation(async (_client, itemId) => ({
+      id: Number(itemId),
+      title: `Detail For Item ${itemId}`,
+      overview: `Detailed overview for ${itemId}`,
+      release_year: 2025,
+      media_type: 'movie',
+      library_id: 'movies',
+      folder_path: '',
+    }));
+
+    await renderAuthenticatedApp();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^Movies$/i })).toBeInTheDocument();
+    });
+
+    // Switch to Movies library and open FolderBrowserModal
+    fireEvent.click(screen.getByRole('button', { name: /^Movies$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Browse Folders/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Browse Folders/i }));
+
+    await waitFor(() => {
+      expect(document.getElementById('folder-item-700')?.getAttribute('data-focused')).toBe('true');
+    });
+
+    // Test CH_DOWN / CH_UP fast jump (~5 rows = +30 / -30 items in 6-col grid)
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ChannelDown', keyCode: TVKeys.CH_DOWN });
+    });
+    expect(document.getElementById('folder-item-730')?.getAttribute('data-focused')).toBe('true');
+
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ChannelUp', keyCode: TVKeys.CH_UP });
+    });
+    expect(document.getElementById('folder-item-700')?.getAttribute('data-focused')).toBe('true');
+
+    // Click item 704 ("Folder Film 4") directly -> opens ItemDetailModal
+    const card704 = document.getElementById('folder-item-704')!;
+    await act(async () => {
+      fireEvent.click(card704);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Detail For Item 704')).toBeInTheDocument();
+    });
+    expect(items.fetchMediaItem).toHaveBeenLastCalledWith(expect.anything(), 704);
+
+    // Trigger SSE layout:changed while ItemDetailModal is stacked over FolderBrowserModal
+    await act(async () => {
+      sseHandler?.('layout:changed', { screen_id: 'movies' });
+    });
+
+    // Press Back (Escape / TV Back) to close ItemDetailModal and return to FolderBrowserModal
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'Escape', keyCode: TVKeys.BACK_TIZEN });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Detail For Item 704')).not.toBeInTheDocument();
+    });
+
+    // Trigger another SSE layout:changed while back on FolderBrowserModal -> BrowseScreen MUST NOT steal focus!
+    await act(async () => {
+      sseHandler?.('layout:changed', { screen_id: 'movies' });
+    });
+
+    const restoredCard704 = document.getElementById('folder-item-704')!;
+    expect(restoredCard704).toBeInTheDocument();
+    await waitFor(() => {
+      expect(restoredCard704.getAttribute('data-focused')).toBe('true');
+    });
+    expect(restoredCard704.className).toContain('tv-focus-ring');
+    expect(restoredCard704.className).toContain('border-[#FF6B00]');
+
+    // Pressing Enter/OK MUST re-open that SAME folder item (704), NOT a background BrowseScreen video!
+    vi.mocked(items.fetchMediaItem).mockClear();
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'Enter', keyCode: TVKeys.ENTER });
+    });
+
+    await waitFor(() => {
+      expect(items.fetchMediaItem).toHaveBeenCalledTimes(1);
+      expect(items.fetchMediaItem).toHaveBeenCalledWith(expect.anything(), 704);
+      expect(screen.getByText('Detail For Item 704')).toBeInTheDocument();
+    });
+  });
+
+  it('updates episode card progress and WATCHED badge on ItemDetailModal after watching an episode', async () => {
+    localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
+
+    await renderAuthenticatedApp();
+
+    await waitFor(() => {
+      expect(screen.getByText('Trending Severance Series')).toBeInTheDocument();
+    });
+
+    // Open Severance Series detail modal
+    await act(async () => {
+      fireEvent.click(screen.getByText('Trending Severance Series'));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: 'Severance' })).toBeInTheDocument();
+      expect(screen.getByText('Season 2')).toBeInTheDocument();
+    });
+
+    // Switch to Season 2
+    await act(async () => {
+      fireEvent.click(screen.getByText('Season 2'));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Episode 201')).toBeInTheDocument();
+    });
+
+    // Initially Episode 201 is not watched
+    expect(screen.queryByText('WATCHED')).not.toBeInTheDocument();
+
+    // Click Episode 201 to enter PlayerScreen
+    await act(async () => {
+      fireEvent.click(screen.getByText('Episode 201'));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Episode 201')).toBeInTheDocument();
+    });
+
+    // Simulate playback progress (completed)
+    await act(async () => {
+      driverTimeCb?.(9960000, 9960000);
+    });
+
+    const updatedSeriesDetail: MediaItemDetail = {
+      ...mockSeriesDetail,
+      episodes: mockSeriesDetail.episodes?.map((ep) =>
+        ep.id === 303 ? { ...ep, playback_progress: 1 } : ep
+      ),
+    };
+
+    let resolveFetch: ((value: MediaItemDetail) => void) | null = null;
+    const fetchDeferred = new Promise<MediaItemDetail>((resolve) => {
+      resolveFetch = resolve;
+    });
+
+    vi.mocked(items.fetchMediaItem).mockClear();
+    vi.mocked(items.fetchMediaItem).mockImplementation(async (_client, id) => {
+      if (id === 300 || id === '300') return fetchDeferred;
+      return mockItemDetail;
+    });
+
+    // Exit PlayerScreen (first Escape hides OSD, second exits)
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+    });
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+    });
+
+    // Optimistic assertion: fetchMediaItem is still pending, but WATCHED is already rendered optimistically!
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: 'Severance' })).toBeInTheDocument();
+      expect(screen.getByText('WATCHED')).toBeInTheDocument();
+    });
+    expect(items.fetchMediaItem).toHaveBeenCalledWith(expect.anything(), 300);
+
+    // Resolve fetchMediaItem
+    await act(async () => {
+      resolveFetch!(updatedSeriesDetail);
+    });
+
+    // Assert WATCHED remains rendered cleanly after fetchMediaItem resolves
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: 'Severance' })).toBeInTheDocument();
+      expect(screen.getByText('WATCHED')).toBeInTheDocument();
+    });
+  });
+
+  it('returns to exact video subfolder (not root folder listing) when exiting video played from FolderBrowserModal', async () => {
+    localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
+
+    const rootFolderResponse: LibraryFolderResponse = {
+      library_id: 'lib-movies',
+      library_name: 'Movies Library',
+      current_path: '',
+      breadcrumbs: [{ name: 'Movies Library', path: '' }],
+      directories: [{ name: 'Season 1', path: 'Season 1', item_count: 1 }],
+      items: [],
+      images: [],
+    };
+
+    const subfolderResponse: LibraryFolderResponse = {
+      library_id: 'lib-movies',
+      library_name: 'Movies Library',
+      current_path: 'Season 1',
+      parent_path: '',
+      breadcrumbs: [
+        { name: 'Movies Library', path: '' },
+        { name: 'Season 1', path: 'Season 1' },
+      ],
+      directories: [],
+      items: [
+        {
+          id: 501,
+          title: 'folder-item-501',
+          media_type: 'movie',
+        },
+      ],
+      images: [],
+    };
+
+    const mock501Detail: MediaItemDetail = {
+      id: 501,
+      title: 'folder-item-501',
+      media_type: 'movie',
+      overview: 'Episode 501 Overview',
+      library_id: 'lib-movies',
+      folder_path: 'Season 1',
+    };
+
+    vi.mocked(foldersApi.fetchLibraryFolders).mockImplementation(async (_client, _libId, path) => {
+      if (path === 'Season 1') {
+        return subfolderResponse;
+      }
+      return rootFolderResponse;
+    });
+
+    vi.mocked(items.fetchMediaItem).mockImplementation(async (_client, id) => {
+      if (id === 501 || id === '501') return mock501Detail;
+      return mockItemDetail;
+    });
+
+    await renderAuthenticatedApp();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^Movies$/i })).toBeInTheDocument();
+    });
+
+    // Switch to Movies tab
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^Movies$/i }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Browse Folders/i })).toBeInTheDocument();
+    });
+
+    // Open FolderBrowserModal
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Browse Folders/i }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Season 1')).toBeInTheDocument();
+    });
+
+    // Enter subfolder Season 1
+    await act(async () => {
+      fireEvent.click(screen.getByText('Season 1'));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('folder-item-501')).toBeInTheDocument();
+    });
+
+    // Click item 501 -> ItemDetailModal opens
+    await act(async () => {
+      fireEvent.click(screen.getByText('folder-item-501'));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: 'folder-item-501' })).toBeInTheDocument();
+      expect(screen.getByText('Episode 501 Overview')).toBeInTheDocument();
+      expect(document.getElementById('detail-play-btn')).toBeInTheDocument();
+    });
+
+    // Click Play -> enters PlayerScreen
+    await act(async () => {
+      fireEvent.click(document.getElementById('detail-play-btn')!);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('folder-item-501')).toBeInTheDocument();
+    });
+
+    // Exit PlayerScreen (two Escapes: hide OSD, exit)
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+    });
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+    });
+
+    // ItemDetailModal restored
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: 'folder-item-501' })).toBeInTheDocument();
+      expect(screen.getByText('Episode 501 Overview')).toBeInTheDocument();
+    });
+
+    // Press Back (Escape) to close ItemDetailModal
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+    });
+
+    // Assert FolderBrowserModal is still at path: 'Season 1' with folder-item-501 focused
+    await waitFor(() => {
+      expect(screen.getByText('folder-item-501')).toBeInTheDocument();
+      expect(screen.queryByRole('dialog', { name: 'folder-item-501' })).not.toBeInTheDocument();
+      expect(screen.getByRole('dialog', { name: 'Movies Library' })).toBeInTheDocument();
+    });
+
+    const itemCard501 = document.getElementById('folder-item-501');
+    expect(itemCard501).toBeInTheDocument();
+    expect(itemCard501?.getAttribute('data-focused')).toBe('true');
+
+    // Press Back once more climbs from 'Season 1' to ''
+    const backBtn = screen.getByRole('button', { name: /Back/i });
+    await act(async () => {
+      fireEvent.click(backBtn);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Season 1')).toBeInTheDocument();
+    });
+  });
+
+  it('preserves active library tab on BrowseScreen and does not fabricate ItemDetailModal after direct play', async () => {
+    localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
+
+    const mockMoviesLayout: ScreenLayout = {
+      id: 'movies',
+      title: 'Movies',
+      widgets: [
+        {
+          id: 'movies-hero',
+          type: 'hero_banner',
+          data: {
+            id: 200,
+            title: 'Movies Hero Feature',
+            media_type: 'movie',
+          },
+        },
+      ],
+    };
+
+    vi.mocked(screensApi.fetchScreenLayout).mockImplementation(async (_client, screenId) => {
+      if (screenId === 'movies') return mockMoviesLayout;
+      return mockHomeLayout;
+    });
+
+    await renderAuthenticatedApp();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^Movies$/i })).toBeInTheDocument();
+    });
+
+    // Switch to Movies tab
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^Movies$/i }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Movies Hero Feature')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Play$/i })).toBeInTheDocument();
+    });
+
+    // Direct play via Hero Play button
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^Play$/i }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Playing')).toBeInTheDocument();
+    });
+
+    // Exit PlayerScreen (two Escapes)
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+    });
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+    });
+
+    // Assert ItemDetailModal is NOT opened
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(screen.getByText('Movies Hero Feature')).toBeInTheDocument();
+    });
+
+    // Assert BrowseScreen remains on Movies tab
+    const moviesTabBtn = screen.getByRole('button', { name: /^Movies$/i });
+    expect(moviesTabBtn).toBeInTheDocument();
+    expect(moviesTabBtn.className).toContain('bg-[#FF6B00]/15');
+  });
+
+  it('restores ItemDetailModal when closing FolderBrowserModal opened via Browse Folder button', async () => {
+    localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
+
+    const rootFolderResponse: LibraryFolderResponse = {
+      ...mockFolderResponse,
+      current_path: '',
+      breadcrumbs: [{ name: 'Movies Library', path: '' }],
+    };
+
+    vi.mocked(foldersApi.fetchLibraryFolders).mockImplementation(async (_client, _libId, path) => {
+      if (path === '') return rootFolderResponse;
+      return mockFolderResponse;
+    });
+
+    await renderAuthenticatedApp();
+
+    await waitFor(() => {
+      expect(screen.getByText('Trending Dune Part Two')).toBeInTheDocument();
+    });
+
+    // Open Dune: Part Two detail modal
+    await act(async () => {
+      fireEvent.click(screen.getByText('Trending Dune Part Two'));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: 'Dune: Part Two' })).toBeInTheDocument();
+      expect(screen.getByText('Paul Atreides unites with Chani and the Fremen.')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Browse Folder/i })).toBeInTheDocument();
+    });
+
+    // Click Browse Folder
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Browse Folder/i }));
+    });
+
+    // FolderBrowserModal opens at item's folder
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Dune: Part Two' })).not.toBeInTheDocument();
+      expect(screen.getByRole('dialog', { name: 'Movies Library' })).toBeInTheDocument();
+      expect(foldersApi.fetchLibraryFolders).toHaveBeenCalledWith(
+        expect.anything(),
+        'lib-movies',
+        'Movies/Sci-Fi/Dune'
+      );
+    });
+
+    // Climb to root via root breadcrumb
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Movies Library' }));
+    });
+
+    // Now at root, button is Close
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Close/i })).toBeInTheDocument();
+    });
+
+    // Close FolderBrowserModal via Close button
+    const closeBtn = screen.getByRole('button', { name: /Close/i });
+    await act(async () => {
+      fireEvent.click(closeBtn);
+    });
+
+    // Assert ItemDetailModal (Dune: Part Two) is restored!
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: 'Dune: Part Two' })).toBeInTheDocument();
+      expect(screen.getByText('Paul Atreides unites with Chani and the Fremen.')).toBeInTheDocument();
     });
   });
 });

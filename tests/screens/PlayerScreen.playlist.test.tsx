@@ -5,6 +5,7 @@ import { TVKeys } from '../../src/navigation/keys';
 import { PlayerDriver, PlayerState } from '../../src/player/driver';
 import { ApiClient } from '../../src/api/client';
 import { FocusProvider } from '../../src/navigation/FocusContext';
+import * as playbackApi from '../../src/api/playback';
 
 let mockDriver: {
   init: ReturnType<typeof vi.fn>;
@@ -46,6 +47,14 @@ vi.mock('../../src/player/avplay-driver', () => ({
 
 vi.mock('../../src/api/playback', () => ({
   reportPlaybackProgress: vi.fn().mockResolvedValue(undefined),
+  startPlaybackSession: vi.fn().mockResolvedValue({
+    session_id: 'sess-playlist-1',
+    media_item_id: 101,
+    duration_seconds: 120,
+    resume_position_seconds: 0,
+  }),
+  reportSessionProgress: vi.fn().mockResolvedValue(undefined),
+  endPlaybackSession: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../../src/api/subtitles', () => ({
@@ -445,6 +454,91 @@ describe('PlayerScreen Playlist & Auto-Advance', () => {
         vi.advanceTimersByTime(6000);
       });
       expect(onNext).not.toHaveBeenCalled();
+    });
+
+    it('snaps positionMs to durationMs on auto-advance, emits onEpisodeProgress with durationMs, and does not report duplicate/older progress on subsequent itemId change', async () => {
+      const onEpisodeProgress = vi.fn();
+      const onNext = vi.fn();
+      const reportPlaybackProgressSpy = vi.mocked(playbackApi.reportPlaybackProgress);
+      reportPlaybackProgressSpy.mockClear();
+
+      const { rerender } = render(
+        <FocusProvider>
+          <PlayerScreen
+            serverUrl="http://127.0.0.1:8492"
+            token="test-token"
+            itemId="ep-1"
+            title="Episode 1"
+            playlist={mockPlaylist}
+            currentIndex={0}
+            onNext={onNext}
+            onExit={vi.fn()}
+            onEpisodeProgress={onEpisodeProgress}
+            apiClient={apiClient}
+          />
+        </FocusProvider>
+      );
+
+      // Simulate playback near end: 120,000ms duration, 118,600ms position (1400ms left <= 1500ms)
+      act(() => {
+        mockDriver.stateCallback?.('playing');
+        mockDriver.timeCallback?.(118600, 120000);
+      });
+
+      expect(screen.getByTestId('auto-advance-overlay')).toBeInTheDocument();
+
+      // Tick 5 seconds to finish auto-advance countdown
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
+
+      expect(onNext).toHaveBeenCalledTimes(1);
+
+      // onEpisodeProgress received snapped 120,000ms (durationMs), NOT 118,600ms
+      expect(onEpisodeProgress).toHaveBeenCalledWith(
+        expect.objectContaining({
+          itemId: 'ep-1',
+          positionMs: 120000,
+          durationMs: 120000,
+        })
+      );
+
+      // Check reportPlaybackProgress calls for ep-1: it was flushed with 120,000ms
+      expect(reportPlaybackProgressSpy).toHaveBeenCalledWith(
+        'http://127.0.0.1:8492',
+        'test-token',
+        'ep-1',
+        120000,
+        true
+      );
+
+      const callsBeforeRerender = reportPlaybackProgressSpy.mock.calls.length;
+
+      // Now rerender with next episode (itemId="ep-2") simulating onNext handling in parent
+      rerender(
+        <FocusProvider>
+          <PlayerScreen
+            serverUrl="http://127.0.0.1:8492"
+            token="test-token"
+            itemId="ep-2"
+            title="Episode 2"
+            playlist={mockPlaylist}
+            currentIndex={1}
+            onNext={onNext}
+            onExit={vi.fn()}
+            onEpisodeProgress={onEpisodeProgress}
+            apiClient={apiClient}
+          />
+        </FocusProvider>
+      );
+
+      // The unmount/cleanup effect of ep-1 must NOT have fired another progress report for ep-1
+      const ep1Calls = reportPlaybackProgressSpy.mock.calls.filter((call) => call[2] === 'ep-1');
+      expect(ep1Calls).toHaveLength(callsBeforeRerender);
+
+      // Specifically, ensure ep-1 was never reported with the older 118,600ms position during cleanup
+      const olderTimestampCalls = ep1Calls.filter((call) => call[3] === 118600);
+      expect(olderTimestampCalls).toHaveLength(0);
     });
   });
 });

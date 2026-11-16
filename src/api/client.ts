@@ -66,4 +66,28 @@ export class ApiClient {
     }
     return undefined as T;
   }
+
+  /** Fetch a text resource (e.g. a subtitle file) with the same auth headers as `fetch`. */
+  async fetchText(urlOrPath: string, options: RequestInit = {}): Promise<string> {
+    const headers = new Headers(options.headers || {});
+    if (this.token) {
+      headers.set('Authorization', `Bearer ${this.token}`);
+    }
+    headers.set('Accept', 'text/vtt, text/plain, application/x-subrip, */*');
+
+    if (this.libraryUnlockTokens.size > 0) {
+      const tokens = Array.from(this.libraryUnlockTokens.values());
+      headers.set('X-Kadr-Unlocked', tokens.join(','));
+      headers.set('X-Library-Unlock-Token', tokens[0]);
+    }
+
+    const url = /^https?:\/\//i.test(urlOrPath)
+      ? urlOrPath
+      : `${this.baseUrl}${urlOrPath.startsWith('/') ? urlOrPath : `/${urlOrPath}`}`;
+    const res = await fetch(url, { ...options, headers });
+    if (!res.ok) {
+      throw new Error(`HTTP error ${res.status}: ${res.statusText}`);
+    }
+    return res.text();
+  }
 }

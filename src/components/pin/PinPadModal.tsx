@@ -168,11 +168,12 @@ export function PinPadModal({
         </div>
       ) : (
         <>
-          <div className="flex gap-4 my-8">
+          <div className="flex items-center my-8">
             {[0, 1, 2, 3].map((idx) => (
               <div
                 key={idx}
-                className={`w-6 h-6 rounded-full border-2 transition-all ${
+                style={{ marginRight: idx < 3 ? '16px' : '0px' }}
+                className={`w-6 h-6 rounded-full border-2 transition-transform duration-75 ${
                   pin.length > idx
                     ? 'bg-[#FF6B00] border-[#FF6B00] scale-125'
                     : 'border-[#5C3C3C]'

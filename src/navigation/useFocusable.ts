@@ -1,5 +1,5 @@
-import { useEffect, useRef, useCallback } from 'react';
-import { useFocusContext } from './FocusContext';
+import { useEffect, useRef, useCallback, useSyncExternalStore } from 'react';
+import { scrollElementIntoViewIfNeeded, useFocusStore } from './FocusContext';
 
 export interface UseFocusableOptions {
   id: string;
@@ -20,6 +20,16 @@ export interface UseFocusableResult<T extends HTMLElement = HTMLElement> {
   focus: () => void;
 }
 
+export function isTextInputElement(
+  el: Element | EventTarget | null | undefined
+): el is HTMLInputElement | HTMLTextAreaElement {
+  if (!el || typeof el !== 'object') return false;
+  if (typeof HTMLInputElement !== 'undefined' && el instanceof HTMLInputElement) return true;
+  if (typeof HTMLTextAreaElement !== 'undefined' && el instanceof HTMLTextAreaElement) return true;
+  const tag = (el as HTMLElement).tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA';
+}
+
 export function useFocusable<T extends HTMLElement = HTMLElement>({
   id,
   groupId,
@@ -28,14 +38,25 @@ export function useFocusable<T extends HTMLElement = HTMLElement>({
   autoFocus,
   order,
 }: UseFocusableOptions): UseFocusableResult<T> {
-  const { focusedId, setFocusedId, registerNode, unregisterNode } = useFocusContext();
+  const store = useFocusStore();
+  const { setFocusedId, registerNode, unregisterNode } = store;
+
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => store.subscribeNodeFocus(id, onStoreChange),
+    [store, id]
+  );
+  const getSnapshot = useCallback(() => store.getFocusedId() === id, [store, id]);
+  const isFocused = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+
   const elementRef = useRef<T | null>(null);
+  const hasAutoFocusedRef = useRef(false);
 
   const optionsRef = useRef({ id, groupId, onEnter, onBack, order });
   optionsRef.current = { id, groupId, onEnter, onBack, order };
 
   const callbackRef = useCallback(
     (node: T | null) => {
+      const prevNode = elementRef.current;
       elementRef.current = node;
       (callbackRef as unknown as { current: T | null }).current = node;
       if (node) {
@@ -47,6 +68,14 @@ export function useFocusable<T extends HTMLElement = HTMLElement>({
           onBack: optionsRef.current.onBack,
           order: optionsRef.current.order,
         });
+      } else if (prevNode) {
+        // Detach DOM reference from nodesRef without calling setState synchronously during React's commit phase;
+        // passive useEffect unmount cleanup calls unregisterNode(id) to clear focusedId safely after commit.
+        registerNode({
+          id: optionsRef.current.id,
+          groupId: optionsRef.current.groupId,
+          element: null,
+        });
       }
     },
     [registerNode]
@@ -55,19 +84,29 @@ export function useFocusable<T extends HTMLElement = HTMLElement>({
   const ref = callbackRef as unknown as FocusableRef<T>;
   ref.current = elementRef.current;
 
-  // Lifecycle effect: handle autoFocus on mount and unregister on unmount / ID change
+  // Unregister node only when unmounting or when id changes
   useEffect(() => {
-    if (autoFocus) {
-      setFocusedId((prev) => (prev === null ? id : prev));
-    }
-
+    hasAutoFocusedRef.current = false;
     return () => {
       unregisterNode(id);
     };
-  }, [id, autoFocus, unregisterNode, setFocusedId]);
+  }, [id, unregisterNode]);
 
-  // Property update effect: synchronize node attributes without calling unregisterNode
+  // Handle autoFocus once per activation without re-snapping focus on re-renders
   useEffect(() => {
+    if (!autoFocus) {
+      hasAutoFocusedRef.current = false;
+      return;
+    }
+    if (!hasAutoFocusedRef.current && elementRef.current) {
+      hasAutoFocusedRef.current = true;
+      setFocusedId((prev) => (prev === null ? id : prev));
+    }
+  }, [id, autoFocus, setFocusedId]);
+
+  // Property update effect: synchronize node attributes only when a DOM element is mounted
+  useEffect(() => {
+    if (!elementRef.current) return;
     registerNode({
       id,
       groupId,
@@ -78,17 +117,33 @@ export function useFocusable<T extends HTMLElement = HTMLElement>({
     });
   }, [id, groupId, onEnter, onBack, order, registerNode]);
 
-  const isFocused = focusedId === id;
-
   useEffect(() => {
-    if (isFocused && elementRef.current) {
-      elementRef.current.focus?.({ preventScroll: true });
+    if (!isFocused || !elementRef.current) return;
+    const el = elementRef.current;
+
+    // Do not auto-invoke native .focus() on <input>/<textarea> during passive D-pad navigation:
+    // on Samsung Tizen TV, native .focus() must be triggered on Enter to open the virtual keyboard
+    // and passive focus would either fail to open IME or trap D-pad arrow keys prematurely.
+    if (!isTextInputElement(el)) {
+      try {
+        el.focus?.({ preventScroll: true });
+      } catch {
+        el.focus?.();
+      }
     }
-  }, [isFocused]);
+
+    if (groupId !== 'sidebar') {
+      scrollElementIntoViewIfNeeded(el);
+    }
+  }, [isFocused, groupId]);
+
+  const focus = useCallback(() => {
+    setFocusedId(id);
+  }, [setFocusedId, id]);
 
   return {
     ref,
     isFocused,
-    focus: () => setFocusedId(id),
+    focus,
   };
 }

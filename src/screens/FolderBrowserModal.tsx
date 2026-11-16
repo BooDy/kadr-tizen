@@ -1,14 +1,18 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo, memo } from 'react';
 import { ApiClient } from '../api/client';
 import { fetchLibraryFolders } from '../api/folders';
 import { FolderImage, LibraryFolderResponse } from '../types/kadr';
 import { useFocusContext } from '../navigation/FocusContext';
 import { useFocusable } from '../navigation/useFocusable';
 import { TVButton } from '../components/tv/TVButton';
-import { TVCard } from '../components/tv/TVCard';
+import { PillButton } from '../components/tv/PillButton';
 import { TVKeys } from '../navigation/keys';
-import { Folder, Play, Loader2, Lock, ImageIcon, ArrowLeft } from 'lucide-react';
+import { Folder, Play, Loader2, Lock, ImageIcon, ArrowLeft, X, ListPlus, Film } from 'lucide-react';
 import { getAuthenticatedImageUrl } from '../utils/imageUrl';
+import {
+  AddToPlaylistModal,
+  AddToPlaylistTarget,
+} from '../components/playlists/AddToPlaylistModal';
 
 export interface FolderBrowserModalProps {
   client: ApiClient;
@@ -16,14 +20,21 @@ export interface FolderBrowserModalProps {
   token?: string;
   libraryId: string;
   initialPath?: string;
+  initialFocusItemId?: number | string;
   onClose: () => void;
   onSelectItem: (itemId: number | string) => void;
   onSelectImage: (images: FolderImage[], initialIndex: number) => void;
   onStartSlideshow: (images: FolderImage[]) => void;
   onLockedLibrary?: (libraryId: string) => void;
+  onAddToPlaylist?: (target: AddToPlaylistTarget) => void;
+  onPlaylistChanged?: () => void;
+  onPathChange?: (path: string) => void;
   isOpen?: boolean;
   refreshKey?: number;
 }
+
+const GRID_COLS = 6;
+const PAGE_JUMP_ROWS = 5;
 
 function formatBytes(bytes?: number): string {
   if (!bytes || bytes <= 0) return '0 B';
@@ -42,28 +53,238 @@ function formatImageUrl(serverUrl: string, path?: string): string | undefined {
   return `${cleanServer}${cleanPath}`;
 }
 
-interface FolderImageCardProps {
-  id: string;
-  image: FolderImage;
-  index: number;
-  serverUrl: string;
-  token?: string;
-  client?: ApiClient;
-  onSelect: (index: number) => void;
+function chunkIntoRows(ids: string[], cols: number): string[][] {
+  const rows: string[][] = [];
+  for (let i = 0; i < ids.length; i += cols) {
+    rows.push(ids.slice(i, i + cols));
+  }
+  return rows;
 }
 
-function FolderImageCard({
+function scrollElementIntoViewIfClipped(el: HTMLElement | null) {
+  if (!el || typeof el.scrollIntoView !== 'function') return;
+  const rect = el.getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) return;
+
+  const container = el.closest('[data-folder-scroll-container="true"]') as HTMLElement | null;
+  if (container) {
+    const cRect = container.getBoundingClientRect();
+    if (cRect.height > 0) {
+      if (rect.top >= cRect.top && rect.bottom <= cRect.bottom) {
+        return;
+      }
+      el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      return;
+    }
+  }
+
+  const vh = typeof window !== 'undefined' ? window.innerHeight || 1080 : 1080;
+  if (rect.top >= 0 && rect.bottom <= vh) return;
+  el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
+interface FolderDirItemProps {
+  id: string;
+  order?: number;
+  name: string;
+  path: string;
+  itemCount: number;
+  onNavigate: (path: string, nodeId: string) => void;
+}
+
+const FolderDirItem = memo(function FolderDirItem({
   id,
+  order,
+  name,
+  path,
+  itemCount,
+  onNavigate,
+}: FolderDirItemProps) {
+  const handleActivate = useCallback(() => {
+    onNavigate(path, id);
+  }, [onNavigate, path, id]);
+
+  const { ref, isFocused } = useFocusable<HTMLButtonElement>({
+    id,
+    groupId: 'folder-browser-modal',
+    order,
+    onEnter: handleActivate,
+  });
+
+  useEffect(() => {
+    if (isFocused) {
+      scrollElementIntoViewIfClipped(ref.current);
+    }
+  }, [isFocused, ref]);
+
+  return (
+    <button
+      ref={ref}
+      id={id}
+      type="button"
+      tabIndex={-1}
+      data-focused={isFocused ? 'true' : 'false'}
+      onClick={handleActivate}
+      className={`flex items-center justify-start p-5 rounded-2xl text-left min-w-0 outline-none select-none cursor-pointer transition-transform duration-75 ${
+        isFocused
+          ? 'tv-focus-ring bg-[#2c1610] border-2 border-[#FF6B00] ring-2 ring-[#FFB800] text-white scale-[1.03] z-20'
+          : 'bg-[#1c0909] border-2 border-[rgba(245,229,229,0.10)] text-[#F5E5E5] scale-100'
+      }`}
+    >
+      <Folder
+        className="w-10 h-10 text-[#FF6B00] shrink-0"
+        style={{ marginRight: '16px' }}
+      />
+      <div className="flex flex-col truncate min-w-0">
+        <span
+          className={`font-bold text-xl truncate ${
+            isFocused ? 'text-white' : 'text-[#F5E5E5]'
+          }`}
+        >
+          {name}
+        </span>
+        <span className={`text-base ${isFocused ? 'text-[#FFB800]' : 'text-[#8a6a6a]'}`}>
+          {itemCount} items
+        </span>
+      </div>
+    </button>
+  );
+});
+
+interface FolderMediaCardProps {
+  id: string;
+  order?: number;
+  itemId: number | string;
+  title: string;
+  subtitle?: string;
+  imageUrl?: string;
+  badge?: string;
+  progressPercent?: number;
+  onSelectItemId: (itemId: number | string, nodeId: string) => void;
+}
+
+const FolderMediaCard = memo(function FolderMediaCard({
+  id,
+  order,
+  itemId,
+  title,
+  subtitle,
+  imageUrl,
+  badge,
+  progressPercent,
+  onSelectItemId,
+}: FolderMediaCardProps) {
+  const [imgError, setImgError] = useState(false);
+
+  useEffect(() => {
+    setImgError(false);
+  }, [imageUrl]);
+
+  const handleActivate = useCallback(() => {
+    onSelectItemId(itemId, id);
+  }, [onSelectItemId, itemId, id]);
+
+  const { ref, isFocused } = useFocusable<HTMLDivElement>({
+    id,
+    groupId: 'folder-browser-modal',
+    order,
+    onEnter: handleActivate,
+  });
+
+  useEffect(() => {
+    if (isFocused) {
+      scrollElementIntoViewIfClipped(ref.current);
+    }
+  }, [isFocused, ref]);
+
+  return (
+    <div
+      ref={ref}
+      id={id}
+      tabIndex={-1}
+      role="button"
+      aria-label={title}
+      data-focused={isFocused ? 'true' : 'false'}
+      onClick={handleActivate}
+      className={`relative flex flex-col rounded-xl overflow-hidden outline-none select-none cursor-pointer transition-transform duration-75 ${
+        isFocused
+          ? 'tv-focus-ring bg-[#2c1610] border-2 border-[#FF6B00] ring-2 ring-[#FFB800] scale-[1.03] z-20'
+          : 'bg-[#1c0909] border-2 border-[rgba(245,229,229,0.10)] scale-100 opacity-95'
+      }`}
+    >
+      <div className="w-full h-72 bg-[#120404] relative overflow-hidden flex items-center justify-center">
+        {imageUrl && !imgError ? (
+          <img
+            src={imageUrl}
+            alt={title}
+            loading="lazy"
+            decoding="async"
+            onError={() => setImgError(true)}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center p-4 text-center text-[#8a6a6a]">
+            <Film className="w-12 h-12 text-[#5C3C3C]" />
+          </div>
+        )}
+
+        {badge && (
+          <span className="absolute top-2 right-2 px-2 py-0.5 rounded bg-[#0d0e15]/95 text-xs font-bold text-[#FFB800] border border-[rgba(255,184,0,0.35)]">
+            {badge}
+          </span>
+        )}
+
+        {progressPercent !== undefined && progressPercent > 0 && (
+          <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-[#0d0e15]">
+            <div
+              className="h-full bg-[#FF6B00]"
+              style={{ width: `${Math.min(100, Math.max(0, progressPercent))}%` }}
+            />
+          </div>
+        )}
+      </div>
+
+      <div className={`p-3 ${isFocused ? 'bg-[#3d1c10]' : 'bg-[#1c0909]'}`}>
+        <div
+          className={`text-base font-bold truncate ${
+            isFocused ? 'text-white' : 'text-[#F5E5E5]'
+          }`}
+          title={title}
+        >
+          {title}
+        </div>
+        {subtitle && (
+          <div
+            className={`text-sm truncate mt-0.5 ${
+              isFocused ? 'text-[#FFB800]' : 'text-[#8a6a6a]'
+            }`}
+          >
+            {subtitle}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+});
+
+interface FolderPhotoCardProps {
+  id: string;
+  order?: number;
+  image: FolderImage;
+  index: number;
+  imageUrl?: string;
+  onSelectPhoto: (index: number, nodeId: string) => void;
+}
+
+const FolderPhotoCard = memo(function FolderPhotoCard({
+  id,
+  order,
   image,
   index,
-  serverUrl,
-  token,
-  client,
-  onSelect,
-}: FolderImageCardProps) {
+  imageUrl,
+  onSelectPhoto,
+}: FolderPhotoCardProps) {
   const [hasError, setHasError] = useState(false);
-  const unlockTokens = client?.getUnlockTokens ? client.getUnlockTokens() : [];
-  const imageUrl = getAuthenticatedImageUrl(serverUrl, image.url || image.path, token, unlockTokens);
 
   const isFirstRender = useRef(true);
   useEffect(() => {
@@ -74,11 +295,22 @@ function FolderImageCard({
     setHasError(false);
   }, [imageUrl]);
 
+  const handleActivate = useCallback(() => {
+    onSelectPhoto(index, id);
+  }, [onSelectPhoto, index, id]);
+
   const { ref, isFocused } = useFocusable<HTMLDivElement>({
     id,
     groupId: 'folder-browser-modal',
-    onEnter: () => onSelect(index),
+    order,
+    onEnter: handleActivate,
   });
+
+  useEffect(() => {
+    if (isFocused) {
+      scrollElementIntoViewIfClipped(ref.current);
+    }
+  }, [isFocused, ref]);
 
   return (
     <div
@@ -86,32 +318,360 @@ function FolderImageCard({
       id={id}
       tabIndex={-1}
       role="button"
-      onClick={() => onSelect(index)}
-      className={`relative flex flex-col rounded-xl overflow-hidden bg-[#3B1111] border border-[rgba(245,229,229,0.08)] cursor-pointer transition-all duration-200 ${
-        isFocused ? 'tv-focus-ring scale-105 z-10' : 'scale-100 opacity-90'
+      data-focused={isFocused ? 'true' : 'false'}
+      onClick={handleActivate}
+      className={`relative flex flex-col rounded-xl overflow-hidden cursor-pointer outline-none select-none transition-transform duration-75 ${
+        isFocused
+          ? 'tv-focus-ring bg-[#2c1610] border-2 border-[#FF6B00] ring-2 ring-[#FFB800] scale-[1.03] z-20'
+          : 'bg-[#1c0909] border-2 border-[rgba(245,229,229,0.10)] scale-100 opacity-90'
       }`}
     >
-      <div className="w-full h-36 bg-[#2A0A0A] relative overflow-hidden flex items-center justify-center">
+      <div className="w-full h-36 bg-[#120404] relative overflow-hidden flex items-center justify-center">
         {hasError || !imageUrl ? (
           <ImageIcon className="w-10 h-10 text-[#5C3C3C]" data-testid="image-fallback-icon" />
         ) : (
           <img
             src={imageUrl}
             alt={image.name}
+            loading="lazy"
+            decoding="async"
             onError={() => setHasError(true)}
             className="w-full h-full object-cover"
           />
         )}
       </div>
-      <div className="p-3">
-        <div className="text-sm font-semibold text-[#F5E5E5] truncate" title={image.name}>
+      <div className={`p-3 ${isFocused ? 'bg-[#3d1c10]' : 'bg-[#1c0909]'}`}>
+        <div
+          className={`text-sm font-semibold truncate ${
+            isFocused ? 'text-white' : 'text-[#F5E5E5]'
+          }`}
+          title={image.name}
+        >
           {image.name}
         </div>
-        <div className="text-xs text-[#5C3C3C] mt-1">{formatBytes(image.size_bytes)}</div>
+        <div className={`text-xs mt-1 ${isFocused ? 'text-[#FFB800]' : 'text-[#8a6a6a]'}`}>
+          {formatBytes(image.size_bytes)}
+        </div>
       </div>
     </div>
   );
+});
+
+interface FolderFocusBridgeProps {
+  isOpen: boolean;
+  loading: boolean;
+  isLocked: boolean;
+  error: string | null;
+  folderData: LibraryFolderResponse | null;
+  libraryId: string;
+  currentPath: string;
+  initialFocusItemId?: number | string;
+  hasInternalModal: boolean;
+  validNodeIds: Set<string>;
+  contentRows: string[][];
+  dialogRef: React.RefObject<HTMLDivElement | null>;
+  exitedChildPathRef: React.MutableRefObject<string | null>;
+  autoFocusedFolderKeyRef: React.MutableRefObject<string | null>;
+  lastFocusedItemIdRef: React.MutableRefObject<string | null>;
+  setFocusedIdRef: React.MutableRefObject<((id: string | null) => void) | null>;
+  goBackRef: React.MutableRefObject<() => void>;
 }
+
+const FolderFocusBridge = memo(function FolderFocusBridge({
+  isOpen,
+  loading,
+  isLocked,
+  error,
+  folderData,
+  libraryId,
+  currentPath,
+  initialFocusItemId,
+  hasInternalModal,
+  validNodeIds,
+  contentRows,
+  dialogRef,
+  exitedChildPathRef,
+  autoFocusedFolderKeyRef,
+  lastFocusedItemIdRef,
+  setFocusedIdRef,
+  goBackRef,
+}: FolderFocusBridgeProps) {
+  const { focusedId, setFocusedId, pushTrap, popTrap, activeTrap } = useFocusContext();
+  setFocusedIdRef.current = setFocusedId;
+
+  const focusedIdRef = useRef(focusedId);
+  focusedIdRef.current = focusedId;
+
+  const activeTrapRef = useRef(activeTrap);
+  activeTrapRef.current = activeTrap;
+
+  const contentRowsRef = useRef(contentRows);
+  contentRowsRef.current = contentRows;
+
+  // Trap lifecycle: push only our trap on open, pop ONLY 'folder-browser-modal' on close
+  useEffect(() => {
+    if (!isOpen) {
+      autoFocusedFolderKeyRef.current = null;
+      exitedChildPathRef.current = null;
+      return;
+    }
+    pushTrap('folder-browser-modal');
+    return () => {
+      popTrap('folder-browser-modal');
+    };
+  }, [isOpen, pushTrap, popTrap, autoFocusedFolderKeyRef, exitedChildPathRef]);
+
+  const hasOtherStackedModal = useCallback((): boolean => {
+    if (hasInternalModal) return true;
+    if (activeTrapRef.current && activeTrapRef.current !== 'folder-browser-modal') {
+      return true;
+    }
+    if (typeof document !== 'undefined') {
+      const modals = document.querySelectorAll(
+        '[aria-modal="true"], [role="dialog"], [role="alertdialog"], [data-modal-overlay="true"]'
+      );
+      for (let i = 0; i < modals.length; i++) {
+        const m = modals[i];
+        if (dialogRef.current && (m === dialogRef.current || dialogRef.current.contains(m))) {
+          continue;
+        }
+        return true;
+      }
+    }
+    return false;
+  }, [hasInternalModal, dialogRef]);
+
+  // Self-heal trap if FolderBrowserModal is open with no child modal above it and activeTrap was cleared
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!activeTrap && !hasOtherStackedModal()) {
+      pushTrap('folder-browser-modal');
+    }
+  }, [isOpen, activeTrap, hasOtherStackedModal, pushTrap]);
+
+  // Blur any stray background native DOM focus while FolderBrowserModal is the active modal
+  useEffect(() => {
+    if (!isOpen) return;
+    if (activeTrap && activeTrap !== 'folder-browser-modal') return;
+    if (hasOtherStackedModal()) return;
+    if (typeof document !== 'undefined') {
+      const activeEl = document.activeElement as HTMLElement | null;
+      if (
+        activeEl &&
+        activeEl !== document.body &&
+        dialogRef.current &&
+        !dialogRef.current.contains(activeEl) &&
+        typeof activeEl.blur === 'function'
+      ) {
+        activeEl.blur();
+      }
+    }
+  }, [isOpen, activeTrap, focusedId, hasOtherStackedModal, dialogRef]);
+
+  const computePreferredFocusId = useCallback((): string => {
+    if (isLocked) {
+      return 'folder-unlock-library-btn';
+    }
+
+    if (!error && folderData) {
+      if (exitedChildPathRef.current && folderData.directories?.length) {
+        const returnedIdx = folderData.directories.findIndex(
+          (d) => d.path === exitedChildPathRef.current
+        );
+        exitedChildPathRef.current = null;
+        if (returnedIdx !== -1) {
+          return `folder-dir-${returnedIdx}`;
+        }
+      }
+      exitedChildPathRef.current = null;
+
+      if (lastFocusedItemIdRef.current && validNodeIds.has(lastFocusedItemIdRef.current)) {
+        return lastFocusedItemIdRef.current;
+      }
+
+      if (initialFocusItemId !== undefined) {
+        const candidateId = `folder-item-${initialFocusItemId}`;
+        if (validNodeIds.has(candidateId)) {
+          return candidateId;
+        }
+      }
+
+      if (folderData.directories && folderData.directories.length > 0) {
+        return 'folder-dir-0';
+      }
+      if (folderData.items && folderData.items.length > 0) {
+        return `folder-item-${folderData.items[0].id}`;
+      }
+      if (folderData.images && folderData.images.length > 0) {
+        return 'folder-image-0';
+      }
+    }
+
+    return 'folder-browser-close-btn';
+  }, [
+    isLocked,
+    error,
+    folderData,
+    initialFocusItemId,
+    validNodeIds,
+    exitedChildPathRef,
+    lastFocusedItemIdRef,
+  ]);
+
+  // Deterministic initial, post-navigation, AND self-healing focus placement
+  useEffect(() => {
+    if (!isOpen || loading) return;
+    if (activeTrap && activeTrap !== 'folder-browser-modal') return;
+    if (hasOtherStackedModal()) return;
+
+    const statusTag = isLocked ? 'locked' : error ? 'error' : 'loaded';
+    const folderKey = `${libraryId}:${currentPath}:${statusTag}`;
+
+    if (autoFocusedFolderKeyRef.current !== folderKey) {
+      autoFocusedFolderKeyRef.current = folderKey;
+      const targetId = computePreferredFocusId();
+      lastFocusedItemIdRef.current = targetId;
+      setFocusedId(targetId);
+      return;
+    }
+
+    if (focusedId && validNodeIds.has(focusedId)) {
+      lastFocusedItemIdRef.current = focusedId;
+      return;
+    }
+
+    // Self-heal: if FolderBrowserModal is the active modal and focusedId is null or outside this modal,
+    // immediately restore focus to lastFocusedItemIdRef or the first item.
+    const healId =
+      lastFocusedItemIdRef.current && validNodeIds.has(lastFocusedItemIdRef.current)
+        ? lastFocusedItemIdRef.current
+        : computePreferredFocusId();
+    lastFocusedItemIdRef.current = healId;
+    setFocusedId(healId);
+  }, [
+    isOpen,
+    loading,
+    isLocked,
+    error,
+    folderData,
+    libraryId,
+    currentPath,
+    activeTrap,
+    focusedId,
+    validNodeIds,
+    hasOtherStackedModal,
+    computePreferredFocusId,
+    autoFocusedFolderKeyRef,
+    lastFocusedItemIdRef,
+    setFocusedId,
+  ]);
+
+  // Capture keydown: Back navigation + Fast Page-Up / Page-Down (~5 rows/items)
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (activeTrapRef.current && activeTrapRef.current !== 'folder-browser-modal') {
+        return;
+      }
+      if (hasOtherStackedModal()) {
+        return;
+      }
+
+      const code = e.keyCode || e.which;
+
+      if (
+        code === TVKeys.BACK_TIZEN ||
+        code === TVKeys.BACK_WEB ||
+        code === TVKeys.BACKSPACE ||
+        e.key === 'Escape'
+      ) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        goBackRef.current();
+        return;
+      }
+
+      const isPageUp =
+        code === TVKeys.CH_UP ||
+        code === TVKeys.REWIND ||
+        code === 33 ||
+        e.key === 'PageUp' ||
+        e.key === 'ChannelUp' ||
+        e.key === 'MediaRewind';
+
+      const isPageDown =
+        code === TVKeys.CH_DOWN ||
+        code === TVKeys.FAST_FORWARD ||
+        code === 34 ||
+        e.key === 'PageDown' ||
+        e.key === 'ChannelDown' ||
+        e.key === 'MediaFastForward';
+
+      if (!isPageUp && !isPageDown) {
+        return;
+      }
+
+      const rows = contentRowsRef.current;
+      if (!rows || rows.length === 0) {
+        return;
+      }
+
+      e.preventDefault();
+      e.stopImmediatePropagation();
+
+      const curId = focusedIdRef.current;
+      let foundRow = -1;
+      let foundCol = 0;
+
+      if (curId) {
+        for (let r = 0; r < rows.length; r++) {
+          const c = rows[r].indexOf(curId);
+          if (c !== -1) {
+            foundRow = r;
+            foundCol = c;
+            break;
+          }
+        }
+      }
+
+      let nextId: string;
+      if (foundRow === -1) {
+        // Currently on header action row -> enter content list on PageDown, or stay/enter top on PageUp
+        nextId = isPageDown
+          ? rows[Math.min(rows.length - 1, PAGE_JUMP_ROWS - 1)][0]
+          : rows[0][0];
+      } else if (rows.length === 1) {
+        // Single row of items: jump ~5 items left/right within the row
+        const singleRow = rows[0];
+        const targetCol = isPageDown
+          ? Math.min(singleRow.length - 1, foundCol + PAGE_JUMP_ROWS)
+          : Math.max(0, foundCol - PAGE_JUMP_ROWS);
+        nextId = singleRow[targetCol];
+      } else {
+        const targetRow = isPageDown
+          ? Math.min(rows.length - 1, foundRow + PAGE_JUMP_ROWS)
+          : Math.max(0, foundRow - PAGE_JUMP_ROWS);
+        const rowItems = rows[targetRow];
+        const targetCol = Math.min(foundCol, rowItems.length - 1);
+        nextId = rowItems[targetCol];
+      }
+
+      if (nextId) {
+        lastFocusedItemIdRef.current = nextId;
+        setFocusedId(nextId);
+        if (typeof document !== 'undefined') {
+          scrollElementIntoViewIfClipped(document.getElementById(nextId));
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [isOpen, hasOtherStackedModal, goBackRef, lastFocusedItemIdRef, setFocusedId]);
+
+  return null;
+});
 
 export function FolderBrowserModal({
   client,
@@ -119,29 +679,45 @@ export function FolderBrowserModal({
   token,
   libraryId,
   initialPath = '',
+  initialFocusItemId,
   onClose,
   onSelectItem,
   onSelectImage,
   onStartSlideshow,
   onLockedLibrary,
+  onAddToPlaylist,
+  onPlaylistChanged,
+  onPathChange,
   isOpen = true,
   refreshKey,
 }: FolderBrowserModalProps) {
   const [currentPath, setCurrentPath] = useState<string>(initialPath);
+  const currentPathRef = useRef(currentPath);
+  currentPathRef.current = currentPath;
   const [folderData, setFolderData] = useState<LibraryFolderResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [isLocked, setIsLocked] = useState<boolean>(false);
+  const [internalAddTarget, setInternalAddTarget] = useState<AddToPlaylistTarget | null>(null);
 
-  const { pushTrap, popTrap, activeTrap } = useFocusContext();
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const setFocusedIdRef = useRef<((id: string | null) => void) | null>(null);
+  const onLockedLibraryRef = useRef(onLockedLibrary);
+  onLockedLibraryRef.current = onLockedLibrary;
+  const onSelectItemRef = useRef(onSelectItem);
+  onSelectItemRef.current = onSelectItem;
+  const onSelectImageRef = useRef(onSelectImage);
+  onSelectImageRef.current = onSelectImage;
+  const onPathChangeRef = useRef(onPathChange);
+  onPathChangeRef.current = onPathChange;
+  const folderDataRef = useRef(folderData);
+  folderDataRef.current = folderData;
 
-  useEffect(() => {
-    if (!isOpen) return;
-    pushTrap('folder-browser-modal');
-    return () => {
-      popTrap();
-    };
-  }, [isOpen, pushTrap, popTrap]);
+  const exitedChildPathRef = useRef<string | null>(null);
+  const autoFocusedFolderKeyRef = useRef<string | null>(null);
+  const lastFocusedItemIdRef = useRef<string | null>(
+    initialFocusItemId !== undefined ? `folder-item-${initialFocusItemId}` : null
+  );
 
   useEffect(() => {
     if (!isOpen) return;
@@ -152,6 +728,8 @@ export function FolderBrowserModal({
     fetchLibraryFolders(client, libraryId, currentPath)
       .then((data) => {
         if (isMounted) {
+          // Allow post-load focus effect to run while keeping lastFocusedItemIdRef intact across refreshKey updates
+          autoFocusedFolderKeyRef.current = null;
           setFolderData(data);
           setLoading(false);
           setIsLocked(false);
@@ -159,6 +737,7 @@ export function FolderBrowserModal({
       })
       .catch((err: any) => {
         if (isMounted) {
+          autoFocusedFolderKeyRef.current = null;
           const errMsg = err?.message || String(err);
           const status = err?.status;
           const locked =
@@ -167,7 +746,7 @@ export function FolderBrowserModal({
           setLoading(false);
           if (locked) {
             setIsLocked(true);
-            onLockedLibrary?.(libraryId);
+            onLockedLibraryRef.current?.(libraryId);
           }
         }
       });
@@ -175,51 +754,130 @@ export function FolderBrowserModal({
     return () => {
       isMounted = false;
     };
-  }, [client, libraryId, currentPath, isOpen, onLockedLibrary, refreshKey]);
+  }, [client, libraryId, currentPath, isOpen, refreshKey]);
 
+  const prevLibraryIdRef = useRef(libraryId);
   useEffect(() => {
-    setCurrentPath(initialPath || '');
-  }, [libraryId, initialPath]);
+    const isNewLibrary = libraryId !== prevLibraryIdRef.current;
+    prevLibraryIdRef.current = libraryId;
+    const targetPath = initialPath || '';
+    if (isNewLibrary || targetPath !== currentPathRef.current) {
+      exitedChildPathRef.current = null;
+      autoFocusedFolderKeyRef.current = null;
+      lastFocusedItemIdRef.current =
+        initialFocusItemId !== undefined ? `folder-item-${initialFocusItemId}` : null;
+      setCurrentPath(targetPath);
+    } else if (initialFocusItemId !== undefined) {
+      lastFocusedItemIdRef.current = `folder-item-${initialFocusItemId}`;
+    }
+  }, [libraryId, initialPath, initialFocusItemId]);
 
-  useEffect(() => {
-    if (!isOpen) return;
+  const isAtRoot = currentPath === '';
 
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // If another modal or focus trap is active above this modal, do not intercept keys
-      if (activeTrap && activeTrap !== 'folder-browser-modal') {
-        return;
+  const navigateToPath = useCallback(
+    (nextPath: string, sourceNodeId?: string) => {
+      if (sourceNodeId) {
+        lastFocusedItemIdRef.current = sourceNodeId;
       }
-
-      const code = e.keyCode || e.which;
-      if (
-        code === TVKeys.BACK_TIZEN ||
-        code === TVKeys.BACK_WEB ||
-        code === TVKeys.BACKSPACE ||
-        e.key === 'Escape'
-      ) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        if (currentPath !== '') {
-          const parent =
-            folderData?.parent_path !== undefined
-              ? folderData.parent_path
-              : currentPath.includes('/')
-              ? currentPath.substring(0, currentPath.lastIndexOf('/'))
-              : '';
-          setCurrentPath(parent);
-        } else {
-          onClose();
-        }
+      exitedChildPathRef.current = null;
+      if (nextPath !== currentPath) {
+        lastFocusedItemIdRef.current = null;
+        autoFocusedFolderKeyRef.current = null;
+        setLoading(true);
       }
-    };
+      setCurrentPath(nextPath);
+      onPathChangeRef.current?.(nextPath);
+    },
+    [currentPath]
+  );
 
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [isOpen, currentPath, folderData?.parent_path, onClose, activeTrap]);
+  /** Go up one folder; close the browser only when already at the library root. */
+  const goBack = useCallback(() => {
+    if (!isAtRoot) {
+      exitedChildPathRef.current = currentPath;
+      lastFocusedItemIdRef.current = null;
+      autoFocusedFolderKeyRef.current = null;
+      const fData = folderDataRef.current;
+      const parent =
+        fData?.parent_path !== undefined
+          ? fData.parent_path
+          : currentPath.includes('/')
+          ? currentPath.substring(0, currentPath.lastIndexOf('/'))
+          : '';
+      if (parent !== currentPath) {
+        setLoading(true);
+      }
+      setCurrentPath(parent);
+      onPathChangeRef.current?.(parent);
+    } else {
+      onClose();
+    }
+  }, [isAtRoot, currentPath, onClose]);
+
+  const goBackRef = useRef(goBack);
+  goBackRef.current = goBack;
+
+  const handleSelectItemCard = useCallback((itemId: number | string, nodeId: string) => {
+    lastFocusedItemIdRef.current = nodeId;
+    setFocusedIdRef.current?.(nodeId);
+    onSelectItemRef.current(itemId);
+  }, []);
+
+  const handleSelectPhotoCard = useCallback((idx: number, nodeId: string) => {
+    lastFocusedItemIdRef.current = nodeId;
+    setFocusedIdRef.current?.(nodeId);
+    const images = folderDataRef.current?.images || [];
+    onSelectImageRef.current(images, idx);
+  }, []);
+
+  const title = folderData?.library_name || libraryId;
+  const showAddFolderBtn =
+    !loading && !isLocked && !error && !libraryId.startsWith('plugin://');
+
+  const { validNodeIds, contentRows } = useMemo(() => {
+    const ids = new Set<string>();
+    ids.add('folder-browser-close-btn');
+    (folderData?.breadcrumbs || []).forEach((_, idx) => {
+      ids.add(`folder-breadcrumb-${idx}`);
+    });
+    if (showAddFolderBtn) {
+      ids.add('folder-add-to-playlist-btn');
+    }
+    if (!loading && isLocked) {
+      ids.add('folder-unlock-library-btn');
+    }
+
+    const rows: string[][] = [];
+    if (!loading && !isLocked && folderData) {
+      const dirIds = (folderData.directories || []).map((_, idx) => {
+        const id = `folder-dir-${idx}`;
+        ids.add(id);
+        return id;
+      });
+      const itemIds = (folderData.items || []).map((item) => {
+        const id = `folder-item-${item.id}`;
+        ids.add(id);
+        return id;
+      });
+      if (folderData.images && folderData.images.length > 0) {
+        ids.add('start-slideshow-btn');
+      }
+      const imageIds = (folderData.images || []).map((_, idx) => {
+        const id = `folder-image-${idx}`;
+        ids.add(id);
+        return id;
+      });
+
+      rows.push(...chunkIntoRows(dirIds, GRID_COLS));
+      rows.push(...chunkIntoRows(itemIds, GRID_COLS));
+      rows.push(...chunkIntoRows(imageIds, GRID_COLS));
+    }
+
+    return { validNodeIds: ids, contentRows: rows };
+  }, [folderData, loading, isLocked, showAddFolderBtn]);
 
   if (!isOpen) return null;
 
-  const title = folderData?.library_name || libraryId;
   const isEmpty =
     !loading &&
     !isLocked &&
@@ -227,89 +885,193 @@ export function FolderBrowserModal({
     (!folderData?.items || folderData.items.length === 0) &&
     (!folderData?.images || folderData.images.length === 0);
 
-  return (
-    <div className="fixed inset-0 z-50 bg-[#120404] text-[#F5E5E5] flex flex-col p-12 overflow-hidden select-none">
-      {/* Header */}
-      <div className="flex flex-col gap-5 border-b border-[rgba(245,229,229,0.08)] pb-6 shrink-0">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-6">
-            <TVButton
-              id="folder-browser-close-btn"
-              groupId="folder-browser-modal"
-              variant="secondary"
-              aria-label="Close"
-              className="px-6 py-3 text-lg font-bold flex items-center gap-2 rounded-xl"
-              onClick={onClose}
-              onEnter={onClose}
-            >
-              <ArrowLeft className="w-6 h-6 mr-1" />
-              <span>Back</span>
-            </TVButton>
-            <h2 className="text-4xl font-black tracking-tight text-[#F5E5E5]">{title}</h2>
-          </div>
-        </div>
+  const unlockTokens = client?.getUnlockTokens ? client.getUnlockTokens() : [];
 
-        {/* Breadcrumbs Bar */}
-        <div className="flex items-center flex-wrap gap-3 text-xl">
+  let nextOrder = 1;
+  const closeBtnOrder = nextOrder++;
+  const breadcrumbOrders = (folderData?.breadcrumbs || []).map(() => nextOrder++);
+  const addFolderBtnOrder = showAddFolderBtn ? nextOrder++ : undefined;
+  const unlockBtnOrder = !loading && isLocked ? nextOrder++ : undefined;
+  const dirOrders = (folderData?.directories || []).map(() => nextOrder++);
+  const itemOrders = (folderData?.items || []).map(() => nextOrder++);
+  const slideshowBtnOrder =
+    folderData?.images && folderData.images.length > 0 ? nextOrder++ : undefined;
+  const imageOrders = (folderData?.images || []).map(() => nextOrder++);
+
+  return (
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      data-modal-overlay="true"
+      className="fixed inset-0 z-50 bg-[#120404] text-[#F5E5E5] flex flex-col p-12 overflow-hidden select-none"
+    >
+      {/* Header: action row (Back + breadcrumb trail) on top, folder title below */}
+      <div
+        className="shrink-0"
+        style={{ paddingBottom: '20px', borderBottom: '1px solid rgba(245,229,229,0.08)' }}
+      >
+        <div
+          data-testid="folder-browser-action-row"
+          style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}
+        >
+          <PillButton
+            id="folder-browser-close-btn"
+            groupId="folder-browser-modal"
+            order={closeBtnOrder}
+            variant="secondary"
+            ariaLabel={isAtRoot ? 'Close' : 'Back'}
+            icon={isAtRoot ? <X className="w-5 h-5" /> : <ArrowLeft className="w-5 h-5" />}
+            marginRight="24px"
+            onSelect={goBack}
+          >
+            {isAtRoot ? 'Close' : 'Back'}
+          </PillButton>
+
           {folderData?.breadcrumbs && folderData.breadcrumbs.length > 0 ? (
             folderData.breadcrumbs.map((crumb, idx) => {
               const isLast = idx === folderData.breadcrumbs.length - 1;
               return (
-                <div key={crumb.path || `root-${idx}`} className="flex items-center gap-3">
-                  {idx > 0 && <span className="text-[#5C3C3C] font-bold text-2xl">&gt;</span>}
-                  <TVButton
+                <div
+                  key={crumb.path || `root-${idx}`}
+                  style={{ display: 'flex', alignItems: 'center' }}
+                >
+                  {idx > 0 && (
+                    <span
+                      style={{
+                        marginRight: '12px',
+                        fontSize: '24px',
+                        fontWeight: 700,
+                        color: '#6e6865',
+                      }}
+                    >
+                      &gt;
+                    </span>
+                  )}
+                  <PillButton
                     id={`folder-breadcrumb-${idx}`}
                     groupId="folder-browser-modal"
-                    variant={isLast ? 'primary' : 'secondary'}
-                    className="px-4 py-2 text-base font-semibold rounded-lg"
-                    onClick={() => setCurrentPath(crumb.path)}
-                    onEnter={() => setCurrentPath(crumb.path)}
+                    order={breadcrumbOrders[idx]}
+                    variant={isLast ? 'current' : 'secondary'}
+                    size="sm"
+                    marginRight="12px"
+                    onSelect={() => navigateToPath(crumb.path, `folder-breadcrumb-${idx}`)}
                   >
                     {crumb.name}
-                  </TVButton>
+                  </PillButton>
                 </div>
               );
             })
           ) : (
-            <span className="text-[#5C3C3C] font-medium">{title}</span>
+            <span style={{ color: '#a8a29e', fontWeight: 500, fontSize: '20px' }}>{title}</span>
+          )}
+        </div>
+
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            marginTop: '20px',
+          }}
+        >
+          <h2
+            className="text-4xl font-black tracking-tight text-[#F5E5E5]"
+            style={{ marginRight: '16px' }}
+          >
+            {title}
+          </h2>
+
+          {showAddFolderBtn && (
+            <PillButton
+              id="folder-add-to-playlist-btn"
+              groupId="folder-browser-modal"
+              order={addFolderBtnOrder}
+              variant="secondary"
+              size="sm"
+              icon={<ListPlus className="w-4 h-4" />}
+              marginRight="0px"
+              onSelect={() => {
+                lastFocusedItemIdRef.current = 'folder-add-to-playlist-btn';
+                setFocusedIdRef.current?.('folder-add-to-playlist-btn');
+                const crumbs = folderData?.breadcrumbs || [];
+                const currentCrumbName =
+                  crumbs.length > 0 ? crumbs[crumbs.length - 1].name : title;
+                const target: AddToPlaylistTarget = {
+                  kind: 'folder',
+                  libraryId,
+                  path: currentPath,
+                  folderName: currentCrumbName || title,
+                };
+                if (onAddToPlaylist) {
+                  onAddToPlaylist(target);
+                } else {
+                  setInternalAddTarget(target);
+                }
+              }}
+            >
+              Add Folder to Playlist
+            </PillButton>
           )}
         </div>
       </div>
 
       {/* Content Area */}
-      <div className="flex-1 overflow-y-auto mt-6 pr-4 space-y-8 scrollbar-thin">
+      <div
+        data-folder-scroll-container="true"
+        className="flex-1 overflow-y-auto mt-6 pr-4 scrollbar-thin"
+      >
         {loading && (
-          <div className="flex flex-col items-center justify-center h-64 text-[#5C3C3C] gap-3">
-            <Loader2 className="w-8 h-8 animate-spin text-[#FF6B00]" />
+          <div className="flex flex-col items-center justify-center h-64 text-[#5C3C3C]">
+            <Loader2
+              className="w-8 h-8 animate-spin text-[#FF6B00]"
+              style={{ marginBottom: '12px' }}
+            />
             <span className="text-lg">Loading folder contents...</span>
           </div>
         )}
 
         {!loading && isLocked && (
-          <div className="flex flex-col items-center justify-center h-64 text-center gap-4">
-            <div className="w-16 h-16 rounded-full bg-[#D43F15]/10 flex items-center justify-center text-[#D43F15] mb-2">
-              <Lock className="w-8 h-8" />
+          <div className="flex flex-col items-center justify-center h-64 text-center">
+            <div
+              className="w-16 h-16 rounded-full bg-[#D43F15]/10 flex items-center justify-center text-[#D43F15]"
+              style={{ marginBottom: '16px' }}
+            />
+            <div className="text-2xl font-bold text-[#F5E5E5]" style={{ marginBottom: '12px' }}>
+              This library is locked
             </div>
-            <div className="text-2xl font-bold text-[#F5E5E5]">This library is locked</div>
-            <p className="text-[#5C3C3C] max-w-md">
+            <p className="text-[#5C3C3C] max-w-md" style={{ marginBottom: '16px' }}>
               A PIN or unlock token is required to browse contents of this library.
             </p>
             <TVButton
-              id="unlock-library-btn"
+              id="folder-unlock-library-btn"
               groupId="folder-browser-modal"
+              order={unlockBtnOrder}
               variant="primary"
               className="mt-2 px-8 py-3 text-lg font-semibold"
-              onClick={() => onLockedLibrary?.(libraryId)}
-              onEnter={() => onLockedLibrary?.(libraryId)}
+              onClick={() => {
+                lastFocusedItemIdRef.current = 'folder-unlock-library-btn';
+                setFocusedIdRef.current?.('folder-unlock-library-btn');
+                onLockedLibrary?.(libraryId);
+              }}
+              onEnter={() => {
+                lastFocusedItemIdRef.current = 'folder-unlock-library-btn';
+                setFocusedIdRef.current?.('folder-unlock-library-btn');
+                onLockedLibrary?.(libraryId);
+              }}
             >
-              Unlock Library
+              <Lock className="w-5 h-5 mr-2 inline-block" /> Unlock Library
             </TVButton>
           </div>
         )}
 
         {!loading && !isLocked && error && (
-          <div className="flex flex-col items-center justify-center h-64 text-center gap-3">
-            <div className="text-xl font-bold text-[#D43F15]">Failed to load folder</div>
+          <div className="flex flex-col items-center justify-center h-64 text-center">
+            <div className="text-xl font-bold text-[#D43F15]" style={{ marginBottom: '12px' }}>
+              Failed to load folder
+            </div>
             <p className="text-[#5C3C3C]">{error}</p>
           </div>
         )}
@@ -324,27 +1086,28 @@ export function FolderBrowserModal({
           <>
             {/* Subdirectories Section */}
             {folderData.directories && folderData.directories.length > 0 && (
-              <div className="space-y-4">
-                <h3 className="text-2xl font-bold text-[#F5E5E5]">Folders</h3>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
+              <div style={{ marginBottom: '32px' }}>
+                <h3 className="text-2xl font-bold text-[#F5E5E5]" style={{ marginBottom: '16px' }}>
+                  Folders
+                </h3>
+                <div
+                  className="grid grid-cols-6"
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(6, minmax(0, 1fr))',
+                    gridGap: '24px',
+                  }}
+                >
                   {folderData.directories.map((dir, idx) => (
-                    <TVButton
+                    <FolderDirItem
                       key={dir.path || idx}
                       id={`folder-dir-${idx}`}
-                      groupId="folder-browser-modal"
-                      variant="secondary"
-                      className="flex items-center gap-4 p-5 rounded-2xl text-left"
-                      onClick={() => setCurrentPath(dir.path)}
-                      onEnter={() => setCurrentPath(dir.path)}
-                    >
-                      <Folder className="w-10 h-10 text-[#FF6B00] shrink-0" />
-                      <div className="flex flex-col truncate">
-                        <span className="font-bold text-xl text-[#F5E5E5] truncate">
-                          {dir.name}
-                        </span>
-                        <span className="text-base text-[#5C3C3C]">{dir.item_count} items</span>
-                      </div>
-                    </TVButton>
+                      order={dirOrders[idx]}
+                      name={dir.name}
+                      path={dir.path}
+                      itemCount={dir.item_count}
+                      onNavigate={navigateToPath}
+                    />
                   ))}
                 </div>
               </div>
@@ -352,14 +1115,24 @@ export function FolderBrowserModal({
 
             {/* Media Items Section */}
             {folderData.items && folderData.items.length > 0 && (
-              <div className="space-y-4">
-                <h3 className="text-2xl font-bold text-[#F5E5E5]">Media Items</h3>
-                <div className="grid grid-cols-6 gap-6">
-                  {folderData.items.map((item) => (
-                    <TVCard
+              <div style={{ marginBottom: '32px' }}>
+                <h3 className="text-2xl font-bold text-[#F5E5E5]" style={{ marginBottom: '16px' }}>
+                  Media Items
+                </h3>
+                <div
+                  className="grid grid-cols-6"
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(6, minmax(0, 1fr))',
+                    gridGap: '24px',
+                  }}
+                >
+                  {folderData.items.map((item, idx) => (
+                    <FolderMediaCard
                       key={item.id}
                       id={`folder-item-${item.id}`}
-                      groupId="folder-browser-modal"
+                      order={itemOrders[idx]}
+                      itemId={item.id}
                       title={item.title}
                       subtitle={
                         item.subtitle ||
@@ -372,7 +1145,7 @@ export function FolderBrowserModal({
                           ? Math.round(item.playback_progress * 100)
                           : undefined
                       }
-                      onSelect={() => onSelectItem(item.id)}
+                      onSelectItemId={handleSelectItemCard}
                     />
                   ))}
                 </div>
@@ -381,34 +1154,52 @@ export function FolderBrowserModal({
 
             {/* Photos & Images Section */}
             {folderData.images && folderData.images.length > 0 && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
+              <div style={{ marginBottom: '32px' }}>
+                <div
+                  className="flex items-center justify-between"
+                  style={{ marginBottom: '16px' }}
+                >
                   <h3 className="text-2xl font-bold text-[#F5E5E5]">
                     Photos ({folderData.images.length})
                   </h3>
-                  <TVButton
+                  <PillButton
                     id="start-slideshow-btn"
                     groupId="folder-browser-modal"
+                    order={slideshowBtnOrder}
                     variant="primary"
-                    className="px-6 py-2.5 text-base flex items-center gap-2"
-                    onClick={() => onStartSlideshow(folderData.images)}
-                    onEnter={() => onStartSlideshow(folderData.images)}
+                    icon={<Play className="w-5 h-5 fill-current" />}
+                    marginRight="0px"
+                    onSelect={() => {
+                      lastFocusedItemIdRef.current = 'start-slideshow-btn';
+                      setFocusedIdRef.current?.('start-slideshow-btn');
+                      onStartSlideshow(folderData.images);
+                    }}
                   >
-                    <Play className="w-5 h-5 fill-current" />
-                    <span>Start Slideshow</span>
-                  </TVButton>
+                    Start Slideshow
+                  </PillButton>
                 </div>
-                <div className="grid grid-cols-6 gap-6">
+                <div
+                  className="grid grid-cols-6"
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(6, minmax(0, 1fr))',
+                    gridGap: '24px',
+                  }}
+                >
                   {folderData.images.map((img, idx) => (
-                    <FolderImageCard
+                    <FolderPhotoCard
                       key={img.path || idx}
                       id={`folder-image-${idx}`}
+                      order={imageOrders[idx]}
                       image={img}
                       index={idx}
-                      serverUrl={serverUrl}
-                      token={token}
-                      client={client}
-                      onSelect={() => onSelectImage(folderData.images, idx)}
+                      imageUrl={getAuthenticatedImageUrl(
+                        serverUrl,
+                        img.url || img.path,
+                        token,
+                        unlockTokens
+                      )}
+                      onSelectPhoto={handleSelectPhotoCard}
                     />
                   ))}
                 </div>
@@ -417,6 +1208,44 @@ export function FolderBrowserModal({
           </>
         )}
       </div>
+
+      {!onAddToPlaylist && internalAddTarget && (
+        <AddToPlaylistModal
+          isOpen={Boolean(internalAddTarget)}
+          client={client}
+          serverUrl={serverUrl}
+          token={token}
+          target={internalAddTarget}
+          onClose={() => setInternalAddTarget(null)}
+          onSuccess={() => {
+            setInternalAddTarget(null);
+            onPlaylistChanged?.();
+          }}
+          onLockedLibrary={(libId) => {
+            onLockedLibrary?.(libId || libraryId);
+          }}
+        />
+      )}
+
+      <FolderFocusBridge
+        isOpen={isOpen}
+        loading={loading}
+        isLocked={isLocked}
+        error={error}
+        folderData={folderData}
+        libraryId={libraryId}
+        currentPath={currentPath}
+        initialFocusItemId={initialFocusItemId}
+        hasInternalModal={Boolean(!onAddToPlaylist && internalAddTarget)}
+        validNodeIds={validNodeIds}
+        contentRows={contentRows}
+        dialogRef={dialogRef}
+        exitedChildPathRef={exitedChildPathRef}
+        autoFocusedFolderKeyRef={autoFocusedFolderKeyRef}
+        lastFocusedItemIdRef={lastFocusedItemIdRef}
+        setFocusedIdRef={setFocusedIdRef}
+        goBackRef={goBackRef}
+      />
     </div>
   );
 }

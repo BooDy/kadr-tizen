@@ -1,10 +1,10 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { FocusProvider } from './navigation/FocusContext';
 import { ApiClient } from './api/client';
 import { listProfiles, authenticatePin } from './api/auth';
 import { fetchMediaItem, MediaItemDetail } from './api/items';
 import { unlockLibrary } from './api/libraries';
-import { subscribeEvents } from './api/events';
+import { subscribeEvents, PlaylistUpdatedPayload } from './api/events';
 import { ProfileCard, FolderImage } from './types/kadr';
 import { ServerConnectScreen } from './screens/ServerConnectScreen';
 import { ProfileSelectScreen } from './screens/ProfileSelectScreen';
@@ -12,28 +12,49 @@ import { BrowseScreen } from './screens/BrowseScreen';
 import { ItemDetailModal } from './screens/ItemDetailModal';
 import { FolderBrowserModal } from './screens/FolderBrowserModal';
 import { ImageViewerModal } from './screens/ImageViewerModal';
+import { PlaylistDetailModal, PlaylistQueuePlayItem } from './screens/PlaylistDetailModal';
+import {
+  AddToPlaylistModal,
+  AddToPlaylistTarget,
+} from './components/playlists/AddToPlaylistModal';
 import { PinPadModal } from './components/pin/PinPadModal';
-import { PlayerScreen, PlaylistItem } from './screens/PlayerScreen';
+import { PlayerScreen } from './screens/PlayerScreen';
 import { WifiOff } from 'lucide-react';
+import {
+  applyOptimisticProgress,
+  PlaybackProgressSnapshot,
+} from './utils/playbackProgress';
 
 export type AppView = 'connect' | 'profiles' | 'browse' | 'player';
 
 export default function App() {
-  const [view, setView] = useState<AppView>('connect');
   const [serverUrl, setServerUrl] = useState<string | null>(() => localStorage.getItem('kadr_server_url'));
   const [serverName, setServerName] = useState<string>(() => localStorage.getItem('kadr_server_name') || 'Kadr');
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem('kadr_token'));
+  const [view, setView] = useState<AppView>(() =>
+    localStorage.getItem('kadr_server_url') ? 'profiles' : 'connect'
+  );
+  const [token, setToken] = useState<string | null>(() => {
+    localStorage.removeItem('kadr_token');
+    return null;
+  });
   const [profiles, setProfiles] = useState<ProfileCard[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [activeItem, setActiveItem] = useState<MediaItemDetail | null>(null);
+  const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
+  const [addToPlaylistTarget, setAddToPlaylistTarget] = useState<AddToPlaylistTarget | null>(null);
   const [playerItem, setPlayerItem] = useState<{
     id: number | string;
     title: string;
     startMs: number;
     technical?: MediaItemDetail['technical'];
-    playlist?: PlaylistItem[];
+    playlist?: PlaylistQueuePlayItem[];
     currentIndex?: number;
   } | null>(null);
-  const [folderBrowserState, setFolderBrowserState] = useState<{ libraryId: string; path: string } | null>(null);
+  const [folderBrowserState, setFolderBrowserState] = useState<{
+    libraryId: string;
+    path: string;
+    lastItemId?: number | string;
+  } | null>(null);
   const [imageViewerState, setImageViewerState] = useState<{
     images: FolderImage[];
     initialIndex: number;
@@ -44,6 +65,19 @@ export default function App() {
   const [unlockLockoutSecs, setUnlockLockoutSecs] = useState<number>(0);
   const [screenRefreshKey, setScreenRefreshKey] = useState<number>(0);
   const [folderRefreshKey, setFolderRefreshKey] = useState<number>(0);
+  const [playlistRefreshKey, setPlaylistRefreshKey] = useState<number>(0);
+  const [activeBrowseTab, setActiveBrowseTab] = useState<string>('home');
+  const [lastBrowseFocusId, setLastBrowseFocusId] = useState<string | null>(null);
+  const [itemDetailViewState, setItemDetailViewState] = useState<{
+    itemId: string;
+    selectedSeason: number;
+    lastFocusedId: string | null;
+  } | null>(null);
+  const [suspendedItemDetail, setSuspendedItemDetail] = useState<{
+    item: MediaItemDetail;
+    viewState: { itemId: string; selectedSeason: number; lastFocusedId: string | null } | null;
+  } | null>(null);
+  const sessionProgressRef = useRef<Map<string, PlaybackProgressSnapshot>>(new Map());
   const [isOffline, setIsOffline] = useState(
     typeof navigator !== 'undefined' ? !navigator.onLine : false
   );
@@ -94,11 +128,22 @@ export default function App() {
   // Real-time SSE subscription
   useEffect(() => {
     if (!serverUrl || !token) return;
-    const unsubscribe = subscribeEvents(serverUrl, token, (type) => {
+    const unsubscribe = subscribeEvents(serverUrl, token, (type, payload) => {
       if (type === 'layout:changed') {
         setScreenRefreshKey((k) => k + 1);
       } else if (type === 'library:updated') {
         setFolderRefreshKey((k) => k + 1);
+        setPlaylistRefreshKey((k) => k + 1);
+      } else if (type === 'playlist:updated') {
+        const raw = payload as Record<string, unknown> | null;
+        const inner = (
+          raw && typeof raw.payload === 'object' && raw.payload !== null ? raw.payload : raw
+        ) as Partial<PlaylistUpdatedPayload> | null;
+        if (inner?.action === 'deleted' && inner.playlist_id) {
+          setActivePlaylistId((prev) => (prev === inner.playlist_id ? null : prev));
+        }
+        setPlaylistRefreshKey((k) => k + 1);
+        setScreenRefreshKey((k) => k + 1);
       }
     });
     return () => {
@@ -126,6 +171,7 @@ export default function App() {
     if (res.success && res.data) {
       localStorage.setItem('kadr_token', res.data.token);
       setToken(res.data.token);
+      setCurrentUserId(res.data.user_id || userId);
       setView('browse');
       return { success: true };
     }
@@ -138,10 +184,18 @@ export default function App() {
     localStorage.removeItem('kadr_token');
     setServerUrl(null);
     setToken(null);
+    setCurrentUserId(null);
     setActiveItem(null);
+    setActivePlaylistId(null);
+    setAddToPlaylistTarget(null);
     setFolderBrowserState(null);
     setImageViewerState(null);
     setUnlockLibraryId(null);
+    setActiveBrowseTab('home');
+    setLastBrowseFocusId(null);
+    setItemDetailViewState(null);
+    setSuspendedItemDetail(null);
+    sessionProgressRef.current.clear();
     client.clearLibraryUnlockTokens();
     setView('connect');
   };
@@ -150,6 +204,8 @@ export default function App() {
     try {
       const item = await fetchMediaItem(client, itemId);
       setActiveItem(item);
+      const newId = String(item.id ?? item.card?.id ?? itemId);
+      setItemDetailViewState((prev) => (prev?.itemId === newId ? prev : null));
     } catch {
       // Ignored
     }
@@ -160,12 +216,15 @@ export default function App() {
     resumeMs = 0,
     titleOverride?: string,
     technicalOverride?: MediaItemDetail['technical'],
-    playlistOverride?: PlaylistItem[],
+    playlistOverride?: PlaylistQueuePlayItem[],
     currentIndexOverride?: number
   ) => {
     if (itemId === undefined || itemId === null || itemId === '' || itemId === 'undefined') {
       console.error('[App] Cannot play item with invalid id:', itemId);
       return;
+    }
+    if (view !== 'player') {
+      sessionProgressRef.current.clear();
     }
     let title = titleOverride;
     let technical = technicalOverride;
@@ -212,6 +271,19 @@ export default function App() {
     setView('player');
   };
 
+  const handlePlayPlaylistQueue = (queue: PlaylistQueuePlayItem[], startIndex: number) => {
+    const first = queue[startIndex];
+    if (!first) return;
+    handlePlayItem(
+      first.id,
+      first.resumeMs ?? 0,
+      first.title,
+      first.technical,
+      queue,
+      startIndex
+    );
+  };
+
   const handleNextEpisode = () => {
     if (!playerItem?.playlist || playerItem.currentIndex === undefined) return;
     const nextIdx = playerItem.currentIndex + 1;
@@ -219,7 +291,7 @@ export default function App() {
       const nextItem = playerItem.playlist[nextIdx];
       handlePlayItem(
         nextItem.id,
-        0,
+        nextItem.resumeMs ?? 0,
         nextItem.title,
         nextItem.technical,
         playerItem.playlist,
@@ -235,7 +307,7 @@ export default function App() {
       const prevItem = playerItem.playlist[prevIdx];
       handlePlayItem(
         prevItem.id,
-        0,
+        prevItem.resumeMs ?? 0,
         prevItem.title,
         prevItem.technical,
         playerItem.playlist,
@@ -244,14 +316,50 @@ export default function App() {
     }
   };
 
-  const handleExitPlayer = async () => {
+  const handleEpisodeProgress = (snap: PlaybackProgressSnapshot) => {
+    sessionProgressRef.current.set(String(snap.itemId), snap);
+  };
+
+  const handleExitPlayer = async (snapshot?: PlaybackProgressSnapshot) => {
+    if (snapshot) {
+      sessionProgressRef.current.set(String(snapshot.itemId), snapshot);
+    }
+    const progressMap = new Map(sessionProgressRef.current);
+
+    if (activeItem && progressMap.size > 0) {
+      setActiveItem((prev) => (prev ? applyOptimisticProgress(prev, progressMap) : prev));
+    }
+
     setView('browse');
-    if (!activeItem && playerItem) {
-      try {
-        const detail = await fetchMediaItem(client, playerItem.id);
-        setActiveItem(detail);
-      } catch (e) {
-        console.error('Failed to load item detail on player exit:', e);
+
+    if (snapshot?.flushPromise) {
+      await Promise.race([
+        snapshot.flushPromise,
+        new Promise<void>((resolve) => setTimeout(resolve, 800)),
+      ]);
+    }
+
+    setScreenRefreshKey((k) => k + 1);
+    if (folderBrowserState) {
+      setFolderRefreshKey((k) => k + 1);
+    }
+    if (activePlaylistId) {
+      setPlaylistRefreshKey((k) => k + 1);
+    }
+
+    if (activeItem) {
+      const targetId = activeItem.id ?? activeItem.card?.id;
+      if (targetId !== undefined && targetId !== null) {
+        try {
+          const fresh = await fetchMediaItem(client, targetId);
+          setActiveItem((prev) => {
+            // Only update if user is still viewing the same item
+            const prevId = prev?.id ?? prev?.card?.id;
+            return prev && String(prevId) === String(targetId) ? fresh : prev;
+          });
+        } catch (e) {
+          console.warn('[App] Failed to refresh item detail on player exit:', e);
+        }
       }
     }
   };
@@ -267,6 +375,7 @@ export default function App() {
       setUnlockLockoutSecs(0);
       setFolderRefreshKey((k) => k + 1);
       setScreenRefreshKey((k) => k + 1);
+      setPlaylistRefreshKey((k) => k + 1);
     } catch (err: any) {
       const status = err?.status;
       const msg = err?.message || 'Incorrect PIN';
@@ -290,10 +399,19 @@ export default function App() {
             role="alertdialog"
             aria-modal="true"
             aria-label="Connection Lost"
-            className="fixed inset-0 bg-[#2A0A0A]/90 backdrop-blur-md z-50 flex flex-col items-center justify-center gap-4 select-none"
+            data-modal-overlay="true"
+            className="fixed inset-0 bg-[#120404]/95 z-50 flex flex-col items-center justify-center select-none"
           >
-            <WifiOff className="w-16 h-16 text-[#D43F15] animate-pulse" />
-            <h2 className="text-3xl font-bold text-[#F5E5E5]">Connection Lost</h2>
+            <WifiOff
+              className="w-16 h-16 text-[#D43F15] animate-pulse"
+              style={{ marginBottom: '16px' }}
+            />
+            <h2
+              className="text-3xl font-bold text-[#F5E5E5]"
+              style={{ marginBottom: '12px' }}
+            >
+              Connection Lost
+            </h2>
             <p className="text-xl text-[#5C3C3C]">Waiting for network connection to restore...</p>
           </div>
         )}
@@ -316,10 +434,20 @@ export default function App() {
             <BrowseScreen
               client={client}
               serverUrl={serverUrl || ''}
+              token={token || undefined}
+              currentUserId={currentUserId || undefined}
+              initialTab={activeBrowseTab}
+              onTabChange={setActiveBrowseTab}
+              initialFocusId={lastBrowseFocusId}
+              onContentFocusChange={setLastBrowseFocusId}
               onSelectItem={handleOpenDetail}
               onPlayItem={handlePlayItem}
               onBrowseFolder={(libraryId, folderPath) => {
+                setSuspendedItemDetail(null);
                 setFolderBrowserState({ libraryId, path: folderPath || '' });
+              }}
+              onOpenPlaylist={(playlistId) => {
+                setActivePlaylistId(playlistId);
               }}
               onLockedLibrary={(libraryId) => {
                 setUnlockLibraryId(libraryId);
@@ -327,27 +455,50 @@ export default function App() {
               onSwitchProfile={() => {
                 localStorage.removeItem('kadr_token');
                 setToken(null);
+                setCurrentUserId(null);
                 setActiveItem(null);
+                setActivePlaylistId(null);
+                setAddToPlaylistTarget(null);
                 setFolderBrowserState(null);
                 setImageViewerState(null);
                 setUnlockLibraryId(null);
+                setActiveBrowseTab('home');
+                setLastBrowseFocusId(null);
+                setItemDetailViewState(null);
+                setSuspendedItemDetail(null);
+                sessionProgressRef.current.clear();
                 client.clearLibraryUnlockTokens();
                 setView('profiles');
               }}
               onSwitchServer={handleSwitchServer}
               refreshKey={screenRefreshKey}
+              playlistRefreshKey={playlistRefreshKey}
             />
             {folderBrowserState && (
               <FolderBrowserModal
-                key={`${folderBrowserState.libraryId}-${folderBrowserState.path}`}
+                key={folderBrowserState.libraryId}
                 client={client}
                 serverUrl={serverUrl || ''}
                 token={token || ''}
                 libraryId={folderBrowserState.libraryId}
                 initialPath={folderBrowserState.path}
+                initialFocusItemId={folderBrowserState.lastItemId}
                 refreshKey={folderRefreshKey}
-                onClose={() => setFolderBrowserState(null)}
+                onPathChange={(nextPath) =>
+                  setFolderBrowserState((prev) => (prev ? { ...prev, path: nextPath } : prev))
+                }
+                onClose={() => {
+                  setFolderBrowserState(null);
+                  if (suspendedItemDetail) {
+                    setActiveItem(suspendedItemDetail.item);
+                    setItemDetailViewState(suspendedItemDetail.viewState);
+                    setSuspendedItemDetail(null);
+                  }
+                }}
                 onSelectItem={(itemId) => {
+                  setFolderBrowserState((prev) =>
+                    prev ? { ...prev, lastItemId: itemId } : prev
+                  );
                   handleOpenDetail(itemId);
                 }}
                 onSelectImage={(images, initialIndex) => {
@@ -359,19 +510,127 @@ export default function App() {
                 onLockedLibrary={(libraryId) => {
                   setUnlockLibraryId(libraryId);
                 }}
+                onAddToPlaylist={(target) => {
+                  setAddToPlaylistTarget(target);
+                }}
+                onPlaylistChanged={() => {
+                  setPlaylistRefreshKey((k) => k + 1);
+                }}
+              />
+            )}
+            {activePlaylistId && (
+              <PlaylistDetailModal
+                isOpen={Boolean(activePlaylistId)}
+                playlistId={activePlaylistId}
+                client={client}
+                serverUrl={serverUrl || ''}
+                token={token || undefined}
+                refreshKey={playlistRefreshKey}
+                onClose={() => setActivePlaylistId(null)}
+                onPlayQueue={handlePlayPlaylistQueue}
+                onSelectItem={(itemId) => {
+                  handleOpenDetail(itemId);
+                }}
+                onPlaylistChanged={() => {
+                  setPlaylistRefreshKey((k) => k + 1);
+                }}
+                onPlaylistDeleted={() => {
+                  setActivePlaylistId(null);
+                  setPlaylistRefreshKey((k) => k + 1);
+                }}
+                onLockedLibrary={(libraryId) => {
+                  if (libraryId) setUnlockLibraryId(libraryId);
+                }}
               />
             )}
             <ItemDetailModal
               isOpen={Boolean(activeItem)}
               item={activeItem}
               serverUrl={serverUrl || ''}
+              client={client}
+              token={token || undefined}
+              initialSelectedSeason={
+                itemDetailViewState &&
+                activeItem &&
+                itemDetailViewState.itemId === String(activeItem.id ?? activeItem.card?.id)
+                  ? itemDetailViewState.selectedSeason
+                  : undefined
+              }
+              initialFocusedId={
+                itemDetailViewState &&
+                activeItem &&
+                itemDetailViewState.itemId === String(activeItem.id ?? activeItem.card?.id)
+                  ? itemDetailViewState.lastFocusedId
+                  : undefined
+              }
+              onViewStateChange={(state) => {
+                if (activeItem) {
+                  const itemId = String(activeItem.id ?? activeItem.card?.id);
+                  setItemDetailViewState((prev) => {
+                    if (
+                      prev &&
+                      prev.itemId === itemId &&
+                      prev.selectedSeason === state.selectedSeason &&
+                      prev.lastFocusedId === state.lastFocusedId
+                    ) {
+                      return prev;
+                    }
+                    return {
+                      itemId,
+                      selectedSeason: state.selectedSeason,
+                      lastFocusedId: state.lastFocusedId,
+                    };
+                  });
+                }
+              }}
               onPlay={handlePlayItem}
-              onClose={() => setActiveItem(null)}
-              onBrowseFolder={(libraryId, folderPath) => {
+              onClose={() => {
                 setActiveItem(null);
-                setFolderBrowserState({ libraryId, path: folderPath });
+                setItemDetailViewState(null);
+              }}
+              onBrowseFolder={(libraryId, folderPath) => {
+                if (activeItem) {
+                  const currentItemId = String(activeItem.id ?? activeItem.card?.id);
+                  setSuspendedItemDetail({
+                    item: activeItem,
+                    viewState:
+                      itemDetailViewState?.itemId === currentItemId
+                        ? itemDetailViewState
+                        : null,
+                  });
+                }
+                const focusItemId = activeItem?.id ?? activeItem?.card?.id;
+                setActiveItem(null);
+                setFolderBrowserState({
+                  libraryId,
+                  path: folderPath,
+                  lastItemId: focusItemId,
+                });
+              }}
+              onAddToPlaylist={(target) => {
+                setAddToPlaylistTarget(target);
+              }}
+              onPlaylistChanged={() => {
+                setPlaylistRefreshKey((k) => k + 1);
               }}
             />
+            {addToPlaylistTarget && (
+              <AddToPlaylistModal
+                isOpen={Boolean(addToPlaylistTarget)}
+                client={client}
+                serverUrl={serverUrl || ''}
+                token={token || undefined}
+                target={addToPlaylistTarget}
+                onClose={() => setAddToPlaylistTarget(null)}
+                onSuccess={() => {
+                  setAddToPlaylistTarget(null);
+                  setPlaylistRefreshKey((k) => k + 1);
+                }}
+                onLockedLibrary={(libraryId) => {
+                  if (libraryId) setUnlockLibraryId(libraryId);
+                }}
+              />
+            )}
             {imageViewerState && (
               <ImageViewerModal
                 images={imageViewerState.images}
@@ -417,6 +676,7 @@ export default function App() {
             currentIndex={playerItem.currentIndex}
             onNext={playerItem.playlist ? handleNextEpisode : undefined}
             onPrevious={playerItem.playlist ? handlePreviousEpisode : undefined}
+            onEpisodeProgress={handleEpisodeProgress}
             onExit={handleExitPlayer}
           />
         )}

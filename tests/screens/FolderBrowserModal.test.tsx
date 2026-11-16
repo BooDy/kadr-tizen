@@ -544,6 +544,103 @@ describe('FolderBrowserModal', () => {
     });
   });
 
+  it('on-screen Back button goes to the previous folder (not the library home) and Close only at the root', async () => {
+    const onClose = vi.fn();
+    vi.mocked(foldersApi.fetchLibraryFolders).mockImplementation(async (_client, _libId, path) => {
+      if (path === 'Sci-Fi/Dune') return mockNestedFolderResponse;
+      if (path === 'Sci-Fi') {
+        return { ...mockNestedFolderResponse, current_path: 'Sci-Fi', parent_path: '' };
+      }
+      return mockRootFolderResponse;
+    });
+
+    render(
+      <FocusProvider>
+        <FolderBrowserModal
+          client={client}
+          serverUrl={serverUrl}
+          libraryId={libraryId}
+          initialPath="Sci-Fi/Dune"
+          onClose={onClose}
+          onSelectItem={vi.fn()}
+          onSelectImage={vi.fn()}
+          onStartSlideshow={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Dune: Part One')).toBeInTheDocument();
+    });
+
+    // In a nested folder the button reads "Back" and steps up one level
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    });
+    await waitFor(() => {
+      expect(foldersApi.fetchLibraryFolders).toHaveBeenCalledWith(client, libraryId, 'Sci-Fi');
+    });
+    expect(onClose).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    });
+    await waitFor(() => {
+      expect(foldersApi.fetchLibraryFolders).toHaveBeenCalledWith(client, libraryId, '');
+    });
+    expect(onClose).not.toHaveBeenCalled();
+
+    // At the library root it becomes "Close" and closes the browser
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders header buttons inline with explicit padding and margin spacing for Chromium 69', async () => {
+    vi.mocked(foldersApi.fetchLibraryFolders).mockResolvedValue(mockNestedFolderResponse);
+
+    render(
+      <FocusProvider>
+        <FolderBrowserModal
+          client={client}
+          serverUrl={serverUrl}
+          libraryId={libraryId}
+          initialPath="Sci-Fi/Dune"
+          onClose={vi.fn()}
+          onSelectItem={vi.fn()}
+          onSelectImage={vi.fn()}
+          onStartSlideshow={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Dune: Part One')).toBeInTheDocument();
+    });
+
+    const row = screen.getByTestId('folder-browser-action-row');
+    expect(row.style.display).toBe('flex');
+    expect(row.style.flexWrap).toBe('wrap');
+
+    const backBtn = screen.getByRole('button', { name: 'Back' });
+    expect(row.contains(backBtn)).toBe(true);
+    expect(backBtn.style.padding).toBe('16px 22px');
+    expect(backBtn.style.marginRight).toBe('24px');
+    expect(backBtn.style.borderRadius).toBe('12px');
+
+    const crumb = screen.getByRole('button', { name: 'Sci-Fi' });
+    expect(row.contains(crumb)).toBe(true);
+    expect(crumb.style.padding).toBe('10px 18px');
+    expect(crumb.style.marginRight).toBe('12px');
+
+    const slideshow = screen.getByRole('button', { name: /start slideshow/i });
+    expect(slideshow.style.padding).toBe('16px 24px');
+  });
+
   it('invokes onClose when Close button in header is clicked', async () => {
     const onClose = vi.fn();
     vi.mocked(foldersApi.fetchLibraryFolders).mockResolvedValue(mockRootFolderResponse);
@@ -712,6 +809,537 @@ describe('FolderBrowserModal', () => {
     expect(recoveredImg).toBeInTheDocument();
     expect(recoveredImg.getAttribute('src')).toContain('token=updated-token');
     expect(screen.queryByTestId('image-fallback-icon')).not.toBeInTheDocument();
+  });
+
+  it('navigates deterministically on 1920x1080 real geometry across folders, media cards, photos, header actions, subfolders, and stacked AddToPlaylistModal', async () => {
+    function makeRect(x: number, y: number, width: number, height: number): DOMRect {
+      return {
+        x,
+        y,
+        left: x,
+        top: y,
+        width,
+        height,
+        right: x + width,
+        bottom: y + height,
+        toJSON: () => {},
+      };
+    }
+
+    const richRootResponse: LibraryFolderResponse = {
+      library_id: libraryId,
+      library_name: 'Movies Library',
+      current_path: '',
+      parent_path: undefined,
+      breadcrumbs: [{ name: 'Movies Library', path: '' }],
+      // 8 directories (row 0 = 6 cols, row 1 = 2 cols partial)
+      directories: Array.from({ length: 8 }, (_, idx) => ({
+        name: `Folder ${idx}`,
+        path: `Folder-${idx}`,
+        item_count: idx + 1,
+      })),
+      // 6 media items below
+      items: Array.from({ length: 6 }, (_, idx) => ({
+        id: 500 + idx,
+        title: `Film ${idx}`,
+        subtitle: '2025',
+        poster_url: `/posters/film-${idx}.jpg`,
+        media_type: 'movie',
+      })),
+      // 2 photos below
+      images: [
+        { name: 'still-0.jpg', path: 'still-0.jpg', url: '/img/0.jpg', size_bytes: 102400 },
+        { name: 'still-1.jpg', path: 'still-1.jpg', url: '/img/1.jpg', size_bytes: 204800 },
+      ],
+    };
+
+    const subfolderResponse: LibraryFolderResponse = {
+      library_id: libraryId,
+      library_name: 'Movies Library',
+      current_path: 'Folder-1',
+      parent_path: '',
+      breadcrumbs: [
+        { name: 'Movies Library', path: '' },
+        { name: 'Folder 1', path: 'Folder-1' },
+      ],
+      directories: [],
+      items: [
+        {
+          id: 901,
+          title: 'Subfolder Feature',
+          subtitle: '2026',
+          poster_url: '/posters/sub.jpg',
+          media_type: 'movie',
+        },
+      ],
+      images: [],
+    };
+
+    vi.spyOn(foldersApi, 'fetchLibraryFolders').mockImplementation(async (_client, _libId, path) => {
+      if (path === 'Folder-1') return subfolderResponse;
+      return richRootResponse;
+    });
+
+    function FocusProbe() {
+      const { focusedId, activeTrap } = useFocusContext();
+      return (
+        <>
+          <div data-testid="probe-focus">{focusedId ?? ''}</div>
+          <div data-testid="probe-trap">{activeTrap ?? ''}</div>
+        </>
+      );
+    }
+
+    const apply1080pLayout = () => {
+      const closeEl = document.getElementById('folder-browser-close-btn');
+      if (closeEl) vi.spyOn(closeEl, 'getBoundingClientRect').mockReturnValue(makeRect(56, 60, 140, 56));
+      const crumb0 = document.getElementById('folder-breadcrumb-0');
+      if (crumb0) vi.spyOn(crumb0, 'getBoundingClientRect').mockReturnValue(makeRect(220, 66, 180, 44));
+      const addFolderBtn = document.getElementById('folder-add-to-playlist-btn');
+      if (addFolderBtn) {
+        vi.spyOn(addFolderBtn, 'getBoundingClientRect').mockReturnValue(makeRect(1560, 60, 300, 56));
+      }
+
+      for (let i = 0; i < 8; i++) {
+        const el = document.getElementById(`folder-dir-${i}`);
+        if (el) {
+          const col = i % 6;
+          const row = Math.floor(i / 6);
+          vi.spyOn(el, 'getBoundingClientRect').mockReturnValue(
+            makeRect(56 + col * 304, 220 + row * 136, 280, 112)
+          );
+        }
+      }
+      for (let i = 0; i < 6; i++) {
+        const el = document.getElementById(`folder-item-${500 + i}`);
+        if (el) {
+          vi.spyOn(el, 'getBoundingClientRect').mockReturnValue(
+            makeRect(56 + i * 304, 540, 224, 384)
+          );
+        }
+      }
+      const subItem = document.getElementById('folder-item-901');
+      if (subItem) {
+        vi.spyOn(subItem, 'getBoundingClientRect').mockReturnValue(makeRect(56, 240, 224, 384));
+      }
+      const slideshowBtn = document.getElementById('folder-start-slideshow-btn');
+      if (slideshowBtn) {
+        vi.spyOn(slideshowBtn, 'getBoundingClientRect').mockReturnValue(makeRect(1600, 960, 260, 56));
+      }
+      for (let i = 0; i < 2; i++) {
+        const el = document.getElementById(`folder-image-${i}`);
+        if (el) {
+          vi.spyOn(el, 'getBoundingClientRect').mockReturnValue(
+            makeRect(56 + i * 304, 1040, 280, 220)
+          );
+        }
+      }
+    };
+
+    const onSelectItem = vi.fn();
+
+    render(
+      <FocusProvider>
+        <FocusProbe />
+        <FolderBrowserModal
+          isOpen={true}
+          client={client}
+          serverUrl={serverUrl}
+          libraryId={libraryId}
+          onClose={vi.fn()}
+          onSelectItem={onSelectItem}
+          onSelectImage={vi.fn()}
+          onStartSlideshow={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Folder 0')).toBeInTheDocument();
+    });
+    apply1080pLayout();
+
+    // Initial focus after loading MUST land on the first directory (not Close or random header button)
+    await waitFor(() => {
+      expect(screen.getByTestId('probe-focus').textContent).toBe('folder-dir-0');
+    });
+
+    // Navigate right to Folder 1 -> down to Folder 7 (partial row) -> right at partial row end stays on Folder 7
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+    });
+    expect(screen.getByTestId('probe-focus').textContent).toBe('folder-dir-1');
+
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowDown', keyCode: TVKeys.DOWN });
+    });
+    expect(screen.getByTestId('probe-focus').textContent).toBe('folder-dir-7');
+
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+    });
+    expect(screen.getByTestId('probe-focus').textContent).toBe('folder-dir-7');
+
+    // Navigate down to Film 1 (col 1) -> down to Photo 1 (col 1)
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowDown', keyCode: TVKeys.DOWN });
+    });
+    expect(screen.getByTestId('probe-focus').textContent).toBe('folder-item-501');
+
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowDown', keyCode: TVKeys.DOWN });
+    });
+    expect(screen.getByTestId('probe-focus').textContent).toBe('folder-image-1');
+
+    // Navigate back up to Folder 1 and press Enter to open subfolder
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowUp', keyCode: TVKeys.UP });
+      fireEvent.keyDown(window, { key: 'ArrowUp', keyCode: TVKeys.UP });
+      fireEvent.keyDown(window, { key: 'ArrowUp', keyCode: TVKeys.UP });
+    });
+    expect(screen.getByTestId('probe-focus').textContent).toBe('folder-dir-1');
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'Enter', keyCode: TVKeys.ENTER });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Subfolder Feature')).toBeInTheDocument();
+    });
+    apply1080pLayout();
+
+    // Entering subfolder focuses its first media item
+    await waitFor(() => {
+      expect(screen.getByTestId('probe-focus').textContent).toBe('folder-item-901');
+    });
+
+    // Pressing Tizen Back (10009) returns to parent directory AND restores focus to folder-dir-1
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.BACK_TIZEN }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Folder 1')).toBeInTheDocument();
+    });
+    apply1080pLayout();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('probe-focus').textContent).toBe('folder-dir-1');
+    });
+
+    // Open stacked AddToPlaylistModal via header button and verify closing it preserves folder-browser-modal trap
+    fireEvent.click(document.getElementById('folder-add-to-playlist-btn')!);
+    await waitFor(() => {
+      expect(screen.getByTestId('probe-trap').textContent).toBe('add-to-playlist-modal');
+    });
+
+    fireEvent.click(document.getElementById('add-playlist-close-btn')!);
+    await waitFor(() => {
+      expect(screen.getByTestId('probe-trap').textContent).toBe('folder-browser-modal');
+    });
+  });
+
+  it('preserves exact item selection, visible focus highlight, Enter activation, and self-heals focus after stacked child modal closes', async () => {
+    const folderItemsResponse: LibraryFolderResponse = {
+      library_id: libraryId,
+      library_name: 'Movies Library',
+      current_path: 'Action',
+      parent_path: '',
+      breadcrumbs: [
+        { name: 'Movies Library', path: '' },
+        { name: 'Action', path: 'Action' },
+      ],
+      directories: [],
+      items: [
+        { id: 501, title: 'Mad Max', subtitle: '2015', media_type: 'movie' },
+        { id: 502, title: 'John Wick', subtitle: '2014', media_type: 'movie' },
+        { id: 503, title: 'Mission Impossible', subtitle: '2018', media_type: 'movie' },
+        { id: 504, title: 'Top Gun Maverick', subtitle: '2022', media_type: 'movie' },
+      ],
+      images: [],
+    };
+
+    vi.spyOn(foldersApi, 'fetchLibraryFolders').mockResolvedValue(folderItemsResponse);
+
+    function StackedModalHarness() {
+      const { focusedId, activeTrap, setFocusedId, pushTrap, popTrap } = useFocusContext();
+      const [detailItemId, setDetailItemId] = useState<number | string | null>(null);
+      const [refreshKey, setRefreshKey] = useState(0);
+
+      useEffect(() => {
+        if (detailItemId === null) return;
+        pushTrap('item-detail-modal');
+        setFocusedId('detail-play-btn');
+        return () => {
+          popTrap('item-detail-modal');
+        };
+      }, [detailItemId, pushTrap, popTrap, setFocusedId]);
+
+      return (
+        <div>
+          <div data-testid="probe-focus">{focusedId ?? ''}</div>
+          <div data-testid="probe-trap">{activeTrap ?? ''}</div>
+          <button
+            data-testid="corrupt-focus-outside"
+            onClick={() => setFocusedId('card-home-999')}
+          >
+            Corrupt Focus
+          </button>
+          <button
+            data-testid="trigger-folder-refresh"
+            onClick={() => setRefreshKey((k) => k + 1)}
+          >
+            Refresh Folder
+          </button>
+          <FolderBrowserModal
+            isOpen={true}
+            client={client}
+            serverUrl={serverUrl}
+            libraryId={libraryId}
+            initialPath="Action"
+            refreshKey={refreshKey}
+            onClose={vi.fn()}
+            onSelectItem={(id) => {
+              onSelectSpy(id);
+              setDetailItemId(id);
+            }}
+            onSelectImage={vi.fn()}
+            onStartSlideshow={vi.fn()}
+          />
+          {detailItemId !== null && (
+            <div role="dialog" aria-modal="true" data-testid="mock-item-detail-modal">
+              <button id="detail-play-btn">Play {String(detailItemId)}</button>
+              <button
+                data-testid="close-detail-modal"
+                onClick={() => setDetailItemId(null)}
+              >
+                Back
+              </button>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const { useState, useEffect } = await import('react');
+    const onSelectSpy = vi.fn();
+
+    render(
+      <FocusProvider>
+        <StackedModalHarness />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Mission Impossible')).toBeInTheDocument();
+    });
+
+    // Click item 503 directly -> opens stacked ItemDetailModal
+    const card503 = document.getElementById('folder-item-503')!;
+    act(() => {
+      fireEvent.click(card503);
+    });
+
+    expect(onSelectSpy).toHaveBeenCalledTimes(1);
+    expect(onSelectSpy).toHaveBeenLastCalledWith(503);
+    await waitFor(() => {
+      expect(screen.getByTestId('probe-trap').textContent).toBe('item-detail-modal');
+    });
+
+    // Trigger a folder refresh while ItemDetailModal is stacked on top
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('trigger-folder-refresh'));
+    });
+
+    // Close stacked ItemDetailModal -> focus & visible highlight MUST return to folder-item-503
+    act(() => {
+      fireEvent.click(screen.getByTestId('close-detail-modal'));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('probe-trap').textContent).toBe('folder-browser-modal');
+      expect(screen.getByTestId('probe-focus').textContent).toBe('folder-item-503');
+    });
+
+    const restoredCard = document.getElementById('folder-item-503')!;
+    expect(restoredCard.getAttribute('data-focused')).toBe('true');
+    expect(restoredCard.className).toContain('tv-focus-ring');
+    expect(restoredCard.className).toContain('border-[#FF6B00]');
+
+    // Pressing Enter immediately re-opens that EXACT same item (503)
+    act(() => {
+      fireEvent.keyDown(window, { key: 'Enter', keyCode: TVKeys.ENTER });
+    });
+    expect(onSelectSpy).toHaveBeenCalledTimes(2);
+    expect(onSelectSpy).toHaveBeenLastCalledWith(503);
+
+    // Close detail modal again and verify self-healing if focus is externally corrupted outside modal
+    act(() => {
+      fireEvent.click(screen.getByTestId('close-detail-modal'));
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('probe-focus').textContent).toBe('folder-item-503');
+    });
+
+    act(() => {
+      fireEvent.click(screen.getByTestId('corrupt-focus-outside'));
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('probe-focus').textContent).toBe('folder-item-503');
+    });
+  });
+
+  it('supports fast remote Page-Up / Page-Down (CH_DOWN, PageDown, FAST_FORWARD, CH_UP, PageUp, REWIND) jumping ~5 rows and avoids full-modal re-renders on arrow keys', async () => {
+    const largeFolderResponse: LibraryFolderResponse = {
+      library_id: libraryId,
+      library_name: 'Large Archive',
+      current_path: '',
+      parent_path: undefined,
+      breadcrumbs: [{ name: 'Large Archive', path: '' }],
+      directories: [],
+      // 42 items = 7 rows of 6 columns (1000..1041)
+      items: Array.from({ length: 42 }, (_, idx) => ({
+        id: 1000 + idx,
+        title: `Archive Video ${idx}`,
+        subtitle: '2025',
+        media_type: 'movie',
+      })),
+      images: [],
+    };
+
+    vi.spyOn(foldersApi, 'fetchLibraryFolders').mockResolvedValue(largeFolderResponse);
+    const unlockTokensSpy = vi.spyOn(client, 'getUnlockTokens');
+
+    function FocusProbe() {
+      const { focusedId } = useFocusContext();
+      return <div data-testid="probe-focus">{focusedId ?? ''}</div>;
+    }
+
+    render(
+      <FocusProvider>
+        <FocusProbe />
+        <FolderBrowserModal
+          isOpen={true}
+          client={client}
+          serverUrl={serverUrl}
+          libraryId={libraryId}
+          onClose={vi.fn()}
+          onSelectItem={vi.fn()}
+          onSelectImage={vi.fn()}
+          onStartSlideshow={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('probe-focus').textContent).toBe('folder-item-1000');
+    });
+
+    // Clear render spy after initial load; arrow-key navigation must NOT re-render FolderBrowserModal!
+    unlockTokensSpy.mockClear();
+
+    // Move right twice to col 2 (folder-item-1002)
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+      fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+    });
+    expect(screen.getByTestId('probe-focus').textContent).toBe('folder-item-1002');
+    expect(unlockTokensSpy).not.toHaveBeenCalled();
+
+    // CH_DOWN jumps +5 rows in col 2 -> row 5, col 2 = 1000 + 5*6 + 2 = 1032
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ChannelDown', keyCode: TVKeys.CH_DOWN });
+    });
+    expect(screen.getByTestId('probe-focus').textContent).toBe('folder-item-1032');
+
+    // PageDown (34) clamps cleanly to last row (row 6, col 2 = 1038)
+    act(() => {
+      fireEvent.keyDown(window, { key: 'PageDown', keyCode: 34 });
+    });
+    expect(screen.getByTestId('probe-focus').textContent).toBe('folder-item-1038');
+
+    // CH_UP jumps -5 rows in col 2 -> row 1, col 2 = 1008
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ChannelUp', keyCode: TVKeys.CH_UP });
+    });
+    expect(screen.getByTestId('probe-focus').textContent).toBe('folder-item-1008');
+
+    // REWIND jumps -5 rows and clamps to row 0, col 2 = 1002
+    act(() => {
+      fireEvent.keyDown(window, { key: 'MediaRewind', keyCode: TVKeys.REWIND });
+    });
+    expect(screen.getByTestId('probe-focus').textContent).toBe('folder-item-1002');
+
+    // FAST_FORWARD jumps +5 rows again -> 1032
+    act(() => {
+      fireEvent.keyDown(window, { key: 'MediaFastForward', keyCode: TVKeys.FAST_FORWARD });
+    });
+    expect(screen.getByTestId('probe-focus').textContent).toBe('folder-item-1032');
+
+    // Parent modal STILL never re-rendered across all arrow + page jump keys!
+    expect(unlockTokensSpy).not.toHaveBeenCalled();
+  });
+
+  it('calls onPathChange when navigating to subfolder and climbing back', async () => {
+    const mockSciFiFolderResponse: LibraryFolderResponse = {
+      library_id: libraryId,
+      library_name: 'Movies Library',
+      current_path: 'Sci-Fi',
+      parent_path: '',
+      breadcrumbs: [
+        { name: 'Movies Library', path: '' },
+        { name: 'Sci-Fi', path: 'Sci-Fi' },
+      ],
+      directories: [],
+      items: [],
+      images: [],
+    };
+
+    vi.spyOn(foldersApi, 'fetchLibraryFolders').mockImplementation(async (_client, _libId, path) => {
+      if (path === 'Sci-Fi') {
+        return mockSciFiFolderResponse;
+      }
+      return mockRootFolderResponse;
+    });
+
+    const onPathChangeSpy = vi.fn();
+    const onCloseSpy = vi.fn();
+
+    render(
+      <FocusProvider>
+        <FolderBrowserModal
+          client={client}
+          serverUrl={serverUrl}
+          libraryId={libraryId}
+          initialPath=""
+          isOpen={true}
+          onClose={onCloseSpy}
+          onPathChange={onPathChangeSpy}
+          onSelectItem={vi.fn()}
+          onSelectImage={vi.fn()}
+          onStartSlideshow={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Sci-Fi')).toBeInTheDocument();
+    });
+
+    // Click Sci-Fi folder
+    fireEvent.click(screen.getByText('Sci-Fi'));
+
+    await waitFor(() => {
+      expect(onPathChangeSpy).toHaveBeenCalledWith('Sci-Fi');
+    });
+
+    // Press Back button to go up to parent ('')
+    const backBtn = screen.getByRole('button', { name: /Back/i });
+    fireEvent.click(backBtn);
+
+    await waitFor(() => {
+      expect(onPathChangeSpy).toHaveBeenCalledWith('');
+    });
   });
 });
 

@@ -87,7 +87,11 @@ describe('PlayerScreen Error & HLS Button Scaling', () => {
       </FocusProvider>
     );
 
-    // Trigger error from player driver
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Trigger error from player driver (starts in HLS mode by default)
     act(() => {
       mockDriver.errorCallback?.('Hardware decoding error');
     });
@@ -95,7 +99,7 @@ describe('PlayerScreen Error & HLS Button Scaling', () => {
     expect(screen.getByText('Playback Error')).toBeInTheDocument();
 
     const retryBtn = screen.getByRole('button', { name: /retry playback/i });
-    const hlsBtn = screen.getByRole('button', { name: /play with transcoding/i });
+    const directBtn = screen.getByRole('button', { name: /try direct stream/i });
     const html5Btn = screen.getByRole('button', { name: /try html5 video player/i });
     const exitBtn = screen.getByRole('button', { name: /exit to browse/i });
 
@@ -105,10 +109,10 @@ describe('PlayerScreen Error & HLS Button Scaling', () => {
     expect(retryBtn.className).toContain('rounded-2xl');
     expect(retryBtn.parentElement?.className).toContain('space-y-6');
 
-    expect(hlsBtn.className).toContain('py-6');
-    expect(hlsBtn.className).toContain('px-10');
-    expect(hlsBtn.className).toContain('text-2xl');
-    expect(hlsBtn.className).toContain('rounded-2xl');
+    expect(directBtn.className).toContain('py-6');
+    expect(directBtn.className).toContain('px-10');
+    expect(directBtn.className).toContain('text-2xl');
+    expect(directBtn.className).toContain('rounded-2xl');
 
     expect(html5Btn.className).toContain('py-6');
     expect(html5Btn.className).toContain('px-10');
@@ -119,5 +123,19 @@ describe('PlayerScreen Error & HLS Button Scaling', () => {
     expect(exitBtn.className).toContain('px-10');
     expect(exitBtn.className).toContain('text-2xl');
     expect(exitBtn.className).toContain('rounded-2xl');
+
+    // Switch to Direct Stream and verify symmetric "Play with Transcoding (HLS)" button scaling
+    act(() => {
+      directBtn.click();
+    });
+    act(() => {
+      mockDriver.errorCallback?.('Direct stream error');
+    });
+
+    const hlsBtn = screen.getByRole('button', { name: /play with transcoding/i });
+    expect(hlsBtn.className).toContain('py-6');
+    expect(hlsBtn.className).toContain('px-10');
+    expect(hlsBtn.className).toContain('text-2xl');
+    expect(hlsBtn.className).toContain('rounded-2xl');
   });
 });

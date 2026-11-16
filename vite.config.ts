@@ -29,6 +29,78 @@ function tizenClassicBundlePlugin() {
               property(atRule: any) {
                 atRule.remove();
               },
+              supports(atRule: any) {
+                if (atRule.params && atRule.params.includes('-webkit-hyphens:none')) {
+                  if (atRule.nodes) {
+                    atRule.replaceWith(atRule.nodes);
+                  } else {
+                    atRule.remove();
+                  }
+                } else if (atRule.params && atRule.params.includes('color-mix')) {
+                  atRule.remove();
+                }
+              },
+            },
+            Rule(rule: any) {
+              if (rule.selector && rule.selector.includes(':where(')) {
+                rule.selector = rule.selector.replace(/:where\(([^()]+)\)/g, '$1');
+              }
+            },
+            Declaration(decl: any) {
+              if (decl.value && (decl.value.includes(' in oklab') || decl.value.includes(' in oklch'))) {
+                decl.value = decl.value.replace(/\s+in\s+(?:oklab|oklch)\b/g, '');
+              }
+              if (decl.prop === 'padding-inline') {
+                decl.cloneBefore({ prop: 'padding-left', value: decl.value, important: decl.important });
+                decl.cloneBefore({ prop: 'padding-right', value: decl.value, important: decl.important });
+                decl.remove();
+              } else if (decl.prop === 'padding-block') {
+                decl.cloneBefore({ prop: 'padding-top', value: decl.value, important: decl.important });
+                decl.cloneBefore({ prop: 'padding-bottom', value: decl.value, important: decl.important });
+                decl.remove();
+              } else if (decl.prop === 'padding-inline-start') {
+                decl.prop = 'padding-left';
+              } else if (decl.prop === 'padding-inline-end') {
+                decl.prop = 'padding-right';
+              } else if (decl.prop === 'padding-block-start') {
+                decl.prop = 'padding-top';
+              } else if (decl.prop === 'padding-block-end') {
+                decl.prop = 'padding-bottom';
+              } else if (decl.prop === 'margin-inline') {
+                decl.cloneBefore({ prop: 'margin-left', value: decl.value, important: decl.important });
+                decl.cloneBefore({ prop: 'margin-right', value: decl.value, important: decl.important });
+                decl.remove();
+              } else if (decl.prop === 'margin-block') {
+                decl.cloneBefore({ prop: 'margin-top', value: decl.value, important: decl.important });
+                decl.cloneBefore({ prop: 'margin-bottom', value: decl.value, important: decl.important });
+                decl.remove();
+              } else if (decl.prop === 'margin-inline-start') {
+                decl.prop = 'margin-left';
+              } else if (decl.prop === 'margin-inline-end') {
+                decl.prop = 'margin-right';
+              } else if (decl.prop === 'margin-block-start') {
+                decl.prop = 'margin-top';
+              } else if (decl.prop === 'margin-block-end') {
+                decl.prop = 'margin-bottom';
+              } else if (decl.prop === 'inset-inline') {
+                decl.cloneBefore({ prop: 'left', value: decl.value, important: decl.important });
+                decl.cloneBefore({ prop: 'right', value: decl.value, important: decl.important });
+                decl.remove();
+              } else if (decl.prop === 'inset-block') {
+                decl.cloneBefore({ prop: 'top', value: decl.value, important: decl.important });
+                decl.cloneBefore({ prop: 'bottom', value: decl.value, important: decl.important });
+                decl.remove();
+              } else if (decl.prop === 'scale') {
+                decl.prop = 'transform';
+                decl.value = decl.value.includes('var(--tw-scale-x)')
+                  ? 'scaleX(var(--tw-scale-x)) scaleY(var(--tw-scale-y))'
+                  : `scale(${decl.value})`;
+              } else if (decl.prop === 'translate') {
+                if (decl.value.includes('var(--tw-translate-x)')) {
+                  decl.prop = 'transform';
+                  decl.value = 'translate(var(--tw-translate-x), var(--tw-translate-y))';
+                }
+              }
             },
           });
           unwrapPlugin.postcss = true;
@@ -125,5 +197,6 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: './tests/setup.ts',
+    testTimeout: 10000,
   },
 });

@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   checkMediaCompatibility,
   KNOWN_COMPATIBILITY_INFO,
+  SAMSUNG_TV_HLS_MAX_HEIGHT,
+  hasMissingAudioStream,
   isSupportedOnSamsungTv,
   getPlaybackUrl,
 } from '../../src/player/compatibility';
@@ -49,6 +51,14 @@ describe('Samsung TV Codec Compatibility Matrix', () => {
 
     const html5Mp4 = checkMediaCompatibility('h264', 'aac', 'mp4', true);
     expect(html5Mp4.isSupported).toBe(true);
+  });
+
+  it('flags MKV and AVI containers as requiring HLS remuxing on Samsung TV for reliable seeking', () => {
+    const tvMkv = checkMediaCompatibility('h264', 'eac3', 'mkv', false);
+    expect(tvMkv.isSupported).toBe(false);
+
+    const tvAvi = checkMediaCompatibility('h264', 'aac', 'avi', false);
+    expect(tvAvi.isSupported).toBe(false);
   });
 });
 
@@ -128,5 +138,64 @@ describe('getPlaybackUrl helper', () => {
 
     expect(res.isHls).toBe(true);
     expect(res.url).not.toContain('start_time=');
+  });
+
+  it('generates direct stream URL when forceDirect is true even for remux containers', () => {
+    const res = getPlaybackUrl({
+      serverUrl,
+      itemId: 178,
+      videoCodec: 'h264',
+      audioCodec: 'eac3',
+      container: 'mkv',
+      forceDirect: true,
+      token: 'jwt-token-123',
+    });
+
+    expect(res.isHls).toBe(false);
+    expect(res.url).toBe('http://192.168.1.109:8492/api/v1/stream/178?token=jwt-token-123');
+  });
+
+  it('attaches max_height=1080 on HLS streams to cap vertical 4K/portrait height within Samsung AVPlay H.264 decoder limits while omitting it on Direct Stream', () => {
+    expect(SAMSUNG_TV_HLS_MAX_HEIGHT).toBe(1080);
+
+    const hlsRes = getPlaybackUrl({
+      serverUrl,
+      itemId: 1347,
+      videoCodec: 'hevc',
+      audioCodec: 'aac',
+      container: 'mp4',
+      forceHls: true,
+      maxHeight: SAMSUNG_TV_HLS_MAX_HEIGHT,
+      token: 'jwt-token-123',
+    });
+    expect(hlsRes.isHls).toBe(true);
+    expect(hlsRes.url).toBe(
+      'http://192.168.1.109:8492/api/v1/media/1347/hls/master.m3u8?video_codec=h264&audio_codec=aac&max_height=1080&token=jwt-token-123'
+    );
+
+    const directRes = getPlaybackUrl({
+      serverUrl,
+      itemId: 1347,
+      videoCodec: 'h264',
+      audioCodec: 'aac',
+      container: 'mp4',
+      forceDirect: true,
+      maxHeight: SAMSUNG_TV_HLS_MAX_HEIGHT,
+      token: 'jwt-token-123',
+    });
+    expect(directRes.isHls).toBe(false);
+    expect(directRes.url).toBe('http://192.168.1.109:8492/api/v1/stream/1347?token=jwt-token-123');
+    expect(directRes.url).not.toContain('max_height=');
+  });
+
+  it('detects audio-less video streams via hasMissingAudioStream so PlayerScreen can bypass doomed ffmpeg -map 0:a:0 HLS transcodes', () => {
+    expect(hasMissingAudioStream('h264', undefined)).toBe(true);
+    expect(hasMissingAudioStream('h264', null)).toBe(true);
+    expect(hasMissingAudioStream('h264', '')).toBe(true);
+    expect(hasMissingAudioStream('h264', '   ')).toBe(true);
+    expect(hasMissingAudioStream('hevc', 'none')).toBe(true);
+    expect(hasMissingAudioStream('h264', 'aac')).toBe(false);
+    expect(hasMissingAudioStream(undefined, undefined)).toBe(false);
+    expect(hasMissingAudioStream('', '')).toBe(false);
   });
 });

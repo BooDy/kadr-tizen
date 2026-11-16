@@ -52,16 +52,33 @@ export class PlaybackSessionManager {
     }
   }
 
-  async destroy(): Promise<void> {
+  async flushAndDestroy(positionSeconds?: number): Promise<void> {
+    const currentSessionId = this.sessionId;
     this.isDestroyed = true;
     this.currentStartId++;
-    if (!this.sessionId) return;
-    const currentSessionId = this.sessionId;
     this.sessionId = null;
+    if (!currentSessionId) return;
+
+    if (
+      positionSeconds !== undefined &&
+      Number.isFinite(positionSeconds) &&
+      positionSeconds >= 0
+    ) {
+      try {
+        await reportSessionProgress(this.client, currentSessionId, positionSeconds);
+      } catch {
+        // Catches any error silently to avoid disrupting exit
+      }
+    }
+
     try {
       await endPlaybackSession(this.client, currentSessionId);
     } catch {
       // Catches any error silently
     }
+  }
+
+  async destroy(): Promise<void> {
+    return this.flushAndDestroy();
   }
 }

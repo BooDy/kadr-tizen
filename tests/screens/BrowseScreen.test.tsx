@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { FocusProvider } from '../../src/navigation/FocusContext';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { FocusProvider, useFocusContext } from '../../src/navigation/FocusContext';
 import { BrowseScreen } from '../../src/screens/BrowseScreen';
 import { ApiClient } from '../../src/api/client';
 import * as screensApi from '../../src/api/screens';
+import * as librariesApi from '../../src/api/libraries';
+import * as playlistsApi from '../../src/api/playlists';
 import { ScreenLayout } from '../../src/types/ast';
 import { TVKeys } from '../../src/navigation/keys';
 
@@ -90,6 +92,7 @@ describe('BrowseScreen', () => {
       { id: 'movies', title: 'Movies' },
       { id: 'shows', title: 'Shows' },
     ]);
+    vi.spyOn(librariesApi, 'fetchLibraries').mockResolvedValue([]);
   });
 
   it('loads dynamic screens from server and renders custom library tabs in sidebar', async () => {
@@ -266,8 +269,8 @@ describe('BrowseScreen', () => {
     expect(logo).toHaveAttribute('src', './kadr-logo.png');
 
     const sidebar = screen.getByTestId('tv-sidebar');
-    expect(sidebar).toHaveClass('bg-[#3B1111]');
-    expect(sidebar.className).toContain('border-[rgba(245,229,229,0.08)]');
+    expect(sidebar).toHaveClass('bg-[#0d0e15]');
+    expect(sidebar.className).toContain('border-[rgba(255,255,255,0.05)]');
 
     expect(screen.getByText('Home')).toBeInTheDocument();
     expect(screen.getByText('Movies')).toBeInTheDocument();
@@ -286,7 +289,7 @@ describe('BrowseScreen', () => {
     });
   });
 
-  it('renders sidebar navigation items with 32px spacing (gap-8) in an auto-scroll container', async () => {
+  it('renders sidebar navigation items in an auto-scroll container with 10px card spacing (no flex gap on Chromium 69)', async () => {
     vi.spyOn(screensApi, 'fetchScreenLayout').mockResolvedValue(mockHomeLayout);
 
     render(
@@ -305,13 +308,15 @@ describe('BrowseScreen', () => {
       expect(screen.getByTestId('sidebar-items-container')).toBeInTheDocument();
     });
     const container = screen.getByTestId('sidebar-items-container');
-    expect(container.className).toContain('gap-8');
-    expect(container.className).not.toContain('gap-[148px]');
+    expect(container.className).not.toContain('gap-');
+    const homeCard = document.getElementById('nav-screen-home');
+    expect(homeCard?.style.marginBottom).toBe('10px');
+    expect(homeCard?.style.borderRadius).toBe('12px');
     expect(container.className).toContain('overflow-y-auto');
     expect(container.className).toContain('scrollbar-none');
   });
 
-  it('calls scrollIntoView when a sidebar button receives focus', async () => {
+  it('calls instant scrollIntoView only when a focused sidebar button is clipped outside the scroll container', async () => {
     vi.spyOn(screensApi, 'fetchScreenLayout').mockResolvedValue(mockHomeLayout);
     const scrollIntoViewMock = vi.fn();
     window.HTMLElement.prototype.scrollIntoView = scrollIntoViewMock;
@@ -333,13 +338,120 @@ describe('BrowseScreen', () => {
       expect(document.activeElement?.id).toBe('hero-play-hero-home');
     });
 
-    // Move focus from content to sidebar
-    fireEvent.keyDown(window, { key: 'ArrowLeft', keyCode: TVKeys.LEFT });
+    const container = screen.getByTestId('sidebar-items-container');
+    const homeCard = document.getElementById('nav-screen-home')!;
+    const moviesCard = document.getElementById('nav-screen-movies')!;
 
+    vi.spyOn(container, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 120,
+      left: 0,
+      top: 120,
+      width: 320,
+      height: 400,
+      right: 320,
+      bottom: 520,
+      toJSON: () => {},
+    });
+    // Home card is fully visible inside container -> should NOT trigger scrollIntoView
+    vi.spyOn(homeCard, 'getBoundingClientRect').mockReturnValue({
+      x: 16,
+      y: 140,
+      left: 16,
+      top: 140,
+      width: 288,
+      height: 72,
+      right: 304,
+      bottom: 212,
+      toJSON: () => {},
+    });
+    // Movies card is clipped below container -> MUST trigger instant scrollIntoView (never smooth)
+    vi.spyOn(moviesCard, 'getBoundingClientRect').mockReturnValue({
+      x: 16,
+      y: 490,
+      left: 16,
+      top: 490,
+      width: 288,
+      height: 72,
+      right: 304,
+      bottom: 562,
+      toJSON: () => {},
+    });
+
+    // Move focus from content to visible Home sidebar item -> no scroll needed
+    fireEvent.keyDown(window, { key: 'ArrowLeft', keyCode: TVKeys.LEFT });
+    expect(scrollIntoViewMock).not.toHaveBeenCalled();
+
+    // Move focus down to clipped Movies sidebar item -> instant scrollIntoView({ block: 'nearest' })
+    fireEvent.keyDown(window, { key: 'ArrowDown', keyCode: TVKeys.DOWN });
+    expect(scrollIntoViewMock).toHaveBeenCalledTimes(1);
     expect(scrollIntoViewMock).toHaveBeenCalledWith({
       block: 'nearest',
-      behavior: 'smooth',
     });
+  });
+
+  it('never steals focus onto background BrowseScreen cards when refreshKey updates while a modal is active', async () => {
+    const { useEffect } = await import('react');
+    vi.spyOn(screensApi, 'fetchScreenLayout').mockResolvedValue(mockHomeLayout);
+
+    function ModalFocusHarness({ refreshKey }: { refreshKey: number }) {
+      const { focusedId, setFocusedId, pushTrap, popTrap } = useFocusContext();
+      useEffect(() => {
+        pushTrap('folder-browser-modal');
+        setFocusedId('folder-item-503');
+        return () => popTrap('folder-browser-modal');
+      }, [pushTrap, popTrap, setFocusedId]);
+
+      return (
+        <div>
+          <div data-testid="probe-focused-id">{focusedId ?? 'null'}</div>
+          <button data-testid="clear-focus" onClick={() => setFocusedId(null)}>
+            Clear Focus
+          </button>
+          <BrowseScreen
+            client={mockClient}
+            serverUrl="http://localhost:8492"
+            onSelectItem={vi.fn()}
+            onPlayItem={vi.fn()}
+            onSwitchProfile={vi.fn()}
+            refreshKey={refreshKey}
+          />
+          <div role="dialog" aria-modal="true" data-testid="stacked-modal">
+            <button id="folder-item-503">Folder Item 503</button>
+          </div>
+        </div>
+      );
+    }
+
+    const { rerender } = render(
+      <FocusProvider>
+        <ModalFocusHarness refreshKey={0} />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Home Featured Movie')).toBeInTheDocument();
+    });
+
+    // Because modal trap & [role="dialog"][aria-modal="true"] are mounted, initial load must NOT steal focus
+    expect(screen.getByTestId('probe-focused-id').textContent).toBe('folder-item-503');
+
+    // Clear focus while modal trap is active and trigger background BrowseScreen refreshKey increment
+    fireEvent.click(screen.getByTestId('clear-focus'));
+    expect(screen.getByTestId('probe-focused-id').textContent).toBe('null');
+
+    rerender(
+      <FocusProvider>
+        <ModalFocusHarness refreshKey={1} />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(screensApi.fetchScreenLayout).toHaveBeenCalledTimes(2);
+    });
+
+    // Focus must NOT be stolen onto hero-play-hero-home
+    expect(screen.getByTestId('probe-focused-id').textContent).toBe('null');
   });
 
   it('switches tabs to Movies and Shows when sidebar buttons are activated', async () => {
@@ -586,6 +698,8 @@ describe('BrowseScreen', () => {
     // Initially, Hero Play button has focus, so sidebar is collapsed
     expect(sidebar.classList.contains('w-28')).toBe(true);
     expect(sidebar.classList.contains('w-96')).toBe(false);
+    expect(screen.getByTestId('nav-screen-home-card').style.display).toBe('none');
+    expect(screen.getByTestId('nav-screen-home-tile').style.display).toBe('flex');
 
     // Press ArrowLeft from leftmost content element (hero play button) to bridge to sidebar
     fireEvent.keyDown(window, { key: 'ArrowLeft', keyCode: TVKeys.LEFT });
@@ -594,11 +708,15 @@ describe('BrowseScreen', () => {
     expect(sidebar.classList.contains('w-96')).toBe(true);
     expect(sidebar.classList.contains('w-28')).toBe(false);
 
-    // Label for Home button should be 'inline' and large text-3xl
+    // Expanded card (title, subtitle, path chip) is visible, collapsed tile is hidden
     const homeLabel = screen.getByText('Home');
-    expect(homeLabel.className).toContain('inline');
-    expect(homeLabel.className).toContain('text-3xl');
-    expect(homeLabel.className).not.toContain('hidden');
+    expect(homeLabel.className).toContain('text-lg');
+    expect(screen.getByTestId('nav-screen-home-card').style.display).toBe('flex');
+    expect(screen.getByTestId('nav-screen-home-tile').style.display).toBe('none');
+    expect(screen.getByText('Featured & continue watching')).toBeInTheDocument();
+    expect(screen.getByText('/home')).toBeInTheDocument();
+    expect(screen.getByText('[OK] Open')).toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-library-count').style.display).not.toBe('none');
 
     // Press ArrowRight to return to content
     fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
@@ -1113,6 +1231,236 @@ describe('BrowseScreen', () => {
     });
 
     expect(screen.queryByRole('button', { name: /Browse Folders/i })).not.toBeInTheDocument();
+  });
+
+  it('displays only Home and actual server libraries in sidebar (excluding unbacked built-in Movies and TV Shows screens)', async () => {
+    vi.spyOn(screensApi, 'fetchScreens').mockResolvedValue([
+      { id: 'home', title: 'Home' },
+      { id: 'movies', title: 'Movies' },
+      { id: 'shows', title: 'TV Shows' },
+      { id: 'lib-series-uuid', title: 'Series' },
+    ]);
+    vi.spyOn(librariesApi, 'fetchLibraries').mockResolvedValue([
+      { id: 'lib-series-uuid', name: 'Series', media_type: 'show', is_private: false },
+    ]);
+    const layoutSpy = vi.spyOn(screensApi, 'fetchScreenLayout').mockImplementation(async (_client, screenId) => ({
+      id: screenId,
+      title: screenId === 'lib-series-uuid' ? 'Series' : 'Home',
+      widgets: [],
+    }));
+
+    render(
+      <FocusProvider>
+        <BrowseScreen
+          client={mockClient}
+          serverUrl="http://localhost:8492"
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+          onSwitchProfile={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Home')).toBeInTheDocument();
+      expect(screen.getByText('Series')).toBeInTheDocument();
+    });
+
+    // Built-in placeholder screens not backed by any library on the server must not appear in sidebar
+    expect(screen.queryByText('Movies')).not.toBeInTheDocument();
+    expect(screen.queryByText('TV Shows')).not.toBeInTheDocument();
+
+    // Clicking Series loads the Series library screen by its ID
+    fireEvent.click(screen.getByRole('button', { name: /Series/i }));
+    await waitFor(() => {
+      expect(layoutSpy).toHaveBeenCalledWith(mockClient, 'lib-series-uuid');
+    });
+  });
+
+  it('renders Playlists sidebar tab, loads PlaylistsView without fetchScreenLayout, and bridges D-pad focus between sidebar and playlists', async () => {
+    const layoutSpy = vi
+      .spyOn(screensApi, 'fetchScreenLayout')
+      .mockResolvedValue(mockHomeLayout);
+    vi.spyOn(playlistsApi, 'fetchPlaylists').mockResolvedValue([
+      {
+        id: 'pl-1',
+        name: 'My Sci-Fi Queue',
+        owner_user_id: 'user-1',
+        owner_username: 'boody',
+        is_public: false,
+        is_editable: true,
+        visible_item_count: 2,
+        locked_item_count: 0,
+        total_duration_seconds: 5400,
+        cover_poster_urls: [],
+        created_at: 1730000000,
+        updated_at: 1730001000,
+      },
+      {
+        id: 'pl-2',
+        name: 'Second Column Queue',
+        owner_user_id: 'user-1',
+        owner_username: 'boody',
+        is_public: true,
+        is_editable: true,
+        visible_item_count: 3,
+        locked_item_count: 0,
+        total_duration_seconds: 7200,
+        cover_poster_urls: [],
+        created_at: 1730000100,
+        updated_at: 1730001100,
+      },
+    ]);
+
+    const onOpenPlaylist = vi.fn();
+
+    render(
+      <FocusProvider>
+        <BrowseScreen
+          client={mockClient}
+          serverUrl="http://localhost:8492"
+          currentUserId="user-1"
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+          onSwitchProfile={vi.fn()}
+          onOpenPlaylist={onOpenPlaylist}
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(document.getElementById('nav-screen-playlists')).not.toBeNull();
+    });
+
+    const playlistsNav = document.getElementById('nav-screen-playlists')!;
+    fireEvent.click(playlistsNav);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('playlists-view')).toBeInTheDocument();
+      expect(screen.getByText('My Sci-Fi Queue')).toBeInTheDocument();
+      expect(document.getElementById('playlist-card-pl-1')?.className).toContain('tv-focus-ring');
+    });
+
+    // Must not request AST layout for virtual 'playlists' screen
+    expect(layoutSpy).not.toHaveBeenCalledWith(mockClient, 'playlists');
+
+    // Focus sidebar Playlists item via Escape, then ArrowRight bridges back into playlist card
+    act(() => {
+      fireEvent.keyDown(window, { key: 'Escape' });
+    });
+    expect(playlistsNav.className).toContain('tv-focus-ring');
+
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+    });
+    expect(document.getElementById('playlist-card-pl-1')?.className).toContain('tv-focus-ring');
+
+    // ArrowLeft from leftmost col 0 playlist card bridges back to sidebar nav-screen-playlists
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowLeft', keyCode: TVKeys.LEFT });
+    });
+    expect(playlistsNav.className).toContain('tv-focus-ring');
+
+    // Clicking playlist card invokes onOpenPlaylist
+    fireEvent.click(screen.getByTestId('playlist-card-pl-1'));
+    expect(onOpenPlaylist).toHaveBeenCalledWith('pl-1');
+  });
+
+  it('hides Browse Folders button when library path starts with plugin://', async () => {
+    vi.spyOn(screensApi, 'fetchScreenLayout').mockResolvedValue(mockMoviesLayout);
+    const pluginLibraries = [
+      {
+        id: 'lib-iptv',
+        name: 'Live TV',
+        type: 'movie' as const,
+        is_private: false,
+        path: 'plugin://iptv/channels',
+      } as any,
+    ];
+
+    render(
+      <FocusProvider>
+        <BrowseScreen
+          client={mockClient}
+          serverUrl="http://localhost:8492"
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+          onSwitchProfile={vi.fn()}
+          onBrowseFolder={vi.fn()}
+          libraries={pluginLibraries}
+          initialTab="lib-iptv"
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Feature Films')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByRole('button', { name: /Browse Folders/i })).not.toBeInTheDocument();
+  });
+
+  it('notifies onTabChange when activeTab changes', async () => {
+    vi.spyOn(screensApi, 'fetchScreenLayout').mockImplementation(async (_client, screenId) => {
+      if (screenId === 'movies') return mockMoviesLayout;
+      return mockHomeLayout;
+    });
+
+    const onTabChangeSpy = vi.fn();
+
+    render(
+      <FocusProvider>
+        <BrowseScreen
+          client={mockClient}
+          serverUrl="http://localhost:8492"
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+          onSwitchProfile={vi.fn()}
+          onTabChange={onTabChangeSpy}
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^Movies$/i })).toBeInTheDocument();
+    });
+
+    // Click Movies tab
+    fireEvent.click(screen.getByRole('button', { name: /^Movies$/i }));
+
+    await waitFor(() => {
+      expect(onTabChangeSpy).toHaveBeenCalledWith('movies');
+    });
+  });
+
+  it('restores initialFocusId and notifies onContentFocusChange when focus changes', async () => {
+    vi.spyOn(screensApi, 'fetchScreenLayout').mockResolvedValue(mockHomeLayout);
+
+    const onContentFocusChangeSpy = vi.fn();
+
+    render(
+      <FocusProvider>
+        <BrowseScreen
+          client={mockClient}
+          serverUrl="http://localhost:8492"
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+          onSwitchProfile={vi.fn()}
+          initialFocusId="card-carousel-home-201"
+          onContentFocusChange={onContentFocusChangeSpy}
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(document.getElementById('card-carousel-home-201')).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(document.getElementById('card-carousel-home-201')?.className).toContain('tv-focus-ring');
+    });
+
+    expect(onContentFocusChangeSpy).toHaveBeenCalledWith('card-carousel-home-201');
   });
 });
 

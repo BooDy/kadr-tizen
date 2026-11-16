@@ -71,7 +71,7 @@ describe('PlayerScreen Error Handling, Technical Details Modal & Log Relay', () 
 
     fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: any) => {
       const url = typeof input === 'string' ? input : input?.url || String(input);
-      if (url.includes('/api/v1/stream/')) {
+      if (url.includes('/api/v1/stream/') || url.includes('/hls/master.m3u8')) {
         return {
           ok: false,
           status: 404,
@@ -238,7 +238,7 @@ describe('PlayerScreen Error Handling, Technical Details Modal & Log Relay', () 
       if (url.includes(':9999/log')) {
         throw new Error('Connection refused to :9999');
       }
-      if (url.includes('/api/v1/stream/')) {
+      if (url.includes('/api/v1/stream/') || url.includes('/hls/master.m3u8')) {
         return {
           ok: false,
           status: 404,

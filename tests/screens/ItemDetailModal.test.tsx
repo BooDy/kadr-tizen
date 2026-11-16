@@ -101,7 +101,7 @@ describe('ItemDetailModal', () => {
     );
 
     expect(screen.getByText('Inception')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Play/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Play$/i })).toBeInTheDocument();
     expect(screen.queryByText(/Resume/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Play from Beginning/i)).not.toBeInTheDocument();
 
@@ -123,7 +123,7 @@ describe('ItemDetailModal', () => {
       </FocusProvider>
     );
 
-    expect(screen.getByRole('button', { name: /Play/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Play$/i })).toBeInTheDocument();
     expect(screen.queryByText(/Resume/i)).not.toBeInTheDocument();
   });
 
@@ -189,7 +189,7 @@ describe('ItemDetailModal', () => {
       </FocusProvider>
     );
 
-    const playBtn = screen.getByRole('button', { name: /Play/i });
+    const playBtn = screen.getByRole('button', { name: /^Play$/i });
     fireEvent.click(playBtn);
 
     expect(onPlay).toHaveBeenCalledTimes(1);
@@ -298,7 +298,7 @@ describe('ItemDetailModal', () => {
     );
 
     expect(screen.getByText('Minimal Movie')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Play/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Play$/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Back/i })).toBeInTheDocument();
   });
 
@@ -349,6 +349,11 @@ describe('ItemDetailModal', () => {
       fireEvent.keyDown(window, { key: 'ArrowRight' });
     });
     expect(screen.getByTestId('focused-id').textContent).toBe('detail-restart-btn');
+
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowRight' });
+    });
+    expect(screen.getByTestId('focused-id').textContent).toBe('detail-add-playlist-btn');
 
     act(() => {
       fireEvent.keyDown(window, { key: 'ArrowRight' });
@@ -708,9 +713,10 @@ describe('ItemDetailModal', () => {
       const posterImg = screen.getAllByAltText('Severance').find((img) => img.getAttribute('src')?.includes('poster'));
       expect(posterImg?.className).toContain('mr-10');
 
-      // Action button has !py-6
+      // Action button has !py-4 and mr-4 spacing
       const resumeBtn = screen.getByRole('button', { name: /Resume Next/i });
-      expect(resumeBtn.className).toContain('!py-6');
+      expect(resumeBtn.className).toContain('!py-4');
+      expect(resumeBtn.className).toContain('mr-4');
 
       // Season tab has mr-3
       const seasonTab1 = screen.getByRole('button', { name: /Season 1/i });
@@ -746,7 +752,7 @@ describe('ItemDetailModal', () => {
       expect(onPlay).toHaveBeenCalledWith(99, 0);
     });
 
-    it('renders primary video action buttons with enlarged padding, gap-8 spacing, and text-4xl font size', async () => {
+    it('renders primary and secondary video action buttons with template padding and Chromium 69 mr-4 spacing', async () => {
       const { rerender } = render(
         <FocusProvider>
           <ItemDetailModal
@@ -757,11 +763,13 @@ describe('ItemDetailModal', () => {
           />
         </FocusProvider>
       );
-      const playBtn = screen.getByRole('button', { name: /play/i });
-      expect(playBtn.className).toContain('!py-6');
-      expect(playBtn.className).toContain('!px-12');
-      expect(playBtn.className).toContain('!text-4xl');
-      expect(playBtn.parentElement?.className).toContain('gap-8');
+      const playBtn = screen.getByRole('button', { name: /^play$/i });
+      expect(playBtn.className).toContain('!py-4');
+      expect(playBtn.className).toContain('!px-6');
+      expect(playBtn.className).toContain('mr-4');
+      expect(playBtn.style.padding).toBe('16px 24px');
+      expect(playBtn.style.marginRight).toBe('16px');
+      expect(playBtn.parentElement?.className).not.toContain('gap-');
 
       // Test with resume position and folder path
       rerender(
@@ -787,17 +795,474 @@ describe('ItemDetailModal', () => {
       const restartBtn = screen.getByRole('button', { name: /play from beginning/i });
       const browseBtn = screen.getByRole('button', { name: /browse folder/i });
 
-      expect(resumeBtn.className).toContain('!py-6');
-      expect(resumeBtn.className).toContain('!px-12');
-      expect(resumeBtn.className).toContain('!text-4xl');
+      expect(resumeBtn.className).toContain('!py-4');
+      expect(resumeBtn.className).toContain('!px-6');
+      expect(resumeBtn.className).toContain('mr-4');
+      expect(resumeBtn.style.padding).toBe('16px 24px');
 
-      expect(restartBtn.className).toContain('!py-6');
-      expect(restartBtn.className).toContain('!px-12');
-      expect(restartBtn.className).toContain('!text-4xl');
+      expect(restartBtn.className).toContain('!py-4');
+      expect(restartBtn.className).toContain('!px-5');
+      expect(restartBtn.className).toContain('mr-4');
+      expect(restartBtn.style.padding).toBe('16px 22px');
 
-      expect(browseBtn.className).toContain('!py-6');
-      expect(browseBtn.className).toContain('!px-12');
-      expect(browseBtn.className).toContain('!text-4xl');
+      expect(browseBtn.className).toContain('!py-4');
+      expect(browseBtn.className).toContain('!px-5');
+      expect(browseBtn.className).toContain('mr-4');
+      expect(browseBtn.style.padding).toBe('16px 22px');
+    });
+
+    it('renders template hero breadcrumb, technical format chips, 16:9 landscape episode cards with WATCHED/RESUME status, and remote legend footer', () => {
+      render(
+        <FocusProvider>
+          <ItemDetailModal
+            isOpen={true}
+            item={{
+              ...mockShowDetail,
+              release_year: 2024,
+              genres: ['Historical Drama', 'Action'],
+              technical: {
+                resolution: '4K',
+                video_codec: 'hevc',
+                audio_codec: 'truehd',
+                audio_channels: 6,
+                container: 'mkv',
+              },
+            }}
+            serverUrl="http://localhost:8492"
+            onPlay={vi.fn()}
+            onClose={vi.fn()}
+            onBrowseFolder={vi.fn()}
+          />
+        </FocusProvider>
+      );
+
+      // Breadcrumb & technical chips
+      expect(screen.getByTestId('detail-breadcrumb')).toHaveTextContent('TV Shows');
+      expect(screen.getByTestId('detail-breadcrumb')).toHaveTextContent('Severance');
+      expect(screen.getByText('HEVC')).toBeInTheDocument();
+      expect(screen.getByText('4K')).toBeInTheDocument();
+      expect(screen.getByText(/TRUEHD/i)).toBeInTheDocument();
+      expect(screen.getByText('Historical Drama, Action')).toBeInTheDocument();
+
+      // 16:9 episode cards with WATCHED and RESUME badges
+      expect(screen.getByText('WATCHED')).toBeInTheDocument();
+      expect(screen.getByText('RESUME')).toBeInTheDocument();
+      const ep1Card = document.getElementById('episode-card-206');
+      expect(ep1Card?.querySelector('.aspect-video')).not.toBeNull();
+
+      // Remote legend footer & Channel Up/Down season switch
+      expect(screen.getByTestId('detail-remote-footer')).toBeInTheDocument();
+      act(() => {
+        fireEvent.keyDown(window, { keyCode: TVKeys.CH_UP });
+      });
+      expect(screen.getByText('Season 2 Premiere')).toBeInTheDocument();
+    });
+
+    it('supports Add to Playlist for movies and TV shows (with selected season)', () => {
+      const onAddToPlaylist = vi.fn();
+
+      const { rerender } = render(
+        <FocusProvider>
+          <ItemDetailModal
+            isOpen={true}
+            item={{ ...mockMovieWithoutResume, id: 42 }}
+            serverUrl="http://localhost:8492"
+            onPlay={vi.fn()}
+            onClose={vi.fn()}
+            onAddToPlaylist={onAddToPlaylist}
+          />
+        </FocusProvider>
+      );
+
+      const addMovieBtn = screen.getByRole('button', { name: /Add to Playlist/i });
+      expect(addMovieBtn).toBeInTheDocument();
+      fireEvent.click(addMovieBtn);
+      expect(onAddToPlaylist).toHaveBeenCalledWith({
+        kind: 'item',
+        itemId: 42,
+        title: 'Inception',
+      });
+
+      onAddToPlaylist.mockClear();
+
+      rerender(
+        <FocusProvider>
+          <ItemDetailModal
+            isOpen={true}
+            item={mockShowDetail}
+            serverUrl="http://localhost:8492"
+            onPlay={vi.fn()}
+            onClose={vi.fn()}
+            onAddToPlaylist={onAddToPlaylist}
+          />
+        </FocusProvider>
+      );
+
+      // Switch to Season 2 first
+      fireEvent.click(screen.getByText('Season 2'));
+      fireEvent.click(screen.getByRole('button', { name: /Add to Playlist/i }));
+      expect(onAddToPlaylist).toHaveBeenCalledWith({
+        kind: 'show',
+        showId: 205,
+        title: 'Severance',
+        seasons: [1, 2],
+        defaultSeason: 2,
+      });
+    });
+
+    it('hides Browse Folder for plugin:// paths and displays LIVE badge for live_channel or zero-duration items', () => {
+      render(
+        <FocusProvider>
+          <ItemDetailModal
+            isOpen={true}
+            item={{
+              id: 777,
+              title: 'News 24 Live',
+              media_type: 'live_channel',
+              duration_seconds: 0,
+              library_id: 'lib-iptv',
+              folder_path: 'plugin://iptv/news',
+            }}
+            serverUrl="http://localhost:8492"
+            onPlay={vi.fn()}
+            onClose={vi.fn()}
+            onBrowseFolder={vi.fn()}
+          />
+        </FocusProvider>
+      );
+
+      expect(screen.queryByRole('button', { name: /browse folder/i })).not.toBeInTheDocument();
+      expect(screen.getByTestId('detail-live-badge')).toHaveTextContent('LIVE');
+      expect(screen.queryByText(/^0m$/i)).not.toBeInTheDocument();
+    });
+
+    it('renders Play (0ms) instead of Resume when movie playback_progress >= 0.9 (completed)', () => {
+      const onPlay = vi.fn();
+      render(
+        <FocusProvider>
+          <ItemDetailModal
+            isOpen={true}
+            item={{
+              ...mockMovieWithResume,
+              resume_position_seconds: 5700,
+              resume_position_ms: 5700000,
+              duration_ms: 6000000,
+              card: {
+                id: 1,
+                title: 'Interstellar',
+                media_type: 'movie',
+                playback_progress: 0.95,
+              },
+            }}
+            serverUrl="http://localhost:8492"
+            onPlay={onPlay}
+            onClose={vi.fn()}
+          />
+        </FocusProvider>
+      );
+
+      expect(screen.queryByText(/Resume/i)).not.toBeInTheDocument();
+      const playBtn = screen.getByRole('button', { name: /^Play$/i });
+      fireEvent.click(playBtn);
+      expect(onPlay).toHaveBeenCalledWith('movie-1', 0);
+    });
+
+    it('passes 0ms (not 100 sentinel) when clicking an already-watched episode (playback_progress >= 0.9)', () => {
+      const onPlay = vi.fn();
+      render(
+        <FocusProvider>
+          <ItemDetailModal
+            isOpen={true}
+            item={mockShowDetail}
+            serverUrl="http://localhost:8492"
+            onPlay={onPlay}
+            onClose={vi.fn()}
+          />
+        </FocusProvider>
+      );
+
+      // Episode 1 ("Good News About Hell") has playback_progress: 1.0 (watched)
+      fireEvent.click(screen.getByText('Good News About Hell'));
+      expect(onPlay).toHaveBeenCalledWith(
+        206,
+        0,
+        'Good News About Hell',
+        undefined,
+        expect.any(Array),
+        0
+      );
+    });
+
+    it('preserves tiny non-zero episode progress (<0.5%) as sentinel 1 and restores initialSelectedSeason', () => {
+      const onPlay = vi.fn();
+      const showTinyProgress: MediaItemDetail = {
+        ...mockShowDetail,
+        episodes: [
+          { id: 206, title: 'Ep 1', season: 1, episode: 1, playback_progress: 0.003 },
+          { id: 301, title: 'S2 Ep 1', season: 2, episode: 1, playback_progress: 0 },
+        ],
+      };
+
+      render(
+        <FocusProvider>
+          <ItemDetailModal
+            isOpen={true}
+            item={showTinyProgress}
+            serverUrl="http://localhost:8492"
+            initialSelectedSeason={2}
+            onClose={vi.fn()}
+            onPlay={onPlay}
+          />
+        </FocusProvider>
+      );
+
+      // Season 2 episode is immediately visible because initialSelectedSeason={2}
+      expect(screen.getByText('S2 Ep 1')).toBeInTheDocument();
+
+      // Resume Next button still targets Ep 1 with sentinel >= 1 (never 0)
+      fireEvent.click(screen.getByRole('button', { name: /Resume Next/i }));
+      expect(onPlay).toHaveBeenCalledWith(206, 1, 'Ep 1', undefined, expect.any(Array), 0);
+    });
+
+    it('restores initialFocusedId when valid, falls back cleanly to default when invalid, and reports view state changes', () => {
+      const onViewStateChange = vi.fn();
+      const onPlay = vi.fn();
+
+      function FocusTestWrapper({ item }: { item: MediaItemDetail }) {
+        const { setFocusedId } = useFocusContext();
+        return (
+          <>
+            <button
+              data-testid="move-focus-btn"
+              onClick={() => setFocusedId('detail-close-btn')}
+            />
+            <ItemDetailModal
+              isOpen={true}
+              item={item}
+              serverUrl="http://localhost:8492"
+              initialSelectedSeason={1}
+              initialFocusedId="season-tab-1"
+              onViewStateChange={onViewStateChange}
+              onClose={vi.fn()}
+              onPlay={onPlay}
+            />
+          </>
+        );
+      }
+
+      const { rerender, unmount } = render(
+        <FocusProvider>
+          <FocusTestWrapper item={mockShowDetail} />
+        </FocusProvider>
+      );
+
+      const season1Btn = screen.getByRole('button', { name: /Season 1/i });
+      expect(document.activeElement).toBe(season1Btn);
+      expect(onViewStateChange).toHaveBeenCalledWith({
+        selectedSeason: 1,
+        lastFocusedId: 'season-tab-1',
+      });
+
+      // User moves focus to another element (e.g. Back/close button via focus context)
+      const backBtn = screen.getByRole('button', { name: /Back/i });
+      fireEvent.click(screen.getByTestId('move-focus-btn'));
+      expect(document.activeElement).toBe(backBtn);
+
+      // Updating item props so primaryBtnId flips (all episodes watched -> detail-play-btn instead of detail-resume-btn)
+      // must NOT yank focus back to initialFocusedId
+      const allWatchedShowDetail: MediaItemDetail = {
+        ...mockShowDetail,
+        episodes: (mockShowDetail.episodes || []).map((ep) => ({
+          ...ep,
+          playback_progress: 1.0,
+          badge: undefined,
+        })),
+      };
+
+      rerender(
+        <FocusProvider>
+          <FocusTestWrapper item={allWatchedShowDetail} />
+        </FocusProvider>
+      );
+
+      // Focus must remain on the active back button and NOT yank back to season-tab-1
+      expect(document.activeElement).toBe(backBtn);
+
+      unmount();
+
+      // When invalid initialFocusedId is provided, it falls back cleanly to primary button and reports it
+      const onViewStateChangeFallback = vi.fn();
+      render(
+        <FocusProvider>
+          <ItemDetailModal
+            isOpen={true}
+            item={mockShowDetail}
+            serverUrl="http://localhost:8492"
+            initialFocusedId="non-existent-button-id"
+            onViewStateChange={onViewStateChangeFallback}
+            onClose={vi.fn()}
+            onPlay={onPlay}
+          />
+        </FocusProvider>
+      );
+
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: /Resume Next/i }));
+      expect(onViewStateChangeFallback).toHaveBeenCalledWith({
+        selectedSeason: 1,
+        lastFocusedId: 'detail-resume-btn',
+      });
+    });
+  });
+
+  describe('Stacked FolderBrowserModal -> ItemDetailModal Back Navigation Restoration', () => {
+    it('preserves folder-browser-modal trap, visible selection ring, and exact focusedId on Back without opening random background items on OK', () => {
+      const onSelectRandomBrowseMovie = vi.fn();
+      const onSelectFolderVideo = vi.fn();
+
+      function StackedBrowseFolderDetailApp() {
+        const { focusedId, activeTrap, pushTrap, popTrap } = useFocusContext();
+        const [folderOpen, setFolderOpen] = React.useState(false);
+        const [activeDetailItem, setActiveDetailItem] = React.useState<MediaItemDetail | null>(
+          null
+        );
+
+        React.useEffect(() => {
+          if (folderOpen) {
+            pushTrap('folder-browser-modal');
+            return () => {
+              popTrap('folder-browser-modal');
+            };
+          }
+        }, [folderOpen, pushTrap, popTrap]);
+
+        return (
+          <div>
+            <div data-testid="debug-focused-id">{focusedId ?? ''}</div>
+            <div data-testid="debug-active-trap">{activeTrap ?? ''}</div>
+
+            {/* Background BrowseScreen card that used to get accidentally activated */}
+            <TVButton
+              id="browse-random-movie"
+              groupId="browse-row-0"
+              autoFocus
+              onEnter={onSelectRandomBrowseMovie}
+            >
+              Random Browse Movie
+            </TVButton>
+
+            <button data-testid="open-folder-btn" onClick={() => setFolderOpen(true)}>
+              Open Folder Browser
+            </button>
+
+            {/* Stacked FolderBrowserModal */}
+            {folderOpen && (
+              <div role="dialog" aria-label="Folder Browser">
+                <TVButton id="folder-item-1" groupId="folder-browser-modal" order={1}>
+                  Episode_01.mkv
+                </TVButton>
+                <TVButton
+                  id="folder-item-2"
+                  groupId="folder-browser-modal"
+                  order={2}
+                  onEnter={() => {
+                    onSelectFolderVideo('folder-item-2');
+                    setActiveDetailItem(mockMovieWithoutResume);
+                  }}
+                >
+                  Inception_1080p.mkv
+                </TVButton>
+              </div>
+            )}
+
+            {/* Always-mounted ItemDetailModal (matches App/BrowseScreen mounting pattern) */}
+            <ItemDetailModal
+              isOpen={Boolean(activeDetailItem)}
+              item={activeDetailItem}
+              serverUrl="http://localhost:8492"
+              onPlay={vi.fn()}
+              onClose={() => setActiveDetailItem(null)}
+            />
+          </div>
+        );
+      }
+
+      render(
+        <FocusProvider>
+          <StackedBrowseFolderDetailApp />
+        </FocusProvider>
+      );
+
+      expect(screen.getByTestId('debug-focused-id').textContent).toBe('browse-random-movie');
+
+      // 1. Open FolderBrowserModal and navigate right to folder-item-2
+      act(() => {
+        screen.getByTestId('open-folder-btn').click();
+      });
+      expect(screen.getByTestId('debug-active-trap').textContent).toBe('folder-browser-modal');
+      expect(screen.getByTestId('debug-focused-id').textContent).toBe('folder-item-1');
+
+      act(() => {
+        fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+      });
+      expect(screen.getByTestId('debug-focused-id').textContent).toBe('folder-item-2');
+      expect(document.getElementById('folder-item-2')).toHaveClass('tv-focus-ring');
+
+      // 2. Press OK (Enter) on folder-item-2 -> opens ItemDetailModal
+      act(() => {
+        fireEvent.keyDown(window, { key: 'Enter', keyCode: TVKeys.ENTER });
+      });
+      expect(onSelectFolderVideo).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId('debug-active-trap').textContent).toBe('item-detail-modal');
+      expect(screen.getByTestId('debug-focused-id').textContent).toBe('detail-play-btn');
+
+      // 3. Press Samsung TV Return/Back key (10009) inside ItemDetailModal
+      act(() => {
+        fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN });
+      });
+
+      // MUST return to folder-browser-modal (NEVER wipe activeTrap to null!)
+      // and MUST visibly highlight folder-item-2 with tv-focus-ring!
+      expect(screen.getByTestId('debug-active-trap').textContent).toBe('folder-browser-modal');
+      expect(screen.getByTestId('debug-focused-id').textContent).toBe('folder-item-2');
+      expect(document.getElementById('folder-item-2')).toHaveClass('tv-focus-ring');
+
+      // 4. Press OK (Enter) immediately -> MUST re-open folder-item-2, NEVER browse-random-movie!
+      act(() => {
+        fireEvent.keyDown(window, { key: 'Enter', keyCode: TVKeys.ENTER });
+      });
+      expect(onSelectFolderVideo).toHaveBeenCalledTimes(2);
+      expect(onSelectRandomBrowseMovie).not.toHaveBeenCalled();
+    });
+
+    it('does not push item-detail-modal trap when isOpen is true but item is null', () => {
+      function NullItemHost() {
+        const { activeTrap, focusedId } = useFocusContext();
+        return (
+          <div>
+            <div data-testid="trap">{activeTrap ?? ''}</div>
+            <div data-testid="focus">{focusedId ?? ''}</div>
+            <TVButton id="bg-card" groupId="browse" autoFocus>
+              Card
+            </TVButton>
+            <ItemDetailModal
+              isOpen={true}
+              item={null}
+              serverUrl="http://localhost:8492"
+              onPlay={vi.fn()}
+              onClose={vi.fn()}
+            />
+          </div>
+        );
+      }
+
+      render(
+        <FocusProvider>
+          <NullItemHost />
+        </FocusProvider>
+      );
+
+      expect(screen.getByTestId('trap').textContent).toBe('');
+      expect(screen.getByTestId('focus').textContent).toBe('bg-card');
     });
   });
 });

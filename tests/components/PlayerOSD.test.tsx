@@ -36,8 +36,8 @@ describe('PlayerOSD', () => {
     expect(queryByText('Big Buck Bunny')).not.toBeInTheDocument();
   });
 
-  it('correctly calculates progress bar percentage and renders cinema thumb', () => {
-    const { container } = render(
+  it('correctly calculates progress bar percentage, renders cinema thumb, and omits top-right buffering text while buffering', () => {
+    const { container, queryByText } = render(
       <PlayerOSD
         title="Big Buck Bunny"
         playerState="buffering"
@@ -46,6 +46,8 @@ describe('PlayerOSD', () => {
         visible={true}
       />
     );
+
+    expect(queryByText(/^buffering$/i)).not.toBeInTheDocument();
 
     const progressBar = container.querySelector('.bg-\\[\\#FF6B00\\]');
     expect(progressBar).toBeInTheDocument();
@@ -124,8 +126,8 @@ describe('PlayerOSD', () => {
       expect(queryByTestId('subtitles-button')).not.toBeInTheDocument();
     });
 
-    it('does not render Subtitles button when video is playing', () => {
-      const { queryByTestId } = render(
+    it('renders Subtitles button under progress bar when OSD is visible while playing or paused', () => {
+      const { getByTestId, rerender } = render(
         <PlayerOSD
           title="Big Buck Bunny"
           playerState="playing"
@@ -136,7 +138,69 @@ describe('PlayerOSD', () => {
         />
       );
 
-      expect(queryByTestId('subtitles-button')).not.toBeInTheDocument();
+      expect(getByTestId('subtitles-button')).toBeInTheDocument();
+
+      rerender(
+        <PlayerOSD
+          title="Big Buck Bunny"
+          playerState="paused"
+          positionMs={0}
+          durationMs={100000}
+          visible={true}
+          subtitles={mockSubtitles}
+        />
+      );
+
+      expect(getByTestId('subtitles-button')).toBeInTheDocument();
+    });
+
+    it('places control buttons container underneath the progress bar and highlights focused item', () => {
+      const { getByTestId, rerender } = render(
+        <PlayerOSD
+          title="Big Buck Bunny"
+          playerState="paused"
+          positionMs={30000}
+          durationMs={100000}
+          visible={true}
+          subtitles={mockSubtitles}
+          hasPrevious={true}
+          hasNext={true}
+          onPrevious={vi.fn()}
+          onNext={vi.fn()}
+          focusedItem="progress"
+        />
+      );
+
+      const bottomSection = getByTestId('player-osd-bottom');
+      const progressBar = getByTestId('player-progress-bar');
+      const controlsRow = getByTestId('player-osd-controls');
+
+      expect(bottomSection.className).toContain('flex-col');
+      expect(progressBar).toHaveAttribute('data-focused', 'true');
+      expect(controlsRow).toBeInTheDocument();
+      // Progress bar comes before controls row in DOM order
+      expect(
+        progressBar.compareDocumentPosition(controlsRow) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+
+      rerender(
+        <PlayerOSD
+          title="Big Buck Bunny"
+          playerState="paused"
+          positionMs={30000}
+          durationMs={100000}
+          visible={true}
+          subtitles={mockSubtitles}
+          hasPrevious={true}
+          hasNext={true}
+          onPrevious={vi.fn()}
+          onNext={vi.fn()}
+          focusedItem="next"
+        />
+      );
+
+      expect(getByTestId('player-progress-bar')).toHaveAttribute('data-focused', 'false');
+      expect(getByTestId('player-osd-next-btn').className).toContain('tv-focus-ring');
     });
 
     it('renders Subtitles button next to seek bar when video is paused', () => {
@@ -369,6 +433,62 @@ describe('PlayerOSD', () => {
       fireEvent.keyDown(window, { key: 'Escape' });
       expect(queryByTestId('subtitles-popup')).not.toBeInTheDocument();
     });
+
+    it('renders Embedded and Forced badges for MKV embedded streams in subtitle popup', () => {
+      const mkvSubtitles = [
+        {
+          id: 11,
+          media_item_id: 101,
+          source: 'embedded',
+          language: 'ara',
+          title: '',
+          format: 'srt',
+          is_default: false,
+          is_forced: true,
+          stream_url: '/api/v1/subtitles/11/stream.vtt',
+        },
+        {
+          id: 12,
+          media_item_id: 101,
+          source: 'embedded',
+          language: 'eng',
+          title: 'English',
+          format: 'srt',
+          is_default: true,
+          is_forced: false,
+          stream_url: '/api/v1/subtitles/12/stream.vtt',
+        },
+      ];
+
+      const { container, getByTestId, getByText, getAllByText } = render(
+        <PlayerOSD
+          title="Big Buck Bunny"
+          playerState="paused"
+          positionMs={0}
+          durationMs={100000}
+          visible={true}
+          subtitles={mkvSubtitles as any}
+          selectedSubtitleId={11}
+        />
+      );
+
+      fireEvent.click(getByTestId('subtitles-button'));
+
+      expect(getByText('Arabic')).toBeInTheDocument();
+      expect(getByText('English')).toBeInTheDocument();
+      expect(getByText('Forced')).toBeInTheDocument();
+      expect(getByText('Active')).toBeInTheDocument();
+      const badges = getAllByText('Embedded');
+      expect(badges.length).toBe(2);
+
+      const allElements = container.querySelectorAll('*');
+      for (const el of Array.from(allElements)) {
+        const cls = el.className;
+        if (typeof cls === 'string') {
+          expect(cls).not.toMatch(/\bgap-\S+/);
+        }
+      }
+    });
   });
 
   describe('Playlist Navigation (Previous & Next Buttons)', () => {
@@ -536,6 +656,125 @@ describe('PlayerOSD', () => {
 
       fireEvent.keyDown(nextBtn, { key: 'Enter', keyCode: TVKeys.ENTER });
       expect(onNext).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('Seek Preview Thumbnails & Live Stream Indicator', () => {
+    it('renders floating SeekThumbnailPreview anchored inside #player-progress-bar only while isSeeking is true', () => {
+      const { getByTestId, queryByTestId, rerender } = render(
+        <PlayerOSD
+          title="Dune: Part Two"
+          playerState="playing"
+          positionMs={60000}
+          durationMs={240000}
+          visible={true}
+          isSeeking={false}
+        />
+      );
+
+      expect(queryByTestId('seek-thumbnail-preview')).not.toBeInTheDocument();
+
+      rerender(
+        <PlayerOSD
+          title="Dune: Part Two"
+          playerState="playing"
+          positionMs={60000}
+          durationMs={240000}
+          visible={true}
+          isSeeking={true}
+          spriteCrop={{
+            sheetIndex: 0,
+            tileIndex: 6,
+            localIndex: 6,
+            col: 6,
+            row: 0,
+            x: 1920,
+            y: 0,
+            width: 320,
+            height: 180,
+            sheetWidth: 3200,
+            sheetHeight: 1800,
+            sheetUrl: 'http://127.0.0.1:8492/api/v1/media/42/storyboard/0.jpg?token=t',
+          }}
+        />
+      );
+
+      const progressBar = getByTestId('player-progress-bar');
+      const preview = getByTestId('seek-thumbnail-preview');
+      expect(progressBar.contains(preview)).toBe(true);
+      expect(preview).toHaveStyle({ left: '25%' });
+      expect(getByTestId('seek-thumbnail-sprite')).toHaveStyle({
+        backgroundPosition: '-1920px -0px',
+      });
+    });
+
+    it('renders LIVE badge instead of scrub thumb or seek preview when isLive is true or durationMs < 0', () => {
+      const { container, getByTestId, queryByTestId, rerender } = render(
+        <PlayerOSD
+          title="News 24 Live"
+          playerState="playing"
+          positionMs={15000}
+          durationMs={0}
+          visible={true}
+          isLive={true}
+          isSeeking={true}
+        />
+      );
+
+      expect(getByTestId('player-live-badge')).toHaveTextContent('LIVE');
+      expect(queryByTestId('seek-thumbnail-preview')).not.toBeInTheDocument();
+      // Scrub thumb (.bg-[#FFB800]) must not be rendered on live stream
+      expect(container.querySelector('.bg-\\[\\#FFB800\\]')).not.toBeInTheDocument();
+
+      rerender(
+        <PlayerOSD
+          title="Plugin Live Stream"
+          playerState="playing"
+          positionMs={0}
+          durationMs={-1}
+          visible={true}
+        />
+      );
+      expect(getByTestId('player-live-badge')).toHaveTextContent('LIVE');
+    });
+
+    it('uses physical margins instead of flex gap-* classes across PlayerOSD for Chromium 69 compatibility', () => {
+      const { container, getByTestId } = render(
+        <PlayerOSD
+          title="Chromium 69 Check"
+          playerState="paused"
+          positionMs={30000}
+          durationMs={120000}
+          visible={true}
+          isSeeking={true}
+          hasPrevious={true}
+          hasNext={true}
+          onPrevious={vi.fn()}
+          onNext={vi.fn()}
+          subtitles={[
+            {
+              id: 1,
+              media_item_id: 1,
+              source: 'external',
+              language: 'en',
+              title: 'English',
+              format: 'vtt',
+              is_default: true,
+              is_forced: false,
+              stream_url: '/api/v1/subtitles/1/stream.vtt',
+            },
+          ]}
+        />
+      );
+
+      fireEvent.click(getByTestId('subtitles-button'));
+
+      const elements = Array.from(container.querySelectorAll('*'));
+      for (const el of elements) {
+        if (typeof el.className === 'string') {
+          expect(el.className).not.toMatch(/\bgap-/);
+        }
+      }
     });
   });
 });

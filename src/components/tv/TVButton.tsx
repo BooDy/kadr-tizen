@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, MouseEvent } from 'react';
+import { memo, useCallback, type ButtonHTMLAttributes, type MouseEvent } from 'react';
 import { useFocusable } from '../../navigation/useFocusable';
 
 export interface TVButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -11,7 +11,7 @@ export interface TVButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'danger' | 'nav-active' | 'nav-inactive';
 }
 
-export function TVButton({
+export const TVButton = memo(function TVButton({
   id,
   groupId,
   onEnter,
@@ -25,24 +25,26 @@ export function TVButton({
   disabled,
   ...props
 }: TVButtonProps) {
+  const handleEnter = useCallback(() => {
+    if (disabled) return;
+    if (onEnter) {
+      onEnter();
+    } else if (onClick) {
+      onClick({} as MouseEvent<HTMLButtonElement>);
+    }
+  }, [disabled, onEnter, onClick]);
+
   const { ref, isFocused } = useFocusable<HTMLButtonElement>({
     id,
     groupId,
-    onEnter: () => {
-      if (disabled) return;
-      if (onEnter) {
-        onEnter();
-      } else if (onClick) {
-        onClick({} as MouseEvent<HTMLButtonElement>);
-      }
-    },
+    onEnter: handleEnter,
     onBack,
     autoFocus,
     order,
   });
 
   const baseStyle =
-    'px-8 py-4 rounded-xl font-semibold text-xl tracking-wide transition-all duration-150 outline-none flex items-center justify-center gap-3 cursor-pointer select-none';
+    'px-8 py-4 rounded-xl font-semibold text-xl tracking-wide transition-transform duration-75 outline-none flex items-center justify-center cursor-pointer select-none';
   const variantStyles = {
     primary: isFocused
       ? 'bg-[#FF6B00] text-white tv-focus-ring'
@@ -83,4 +85,4 @@ export function TVButton({
       {children}
     </button>
   );
-}
+});

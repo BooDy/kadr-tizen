@@ -7,6 +7,8 @@ export const TVKeys = {
   BACK_TIZEN: 10009,
   BACK_WEB: 27, // Escape
   BACKSPACE: 8,
+  IME_DONE: 65376,
+  IME_CANCEL: 65385,
   PLAY_PAUSE: 10252,
   PLAY: 415,
   PAUSE: 19,
@@ -17,6 +19,8 @@ export const TVKeys = {
   MEDIA_TRACK_PREVIOUS: 10233,
   CH_UP: 427,
   CH_DOWN: 428,
+  PAGE_UP: 33,
+  PAGE_DOWN: 34,
   NUM_0: 48,
   NUM_9: 57,
 } as const;

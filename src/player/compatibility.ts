@@ -10,6 +10,7 @@ export interface PlaybackStreamOptions {
   token?: string;
   unlockTokens?: string[];
   forceHls?: boolean;
+  forceDirect?: boolean;
   forceHtml5?: boolean;
   videoCodec?: string;
   audioCodec?: string;
@@ -24,14 +25,32 @@ export interface PlaybackUrlResult {
   reasons: string[];
 }
 
+export const SAMSUNG_TV_HLS_MAX_HEIGHT = 1080;
+
 export const KNOWN_COMPATIBILITY_INFO = {
   supportedVideo: ['h264', 'avc', 'hevc', 'h265', 'vp9', 'mpeg4'],
   unsupportedVideo: ['av1', 'hi10p', 'vc1', 'rv40'],
   supportedAudio: ['aac', 'ac3', 'eac3', 'mp3', 'flac', 'pcm'],
   unsupportedAudio: ['dts', 'dts-hd', 'dts-x', 'truehd'],
-  supportedContainers: ['mp4', 'mkv', 'webm', 'ts'],
-  unsupportedContainers: ['iso', 'vob', 'rmvb'],
+  supportedContainers: ['mp4', 'webm', 'ts'],
+  unsupportedContainers: ['mkv', 'avi', 'iso', 'vob', 'rmvb'],
 };
+
+/**
+ * Returns true when probed technical metadata shows a video stream is present
+ * (`video_codec` non-empty) while no audio stream exists (`audio_codec` missing/empty/'none').
+ * Kadr's ffmpeg HLS builder maps `-map 0:a:0` without `?`, so audio-less videos
+ * always fail HLS transcoding with HTTP 500 and should use Direct Stream when compatible.
+ */
+export function hasMissingAudioStream(
+  videoCodec?: string | null,
+  audioCodec?: string | null
+): boolean {
+  const v = videoCodec?.trim() || '';
+  if (!v) return false;
+  const a = audioCodec?.trim().toLowerCase() || '';
+  return a === '' || a === 'none';
+}
 
 export function checkMediaCompatibility(
   videoCodec?: string,
@@ -103,7 +122,9 @@ export function getPlaybackUrl(options: PlaybackStreamOptions): PlaybackUrlResul
     options.forceHtml5
   );
 
-  const isHls = Boolean(options.forceHls || !compat.isSupported);
+  const isHls = options.forceDirect
+    ? false
+    : Boolean(options.forceHls || !compat.isSupported);
   const params = new URLSearchParams();
 
   if (isHls) {

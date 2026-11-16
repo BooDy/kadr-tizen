@@ -73,6 +73,9 @@ export interface MediaItemDetail {
   technical?: {
     duration_seconds?: number;
     resolution?: string;
+    width?: number;
+    height?: number;
+    rotation?: number;
     video_codec?: string;
     audio_codec?: string;
     audio_channels?: number;
@@ -94,6 +97,7 @@ export interface SubtitleTrack {
   language: string;
   title: string;
   format: string;
+  stream_index?: number;
   is_default: boolean;
   is_forced: boolean;
   stream_url: string;

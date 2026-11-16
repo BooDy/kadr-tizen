@@ -1,3 +1,12 @@
+export type PlaylistUpdatedAction = 'created' | 'updated' | 'deleted' | 'items_changed';
+
+export interface PlaylistUpdatedPayload {
+  playlist_id: string;
+  user_id: string;
+  action: PlaylistUpdatedAction;
+  timestamp: number;
+}
+
 export function subscribeEvents(
   serverUrl: string,
   token: string | null,
@@ -8,7 +17,7 @@ export function subscribeEvents(
   const url = `${cleanUrl}/api/v1/events${token ? `?token=${encodeURIComponent(token)}` : ''}`;
   const es = new EventSource(url);
 
-  const eventNames = ['layout:changed', 'session:synced', 'library:updated'];
+  const eventNames = ['layout:changed', 'session:synced', 'library:updated', 'playlist:updated'];
   const listeners: Array<{ name: string; handler: (ev: MessageEvent) => void }> = [];
 
   for (const name of eventNames) {

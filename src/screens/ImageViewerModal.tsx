@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, memo } from 'react';
 import { FolderImage } from '../types/kadr';
 import { useFocusContext } from '../navigation/FocusContext';
 import { TVKeys } from '../navigation/keys';
@@ -28,6 +28,7 @@ function formatBytes(bytes?: number): string {
 interface FilmstripThumbnailProps {
   image: FolderImage;
   index: number;
+  isLast: boolean;
   serverUrl: string;
   token?: string;
   unlockTokens: string[];
@@ -37,9 +38,10 @@ interface FilmstripThumbnailProps {
   refCallback: (el: HTMLButtonElement | null) => void;
 }
 
-function FilmstripThumbnail({
+const FilmstripThumbnail = memo(function FilmstripThumbnail({
   image,
   index,
+  isLast,
   serverUrl,
   token,
   unlockTokens,
@@ -66,8 +68,9 @@ function FilmstripThumbnail({
       data-testid={`filmstrip-thumb-${index}`}
       tabIndex={isFilmstripFocused && isActive ? 0 : -1}
       onClick={() => onSelect(index)}
-      className={`w-24 h-16 rounded-lg overflow-hidden border-2 flex-shrink-0 flex items-center justify-center bg-[#2A0A0A] transition-all duration-200 cursor-pointer ${
-        isActive ? 'border-[#FF6B00]' : 'border-transparent opacity-60'
+      style={{ marginRight: isLast ? '0px' : '12px' }}
+      className={`w-24 h-16 rounded-lg overflow-hidden border-2 flex-shrink-0 flex items-center justify-center bg-[#2A0A0A] transition-transform duration-75 cursor-pointer ${
+        isActive ? 'border-[#FF6B00] scale-105' : 'border-transparent opacity-70'
       }`}
     >
       {hasError || !thumbUrl ? (
@@ -77,13 +80,15 @@ function FilmstripThumbnail({
           src={thumbUrl}
           alt=""
           aria-hidden="true"
+          loading="lazy"
+          decoding="async"
           onError={() => setHasError(true)}
           className="w-full h-full object-cover"
         />
       )}
     </button>
   );
-}
+});
 
 export function ImageViewerModal({
   images,
@@ -138,7 +143,7 @@ export function ImageViewerModal({
   useEffect(() => {
     pushTrap('image-viewer-modal');
     return () => {
-      popTrap();
+      popTrap('image-viewer-modal');
     };
   }, [pushTrap, popTrap]);
 
@@ -194,17 +199,37 @@ export function ImageViewerModal({
     };
   }, [isPlaying, isFilmstripFocused, currentIndex, images]);
 
-  // Auto-scroll active thumbnail into view
+  // Auto-scroll active thumbnail into view only when clipped (instant, never smooth)
   useEffect(() => {
     const activeThumb = thumbnailRefs.current[currentIndex];
-    if (activeThumb && typeof activeThumb.scrollIntoView === 'function') {
-      activeThumb.scrollIntoView({
-        behavior: 'smooth',
-        inline: 'center',
-        block: 'nearest',
-      });
+    if (!activeThumb || typeof activeThumb.scrollIntoView !== 'function') return;
+    const rect = activeThumb.getBoundingClientRect();
+    const strip = filmstripRef.current;
+    if ((rect.width > 0 || rect.height > 0) && strip) {
+      const stripRect = strip.getBoundingClientRect();
+      if (
+        stripRect.width > 0 &&
+        rect.left >= stripRect.left &&
+        rect.right <= stripRect.right
+      ) {
+        return;
+      }
     }
+    activeThumb.scrollIntoView({
+      inline: 'center',
+      block: 'nearest',
+    });
   }, [currentIndex]);
+
+  const handleSelectThumbnail = useCallback(
+    (selectedIdx: number) => {
+      setCurrentIndex(selectedIdx);
+      currentIndexRef.current = selectedIdx;
+      setIsPlaying(false);
+      resetControlsTimer();
+    },
+    [resetControlsTimer]
+  );
 
   // Remote keydown capture listener
   useEffect(() => {
@@ -315,14 +340,21 @@ export function ImageViewerModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[70] bg-black flex items-center justify-center select-none overflow-hidden">
+    <div
+      data-modal-overlay="true"
+      aria-modal="true"
+      className="fixed inset-0 z-[70] bg-black flex items-center justify-center select-none overflow-hidden"
+    >
       {/* Centered Image / Error Fallback */}
       {hasMainError || !imageUrl ? (
         <div
           data-testid="viewer-image-fallback"
-          className="flex flex-col items-center justify-center text-[#5C3C3C] gap-4"
+          className="flex flex-col items-center justify-center text-[#5C3C3C]"
         >
-          <ImageIcon className="w-24 h-24 stroke-1 text-[#5C3C3C]" />
+          <ImageIcon
+            className="w-24 h-24 stroke-1 text-[#5C3C3C]"
+            style={{ marginBottom: '16px' }}
+          />
           <span className="text-lg font-medium text-[#5C3C3C]">Unable to load image</span>
         </div>
       ) : (
@@ -330,29 +362,35 @@ export function ImageViewerModal({
           key={currentImage?.path || currentIndex}
           src={imageUrl}
           alt={currentImage?.name || `Image ${currentIndex + 1}`}
+          decoding="async"
           onError={() => setHasMainError(true)}
-          className="max-w-full max-h-full object-contain transition-opacity duration-300"
+          className="max-w-full max-h-full object-contain"
         />
       )}
 
       {/* Top HUD Bar */}
       <div
         data-testid="hud-header"
-        className={`absolute top-0 left-0 right-0 p-8 bg-gradient-to-b from-[#2A0A0A]/90 via-[#2A0A0A]/40 to-transparent flex items-center justify-between z-10 transition-opacity duration-300 ${
+        className={`absolute top-0 left-0 right-0 p-8 bg-gradient-to-b from-[#120404]/95 via-[#120404]/60 to-transparent flex items-center justify-between z-10 ${
           showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
-        <div className="flex flex-col gap-1 max-w-2xl">
-          <h2 className="text-2xl font-bold text-[#F5E5E5] tracking-tight truncate">
+        <div className="flex flex-col max-w-2xl">
+          <h2
+            className="text-2xl font-bold text-[#F5E5E5] tracking-tight truncate"
+            style={{ marginBottom: '4px' }}
+          >
             {currentImage?.name}
           </h2>
-          <div className="text-sm font-medium text-[#F5E5E5]/80 flex items-center gap-3">
+          <div className="text-sm font-medium text-[#F5E5E5]/80 flex items-center">
             <span>
               {currentIndex + 1} / {images.length}
             </span>
             {currentImage?.size_bytes ? (
               <>
-                <span className="text-[#5C3C3C]">•</span>
+                <span className="text-[#5C3C3C]" style={{ margin: '0 12px' }}>
+                  •
+                </span>
                 <span>{formatBytes(currentImage.size_bytes)}</span>
               </>
             ) : null}
@@ -363,7 +401,7 @@ export function ImageViewerModal({
           onClick={onClose}
           tabIndex={-1}
           aria-label="Close"
-          className="p-3 rounded-full bg-[#3B1111] hover:bg-[#4A1616] text-[#F5E5E5] border border-[rgba(245,229,229,0.08)] transition-colors cursor-pointer"
+          className="p-3 rounded-full bg-[#3B1111] hover:bg-[#4A1616] text-[#F5E5E5] border border-[rgba(245,229,229,0.08)] cursor-pointer"
         >
           <X className="w-6 h-6" />
         </button>
@@ -373,7 +411,7 @@ export function ImageViewerModal({
       <div
         ref={filmstripRef}
         data-testid="filmstrip-carousel"
-        className={`absolute bottom-24 left-0 right-0 px-8 flex items-center gap-3 overflow-x-auto scrollbar-none z-20 transition-opacity duration-300 ${
+        className={`absolute bottom-24 left-0 right-0 px-8 flex items-center overflow-x-auto scrollbar-none z-20 ${
           showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
@@ -382,17 +420,13 @@ export function ImageViewerModal({
             key={img.path || idx}
             image={img}
             index={idx}
+            isLast={idx === images.length - 1}
             serverUrl={serverUrl}
             token={token}
             unlockTokens={unlockTokens}
             isActive={idx === currentIndex}
             isFilmstripFocused={isFilmstripFocused}
-            onSelect={(selectedIdx) => {
-              setCurrentIndex(selectedIdx);
-              currentIndexRef.current = selectedIdx;
-              setIsPlaying(false);
-              resetControlsTimer();
-            }}
+            onSelect={handleSelectThumbnail}
             refCallback={(el) => {
               thumbnailRefs.current[idx] = el;
             }}
@@ -403,29 +437,41 @@ export function ImageViewerModal({
       {/* Bottom HUD Bar */}
       <div
         data-testid="hud-footer"
-        className={`absolute bottom-0 left-0 right-0 p-8 bg-gradient-to-t from-[#2A0A0A]/90 via-[#2A0A0A]/40 to-transparent flex items-center justify-between z-10 transition-opacity duration-300 ${
+        className={`absolute bottom-0 left-0 right-0 p-8 bg-gradient-to-t from-[#120404]/95 via-[#120404]/60 to-transparent flex items-center justify-between z-10 ${
           showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
         {/* Status Indicator */}
-        <div className="flex items-center gap-3 bg-[#3B1111]/90 backdrop-blur px-4 py-2 rounded-full border border-[rgba(245,229,229,0.08)]">
+        <div className="flex items-center bg-[#1e0a0a]/95 px-4 py-2 rounded-full border border-[rgba(245,229,229,0.12)]">
           {isPlaying ? (
             <>
-              <span className="w-2.5 h-2.5 rounded-full bg-[#FF6B00] animate-pulse" />
-              <Play className="w-4 h-4 fill-[#FF6B00] text-[#FF6B00]" />
+              <span
+                className="w-2.5 h-2.5 rounded-full bg-[#FF6B00]"
+                style={{ marginRight: '10px' }}
+              />
+              <Play
+                className="w-4 h-4 fill-[#FF6B00] text-[#FF6B00]"
+                style={{ marginRight: '10px' }}
+              />
               <span className="text-sm font-semibold text-[#FFB800]">Playing Slideshow (4s)</span>
             </>
           ) : (
             <>
-              <span className="w-2.5 h-2.5 rounded-full bg-[#5C3C3C]" />
-              <Pause className="w-4 h-4 fill-[#5C3C3C] text-[#5C3C3C]" />
+              <span
+                className="w-2.5 h-2.5 rounded-full bg-[#5C3C3C]"
+                style={{ marginRight: '10px' }}
+              />
+              <Pause
+                className="w-4 h-4 fill-[#5C3C3C] text-[#5C3C3C]"
+                style={{ marginRight: '10px' }}
+              />
               <span className="text-sm font-medium text-[#F5E5E5]/70">Paused</span>
             </>
           )}
         </div>
 
         {/* Remote Control Hints */}
-        <div className="text-sm font-medium text-[#F5E5E5]/70 bg-[#3B1111]/90 backdrop-blur px-5 py-2 rounded-full border border-[rgba(245,229,229,0.08)]">
+        <div className="text-sm font-medium text-[#F5E5E5]/80 bg-[#1e0a0a]/95 px-5 py-2 rounded-full border border-[rgba(245,229,229,0.12)]">
           {isFilmstripFocused
             ? '◄ / ► Scrub • ▲ / Enter Select • Back Exit Filmstrip'
             : '◄ / ► Navigate • ▼ Filmstrip • Enter / ⏯ Play/Pause • Back Exit'}

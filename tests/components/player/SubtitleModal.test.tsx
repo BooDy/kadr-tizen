@@ -351,3 +351,306 @@ describe('SubtitleModal', () => {
   });
 });
 
+
+describe('SubtitleModal appearance settings', () => {
+  const baseSettings = { fontSize: 'medium', color: 'white', placement: 'bottom' } as const;
+
+  it('hides the Appearance tab when no settings handler is provided', () => {
+    render(
+      <SubtitleModal
+        isOpen={true}
+        itemId={10}
+        apiClient={new ApiClient('http://127.0.0.1:8492')}
+        subtitles={mockTracks}
+        selectedSubtitleId={1}
+        onSelectSubtitle={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+    expect(screen.queryByText('Appearance')).not.toBeInTheDocument();
+  });
+
+  it('lets the user change font size, color and placement with a live preview', () => {
+    const onChangeSettings = vi.fn();
+    const { rerender } = render(
+      <SubtitleModal
+        isOpen={true}
+        itemId={10}
+        apiClient={new ApiClient('http://127.0.0.1:8492')}
+        subtitles={mockTracks}
+        selectedSubtitleId={1}
+        onSelectSubtitle={vi.fn()}
+        settings={{ ...baseSettings }}
+        onChangeSettings={onChangeSettings}
+        onClose={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByText('Appearance'));
+    expect(screen.getByTestId('subtitle-appearance-panel')).toBeInTheDocument();
+
+    // Preview reflects the current settings (42px * 0.25 scale)
+    expect(screen.getByTestId('subtitle-overlay-text').style.fontSize).toBe('10.5px');
+
+    fireEvent.click(screen.getByTestId('sub-set-size-xlarge'));
+    expect(onChangeSettings).toHaveBeenLastCalledWith({ ...baseSettings, fontSize: 'xlarge' });
+
+    fireEvent.click(screen.getByTestId('sub-set-color-yellow'));
+    expect(onChangeSettings).toHaveBeenLastCalledWith({ ...baseSettings, color: 'yellow' });
+
+    fireEvent.click(screen.getByTestId('sub-set-place-top'));
+    expect(onChangeSettings).toHaveBeenLastCalledWith({ ...baseSettings, placement: 'top' });
+
+    // Preview updates when the parent applies new settings
+    rerender(
+      <SubtitleModal
+        isOpen={true}
+        itemId={10}
+        apiClient={new ApiClient('http://127.0.0.1:8492')}
+        subtitles={mockTracks}
+        selectedSubtitleId={1}
+        onSelectSubtitle={vi.fn()}
+        settings={{ fontSize: 'xlarge', color: 'yellow', placement: 'top' }}
+        onChangeSettings={onChangeSettings}
+        onClose={vi.fn()}
+      />
+    );
+    const previewText = screen.getByTestId('subtitle-overlay-text');
+    expect(previewText.style.fontSize).toBe('16px');
+    expect(screen.getByTestId('subtitle-overlay').style.top).toBe('16px');
+  });
+});
+
+describe('SubtitleModal timing adjustment', () => {
+  const renderModal = (props: Partial<React.ComponentProps<typeof SubtitleModal>> = {}) =>
+    render(
+      <SubtitleModal
+        isOpen={true}
+        itemId={10}
+        apiClient={new ApiClient('http://127.0.0.1:8492')}
+        subtitles={mockTracks}
+        selectedSubtitleId={1}
+        onSelectSubtitle={vi.fn()}
+        onClose={vi.fn()}
+        {...props}
+      />
+    );
+
+  it('hides the Timing tab without a handler or when no track is selected', () => {
+    const { unmount } = renderModal();
+    expect(screen.queryByText('Timing')).not.toBeInTheDocument();
+    unmount();
+
+    renderModal({ onChangeDelay: vi.fn(), selectedSubtitleId: null });
+    expect(screen.queryByText('Timing')).not.toBeInTheDocument();
+  });
+
+  it('adjusts the delay in 0.1s / 1s / 5s steps in both directions and can reset it', () => {
+    const onChangeDelay = vi.fn();
+    renderModal({ onChangeDelay, delayMs: 1500 });
+
+    fireEvent.click(screen.getByText('Timing'));
+    expect(screen.getByTestId('subtitle-timing-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('subtitle-delay-value').textContent).toBe('+1.5s');
+
+    fireEvent.click(screen.getByTestId('sub-delay-plus-100'));
+    expect(onChangeDelay).toHaveBeenLastCalledWith(1600);
+    fireEvent.click(screen.getByTestId('sub-delay-minus-100'));
+    expect(onChangeDelay).toHaveBeenLastCalledWith(1400);
+    fireEvent.click(screen.getByTestId('sub-delay-plus-1000'));
+    expect(onChangeDelay).toHaveBeenLastCalledWith(2500);
+    fireEvent.click(screen.getByTestId('sub-delay-minus-1000'));
+    expect(onChangeDelay).toHaveBeenLastCalledWith(500);
+    fireEvent.click(screen.getByTestId('sub-delay-plus-5000'));
+    expect(onChangeDelay).toHaveBeenLastCalledWith(6500);
+    fireEvent.click(screen.getByTestId('sub-delay-minus-5000'));
+    expect(onChangeDelay).toHaveBeenLastCalledWith(-3500);
+
+    fireEvent.click(screen.getByTestId('sub-delay-reset'));
+    expect(onChangeDelay).toHaveBeenLastCalledWith(0);
+  });
+
+  it('shows a negative delay and disables reset when already at 0', () => {
+    const { unmount } = renderModal({ onChangeDelay: vi.fn(), delayMs: -2300 });
+    fireEvent.click(screen.getByText('Timing'));
+    expect(screen.getByTestId('subtitle-delay-value').textContent).toBe('-2.3s');
+    expect(screen.getByText(/appear earlier/i)).toBeInTheDocument();
+    unmount();
+
+    renderModal({ onChangeDelay: vi.fn(), delayMs: 0 });
+    fireEvent.click(screen.getByText('Timing'));
+    expect(screen.getByTestId('sub-delay-reset')).toBeDisabled();
+  });
+});
+
+describe('SubtitleModal keyboard Back navigation', () => {
+  it('allows Backspace to edit text input without closing modal', () => {
+    const onClose = vi.fn();
+    render(
+      <FocusProvider>
+        <SubtitleModal
+          isOpen={true}
+          itemId={10}
+          apiClient={new ApiClient('http://127.0.0.1:8492')}
+          subtitles={mockTracks}
+          selectedSubtitleId={1}
+          onSelectSubtitle={vi.fn()}
+          onClose={onClose}
+        />
+        <input data-testid="temp-input" defaultValue="search" />
+      </FocusProvider>
+    );
+
+    const input = screen.getByTestId('temp-input') as HTMLInputElement;
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
+    fireEvent.keyDown(input, { key: 'Backspace', keyCode: TVKeys.BACKSPACE });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('blurs active text input on BACK_TIZEN / Escape without closing modal, and closes on second Back', () => {
+    const onClose = vi.fn();
+    render(
+      <FocusProvider>
+        <SubtitleModal
+          isOpen={true}
+          itemId={10}
+          apiClient={new ApiClient('http://127.0.0.1:8492')}
+          subtitles={mockTracks}
+          selectedSubtitleId={1}
+          onSelectSubtitle={vi.fn()}
+          onClose={onClose}
+        />
+        <input data-testid="temp-input" defaultValue="search" />
+      </FocusProvider>
+    );
+
+    const input = screen.getByTestId('temp-input') as HTMLInputElement;
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
+    // First Back blurs input without calling onClose
+    fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN, key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(document.activeElement).not.toBe(input);
+
+    // Second Back closes modal
+    fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN, key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores Back key when activeTrap does not match subtitle-modal', () => {
+    const onClose = vi.fn();
+    function TrapTest() {
+      const { pushTrap } = useFocusContext();
+      return (
+        <div>
+          <button onClick={() => pushTrap('foreign-trap')} data-testid="push-foreign">Push</button>
+          <SubtitleModal
+            isOpen={true}
+            itemId={10}
+            apiClient={new ApiClient('http://127.0.0.1:8492')}
+            subtitles={mockTracks}
+            selectedSubtitleId={1}
+            onSelectSubtitle={vi.fn()}
+            onClose={onClose}
+          />
+        </div>
+      );
+    }
+    render(
+      <FocusProvider>
+        <TrapTest />
+      </FocusProvider>
+    );
+
+    fireEvent.click(screen.getByTestId('push-foreign'));
+    fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN, key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('stops immediate propagation on Back in capture phase to prevent bubbling window listeners from firing', () => {
+    const onClose = vi.fn();
+    const bubbleListener = vi.fn();
+    window.addEventListener('keydown', bubbleListener, false);
+
+    render(
+      <FocusProvider>
+        <SubtitleModal
+          isOpen={true}
+          itemId={10}
+          apiClient={new ApiClient('http://127.0.0.1:8492')}
+          subtitles={mockTracks}
+          selectedSubtitleId={1}
+          onSelectSubtitle={vi.fn()}
+          onClose={onClose}
+        />
+      </FocusProvider>
+    );
+
+    fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN, key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(bubbleListener).not.toHaveBeenCalled();
+
+    window.removeEventListener('keydown', bubbleListener, false);
+  });
+
+  it('renders Embedded, Forced, and Default badges and human-readable fallback titles for untitled MKV streams', () => {
+    const tracks = [
+      {
+        id: 101,
+        media_item_id: 10,
+        source: 'embedded' as const,
+        language: 'ara',
+        title: '',
+        format: 'srt' as const,
+        is_default: false,
+        is_forced: true,
+        stream_url: '/api/v1/subtitles/101/stream.vtt',
+      },
+      {
+        id: 102,
+        media_item_id: 10,
+        source: 'embedded' as const,
+        language: 'eng',
+        title: 'English SDH',
+        format: 'srt' as const,
+        is_default: true,
+        is_forced: false,
+        stream_url: '/api/v1/subtitles/102/stream.vtt',
+      },
+    ];
+
+    const { container } = render(
+      <SubtitleModal
+        isOpen={true}
+        itemId={10}
+        apiClient={new ApiClient('http://127.0.0.1:8492')}
+        subtitles={tracks as any}
+        selectedSubtitleId={101}
+        onSelectSubtitle={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('Arabic (ara)')).toBeInTheDocument();
+    expect(screen.getAllByText('Embedded').length).toBe(2);
+    expect(screen.getByText('Forced')).toBeInTheDocument();
+    expect(screen.getByText('Default')).toBeInTheDocument();
+
+    const trackRow = screen.getByTestId('subtitle-option-101');
+    expect(trackRow).toHaveTextContent('Arabic (ara)');
+    expect(trackRow).toHaveTextContent('Embedded');
+    expect(trackRow).toHaveTextContent('Forced');
+
+    const allElements = container.querySelectorAll('*');
+    for (const el of Array.from(allElements)) {
+      const cls = el.className;
+      if (typeof cls === 'string') {
+        expect(cls).not.toMatch(/\bgap-\S+/);
+      }
+    }
+  });
+});

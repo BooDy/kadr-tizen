@@ -4,9 +4,12 @@ import { PlayerScreen } from '../../src/screens/PlayerScreen';
 import * as playbackApi from '../../src/api/playback';
 import * as subtitlesApi from '../../src/api/subtitles';
 import { TVKeys } from '../../src/navigation/keys';
-import { PlayerDriver, PlayerState } from '../../src/player/driver';
+import { PlayerDriver, PlayerState, VideoDisplayRect } from '../../src/player/driver';
 import { ApiClient } from '../../src/api/client';
 import { FocusProvider } from '../../src/navigation/FocusContext';
+import * as itemsApi from '../../src/api/items';
+
+const SAMPLE_VTT = 'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHi\n';
 
 // Mock driver instance
 let mockDriver: {
@@ -16,12 +19,15 @@ let mockDriver: {
   seekTo: ReturnType<typeof vi.fn>;
   destroy: ReturnType<typeof vi.fn>;
   setSubtitleTrack: ReturnType<typeof vi.fn>;
+  setMediaHints: ReturnType<typeof vi.fn>;
+  onDisplayRectChange: ReturnType<typeof vi.fn>;
   onTimeUpdate: ReturnType<typeof vi.fn>;
   onStateChange: ReturnType<typeof vi.fn>;
   onError: ReturnType<typeof vi.fn>;
   timeCallback?: (posMs: number, durationMs: number) => void;
   stateCallback?: (state: PlayerState) => void;
   errorCallback?: (error: string) => void;
+  displayRectCallback?: (rect: VideoDisplayRect) => void;
 };
 
 vi.mock('../../src/player/avplay-driver', () => ({
@@ -33,6 +39,10 @@ vi.mock('../../src/player/avplay-driver', () => ({
       seekTo: vi.fn(),
       destroy: vi.fn(),
       setSubtitleTrack: vi.fn(),
+      setMediaHints: vi.fn(),
+      onDisplayRectChange: vi.fn((cb) => {
+        mockDriver.displayRectCallback = cb;
+      }),
       onTimeUpdate: vi.fn((cb) => {
         mockDriver.timeCallback = cb;
       }),
@@ -62,7 +72,7 @@ describe('PlayerScreen', () => {
     vi.restoreAllMocks();
   });
 
-  it('initializes driver with container and stream url on mount', () => {
+  it('initializes driver with container and default HLS stream url on mount (even for H.264/AAC MP4)', () => {
     const onExit = vi.fn();
     const { getByText } = render(
       <PlayerScreen
@@ -71,14 +81,15 @@ describe('PlayerScreen', () => {
         serverUrl="http://localhost:8492"
         token="test-token"
         initialTimeMs={15000}
+        technical={{ video_codec: 'h264', audio_codec: 'aac', container: 'mp4' }}
         onExit={onExit}
       />
     );
 
     expect(mockDriver.init).toHaveBeenCalledWith(
       expect.any(HTMLElement),
-      'http://localhost:8492/api/v1/stream/item-123?token=test-token',
-      15000
+      'http://localhost:8492/api/v1/media/item-123/hls/master.m3u8?video_codec=h264&audio_codec=aac&max_height=1080&start_time=15.000&token=test-token',
+      0
     );
     expect(getByText('Sample Movie')).toBeInTheDocument();
   });
@@ -102,7 +113,7 @@ describe('PlayerScreen', () => {
 
     expect(mockDriver.init).toHaveBeenCalledWith(
       expect.any(HTMLElement),
-      'http://localhost:8492/api/v1/stream/item-456?token=test-token&unlocked=secret-unlock-xyz',
+      'http://localhost:8492/api/v1/media/item-456/hls/master.m3u8?video_codec=h264&audio_codec=aac&max_height=1080&token=test-token&unlocked=secret-unlock-xyz',
       0
     );
   });
@@ -249,19 +260,27 @@ describe('PlayerScreen', () => {
       mockDriver.timeCallback?.(25000, 100000);
     });
 
-    // Press Left (-10s)
+    // Press Left (-10s -> 15s) reloads HLS stream at start_time=15.000
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.LEFT }));
-      vi.advanceTimersByTime(300);
+      vi.advanceTimersByTime(1000);
     });
-    expect(mockDriver.seekTo).toHaveBeenCalledWith(15000, expect.any(Function));
+    expect(mockDriver.init).toHaveBeenCalledWith(
+      expect.any(HTMLElement),
+      expect.stringContaining('start_time=15.000'),
+      0
+    );
 
-    // Press Right (+10s)
+    // Press Right (+10s -> 25s) reloads HLS stream at start_time=25.000
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.RIGHT }));
-      vi.advanceTimersByTime(300);
+      vi.advanceTimersByTime(1000);
     });
-    expect(mockDriver.seekTo).toHaveBeenCalledWith(25000, expect.any(Function)); // 15000 + 10000
+    expect(mockDriver.init).toHaveBeenCalledWith(
+      expect.any(HTMLElement),
+      expect.stringContaining('start_time=25.000'),
+      0
+    );
   });
 
   it('prevents seeking below 0 and clamps seeking to durationMs', () => {
@@ -279,22 +298,35 @@ describe('PlayerScreen', () => {
       mockDriver.timeCallback?.(4000, 20000);
     });
 
-    // Press Left with pos 4s -> should seek to 0, not -6s
+    // Press Left with pos 4s -> should clamp to 0, not -6s
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.LEFT }));
-      vi.advanceTimersByTime(300);
+      vi.advanceTimersByTime(1000);
     });
-    expect(mockDriver.seekTo).toHaveBeenCalledWith(0, expect.any(Function));
+    expect(mockDriver.init).toHaveBeenCalledWith(
+      expect.any(HTMLElement),
+      expect.not.stringContaining('start_time='),
+      0
+    );
     expect(getByText('0:00')).toBeInTheDocument();
 
-    // Press Right repeatedly past duration (20s) -> should clamp to 20000
+    // Ensure duration remains known on the reloaded stream
+    act(() => {
+      mockDriver.timeCallback?.(0, 20000);
+    });
+
+    // Press Right repeatedly past duration (20s) -> should clamp to 20000 (start_time=20.000)
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.RIGHT })); // to 10s
       window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.RIGHT })); // to 20s
       window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.RIGHT })); // clamped at 20s
-      vi.advanceTimersByTime(300);
+      vi.advanceTimersByTime(1000);
     });
-    expect(mockDriver.seekTo).toHaveBeenLastCalledWith(20000, expect.any(Function));
+    expect(mockDriver.init).toHaveBeenLastCalledWith(
+      expect.any(HTMLElement),
+      expect.stringContaining('start_time=20.000'),
+      0
+    );
     expect(getAllByText('0:20')).toHaveLength(2);
   });
 
@@ -325,6 +357,87 @@ describe('PlayerScreen', () => {
     });
     expect(preventDefaultSpy2).toHaveBeenCalled();
     expect(onExit).toHaveBeenCalledTimes(2);
+  });
+
+  it('hides visible PlayerOSD on first Back press once playback has started, then exits on second Back press with progress snapshot', () => {
+    const onExit = vi.fn();
+    render(
+      <PlayerScreen
+        itemId="ep-201"
+        title="Episode 1"
+        serverUrl="http://localhost:8492"
+        token="test-token"
+        onExit={onExit}
+      />
+    );
+
+    act(() => {
+      mockDriver.stateCallback?.('playing');
+      mockDriver.timeCallback?.(45000, 90000);
+    });
+
+    // OSD is visible initially -> first Back hides OSD without exiting
+    const osdRoot = screen.getByText('Episode 1').closest('[class*="transition-opacity"]');
+    expect(osdRoot?.className).toContain('opacity-100');
+
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { keyCode: TVKeys.BACK_TIZEN, cancelable: true })
+      );
+    });
+    expect(onExit).not.toHaveBeenCalled();
+    expect(osdRoot?.className).toContain('opacity-0');
+
+    // Second Back while OSD is hidden exits playback and passes progress snapshot
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { keyCode: TVKeys.BACK_TIZEN, cancelable: true })
+      );
+    });
+    expect(onExit).toHaveBeenCalledTimes(1);
+    expect(onExit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        itemId: 'ep-201',
+        positionMs: 45000,
+        durationMs: 90000,
+      })
+    );
+  });
+
+  it('snaps reported progress to full durationMs when playback reaches ended state', () => {
+    const onExit = vi.fn();
+    render(
+      <PlayerScreen
+        itemId={201}
+        title="Episode Finale"
+        serverUrl="http://localhost:8492"
+        token="test-token"
+        onExit={onExit}
+      />
+    );
+
+    act(() => {
+      mockDriver.stateCallback?.('playing');
+      mockDriver.timeCallback?.(1198000, 1200000);
+      mockDriver.stateCallback?.('ended');
+    });
+
+    // First Back hides OSD on ended screen; second Back exits with 100% positionMs === durationMs
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.BACK_TIZEN, cancelable: true }));
+    });
+    expect(onExit).not.toHaveBeenCalled();
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.BACK_TIZEN, cancelable: true }));
+    });
+    expect(onExit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        itemId: 201,
+        positionMs: 1200000,
+        durationMs: 1200000,
+      })
+    );
   });
 
   it('uses transparent backgrounds to avoid occluding hardware video plane', () => {
@@ -409,7 +522,7 @@ describe('PlayerScreen', () => {
   });
 
   describe('Canonical Playback Session Manager Integration', () => {
-    it('starts canonical session on mount with numeric itemId and seeks to resume position', async () => {
+    it('starts canonical session on mount with numeric itemId and resumes HLS at session resume position', async () => {
       const startSessionSpy = vi.spyOn(playbackApi, 'startPlaybackSession').mockResolvedValue({
         session_id: 'sess-abc',
         media_item_id: 101,
@@ -433,7 +546,11 @@ describe('PlayerScreen', () => {
       });
 
       expect(startSessionSpy).toHaveBeenCalledWith(expect.anything(), 101);
-      expect(mockDriver.seekTo).toHaveBeenCalledWith(45000);
+      expect(mockDriver.init).toHaveBeenCalledWith(
+        expect.any(HTMLElement),
+        expect.stringContaining('start_time=45.000'),
+        0
+      );
     });
 
     it('does not seek to session resume position if manual initialTimeMs was forced', async () => {
@@ -461,6 +578,73 @@ describe('PlayerScreen', () => {
 
       // driver.init is called with initialTimeMs (12000), but seekTo should NOT be called with 45000
       expect(mockDriver.seekTo).not.toHaveBeenCalledWith(45000);
+    });
+
+    it('starts at 0:00 and does NOT jump to session resume_position_seconds when initialTimeMs={0} is explicitly passed (Play / Play from Beginning)', async () => {
+      vi.spyOn(playbackApi, 'startPlaybackSession').mockResolvedValue({
+        session_id: 'sess-restart',
+        media_item_id: 101,
+        duration_seconds: 3600,
+        resume_position_seconds: 900,
+      });
+
+      render(
+        <PlayerScreen
+          itemId={101}
+          title="Sample Movie"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          initialTimeMs={0}
+          onExit={vi.fn()}
+        />
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(mockDriver.init).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.not.stringContaining('start_time='),
+        0
+      );
+      expect(mockDriver.seekTo).not.toHaveBeenCalled();
+    });
+
+    it('treats 1..100 percentage sentinel initialTimeMs as auto-resume without seeking driver to 30ms first', async () => {
+      vi.spyOn(playbackApi, 'startPlaybackSession').mockResolvedValue({
+        session_id: 'sess-ep-resume',
+        media_item_id: 207,
+        duration_seconds: 2700,
+        resume_position_seconds: 810,
+      });
+
+      render(
+        <PlayerScreen
+          itemId={207}
+          title="Half Loop"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          initialTimeMs={30}
+          onExit={vi.fn()}
+        />
+      );
+
+      expect(mockDriver.init).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.not.stringContaining('start_time='),
+        0
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(mockDriver.init).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.stringContaining('start_time=810.000'),
+        0
+      );
     });
 
     it('sends 10-second heartbeats to reportSessionProgress during active session', async () => {
@@ -596,8 +780,15 @@ describe('PlayerScreen', () => {
         mockDriver.timeCallback?.(35000, 100000);
       });
 
+      // First Back hides visible OSD once playback has started
       act(() => {
         window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.BACK_TIZEN }));
+      });
+
+      // Second Back exits playback and flushes final progress before ending session
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { keyCode: TVKeys.BACK_TIZEN }));
+        await Promise.resolve();
       });
 
       expect(progressSpy).toHaveBeenCalledWith(expect.anything(), 'sess-abc', 35);
@@ -706,6 +897,7 @@ describe('PlayerScreen', () => {
 
     it('fetches item subtitles on mount with numeric itemId and sets default track', async () => {
       const fetchSubtitlesSpy = vi.spyOn(subtitlesApi, 'fetchItemSubtitles').mockResolvedValue(mockTracks);
+      const fetchTextSpy = vi.spyOn(ApiClient.prototype, 'fetchText').mockResolvedValue(SAMPLE_VTT);
 
       const { getByTestId, getByText } = render(
         <PlayerScreen
@@ -722,9 +914,8 @@ describe('PlayerScreen', () => {
       });
 
       expect(fetchSubtitlesSpy).toHaveBeenCalledWith(expect.anything(), 101);
-      expect(mockDriver.setSubtitleTrack).toHaveBeenCalledWith(
-        'http://localhost:8492/api/v1/subtitles/1/stream.vtt'
-      );
+      // The default track is downloaded and rendered by the web-layer overlay (not the driver)
+      expect(fetchTextSpy).toHaveBeenCalledWith('http://localhost:8492/api/v1/subtitles/1/stream.vtt');
 
       // Subtitles button appears when video is paused
       act(() => {
@@ -735,8 +926,9 @@ describe('PlayerScreen', () => {
       expect(getByText('Subtitles')).toBeInTheDocument();
     });
 
-    it('allows selecting a different subtitle track from OSD and updates driver', async () => {
+    it('allows selecting a different subtitle track from OSD and loads it into the overlay', async () => {
       vi.spyOn(subtitlesApi, 'fetchItemSubtitles').mockResolvedValue(mockTracks);
+      const fetchTextSpy = vi.spyOn(ApiClient.prototype, 'fetchText').mockResolvedValue(SAMPLE_VTT);
 
       const { getByTestId } = render(
         <PlayerScreen
@@ -766,13 +958,12 @@ describe('PlayerScreen', () => {
         getByTestId('subtitle-option-2').click();
       });
 
-      expect(mockDriver.setSubtitleTrack).toHaveBeenLastCalledWith(
-        'http://localhost:8492/api/v1/subtitles/2/stream.vtt'
-      );
+      expect(fetchTextSpy).toHaveBeenLastCalledWith('http://localhost:8492/api/v1/subtitles/2/stream.vtt');
     });
 
-    it('allows turning subtitles Off from OSD and updates driver with null', async () => {
+    it('allows turning subtitles Off from OSD and clears the overlay', async () => {
       vi.spyOn(subtitlesApi, 'fetchItemSubtitles').mockResolvedValue(mockTracks);
+      vi.spyOn(ApiClient.prototype, 'fetchText').mockResolvedValue(SAMPLE_VTT);
 
       const { getByTestId } = render(
         <PlayerScreen
@@ -800,7 +991,13 @@ describe('PlayerScreen', () => {
         getByTestId('subtitle-option-off').click();
       });
 
-      expect(mockDriver.setSubtitleTrack).toHaveBeenLastCalledWith(null);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      act(() => {
+        mockDriver.timeCallback?.(1500, 60000);
+      });
+      expect(screen.queryByTestId('subtitle-overlay')).not.toBeInTheDocument();
     });
 
     it('handles subtitle fetch rejection gracefully without breaking playback', async () => {
@@ -911,10 +1108,11 @@ describe('PlayerScreen', () => {
       expect(mockDriver.play).not.toHaveBeenCalled();
     });
 
-    it('downloads online subtitle via SubtitleModal and immediately activates it on player driver', async () => {
+    it('downloads online subtitle via SubtitleModal and immediately activates it in the overlay', async () => {
       vi.spyOn(subtitlesApi, 'fetchItemSubtitles').mockResolvedValue(mockTracks);
 
       const client = new ApiClient('http://localhost:8492');
+      const fetchTextSpy = vi.spyOn(client, 'fetchText').mockResolvedValue(SAMPLE_VTT);
       vi.spyOn(client, 'fetch').mockImplementation(async (path: string) => {
         if (path.includes('/search')) {
           return {
@@ -993,10 +1191,8 @@ describe('PlayerScreen', () => {
         screen.getByText('Download & Activate').click();
       });
 
-      // Driver should immediately be updated with the newly downloaded track
-      expect(mockDriver.setSubtitleTrack).toHaveBeenLastCalledWith(
-        'http://localhost:8492/api/v1/subtitles/99/stream.vtt'
-      );
+      // The newly downloaded track is immediately loaded into the subtitle overlay
+      expect(fetchTextSpy).toHaveBeenLastCalledWith('http://localhost:8492/api/v1/subtitles/99/stream.vtt');
     });
 
     it('displays error diagnostic modal and prevents driver init when itemId is undefined', async () => {
@@ -1019,7 +1215,7 @@ describe('PlayerScreen', () => {
       expect(screen.getByText(/Invalid or missing media item ID for playback stream/)).toBeInTheDocument();
     });
 
-    it('supports TV remote D-Pad navigation between Retry Playback, Try HTML5 Video Player, and Exit to Browse on error screen', async () => {
+    it('supports TV remote D-Pad navigation between Retry Playback, Try Direct Stream, Try HTML5 Video Player, and Exit to Browse on error screen', async () => {
       const onExit = vi.fn();
       render(
         <FocusProvider>
@@ -1033,7 +1229,7 @@ describe('PlayerScreen', () => {
         </FocusProvider>
       );
 
-      // Trigger error from player driver
+      // Trigger error from player driver (starts in HLS mode by default)
       act(() => {
         mockDriver.errorCallback?.('Hardware decoding error');
       });
@@ -1041,18 +1237,18 @@ describe('PlayerScreen', () => {
       expect(screen.getByText('Playback Error')).toBeInTheDocument();
 
       const retryBtn = screen.getByRole('button', { name: /Retry Playback/i });
-      const hlsBtn = screen.getByRole('button', { name: /Play with Transcoding \(HLS\)/i });
+      const directBtn = screen.getByRole('button', { name: /Try Direct Stream/i });
       const html5Btn = screen.getByRole('button', { name: /Try HTML5 Video Player/i });
       const exitBtn = screen.getByRole('button', { name: /Exit to Browse/i });
 
       // Retry Playback is initially focused
       expect(retryBtn).toHaveClass('tv-focus-ring');
 
-      // Navigate Right -> Play with Transcoding (HLS)
+      // Navigate Right -> Try Direct Stream
       act(() => {
         fireEvent.keyDown(window, { keyCode: TVKeys.RIGHT, key: 'ArrowRight' });
       });
-      expect(hlsBtn).toHaveClass('tv-focus-ring');
+      expect(directBtn).toHaveClass('tv-focus-ring');
 
       // Navigate Right -> Try HTML5 Video Player
       act(() => {
@@ -1082,6 +1278,134 @@ describe('PlayerScreen', () => {
         fireEvent.keyDown(window, { keyCode: TVKeys.ENTER, key: 'Enter' });
       });
       expect(onExit).toHaveBeenCalledTimes(1);
+    });
+
+    it('switches to /api/v1/stream/{id} when Try Direct Stream is clicked on HLS error screen', async () => {
+      render(
+        <FocusProvider>
+          <PlayerScreen
+            itemId={101}
+            title="Sample Movie"
+            serverUrl="http://localhost:8492"
+            token="test-token"
+            onExit={vi.fn()}
+          />
+        </FocusProvider>
+      );
+
+      act(() => {
+        mockDriver.errorCallback?.('HLS transcode error');
+      });
+
+      const directBtn = screen.getByRole('button', { name: /Try Direct Stream/i });
+      act(() => {
+        directBtn.click();
+      });
+
+      expect(mockDriver.init).toHaveBeenCalledWith(
+        expect.any(HTMLElement),
+        'http://localhost:8492/api/v1/stream/101?token=test-token',
+        0
+      );
+    });
+  });
+
+  describe('Hardware Video Plane Transparency & Centered Cinema Buffering Spinner', () => {
+    it('passes technical hints and max_height=1080 to driver while keeping WebView 100% transparent without opaque DOM pillarbox/letterbox mask divs', async () => {
+      vi.spyOn(itemsApi, 'fetchMediaItem').mockResolvedValue({
+        id: 101,
+        title: 'Vertical Clip',
+        technical: {
+          video_codec: 'h264',
+          audio_codec: 'aac',
+          container: 'mp4',
+          resolution: '1080x1920',
+          width: 1080,
+          height: 1920,
+          rotation: 90,
+        },
+      });
+
+      const { container } = render(
+        <PlayerScreen
+          itemId={101}
+          title="Vertical Clip"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          onExit={vi.fn()}
+        />
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      // Document & root & video hole remain transparent so AVPlay hardware video plane (0,0,1920,1080 + LETTER_BOX) is unobstructed
+      expect(document.body.style.backgroundColor).toBe('transparent');
+      expect(document.documentElement.style.backgroundColor).toBe('transparent');
+      const rootEl = container.firstChild as HTMLElement;
+      expect(rootEl).toHaveClass('bg-transparent');
+      expect(mockDriver.init).toHaveBeenCalledWith(
+        expect.any(HTMLElement),
+        'http://localhost:8492/api/v1/media/101/hls/master.m3u8?video_codec=h264&audio_codec=aac&max_height=1080&token=test-token',
+        0
+      );
+      expect(mockDriver.setMediaHints).toHaveBeenLastCalledWith({
+        resolution: '1080x1920',
+        width: 1080,
+        height: 1920,
+        rotation: 90,
+      });
+
+      // Never render opaque DOM pillarbox/letterbox mask divs that could occlude the hardware video plane
+      expect(screen.queryByTestId('player-pillarbox-left')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('player-pillarbox-right')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('player-letterbox-top')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('player-letterbox-bottom')).not.toBeInTheDocument();
+    });
+
+    it('renders centered cinema loading spinner while buffering (even when OSD is hidden) without top-right buffering text', () => {
+      render(
+        <PlayerScreen
+          itemId="item-123"
+          title="Sample Movie"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          onExit={vi.fn()}
+        />
+      );
+
+      // Initially buffering: centered spinner is visible, top-right "buffering" text is absent
+      const spinner = screen.getByTestId('player-buffering-spinner');
+      expect(spinner).toBeInTheDocument();
+      expect(spinner).toHaveAttribute('role', 'status');
+      expect(spinner).toHaveAttribute('aria-label', 'Buffering');
+      expect(spinner.innerHTML).not.toContain('backdrop-blur');
+      expect(screen.queryByText(/^buffering$/i)).not.toBeInTheDocument();
+
+      // Transition to playing -> spinner disappears, and OSD auto-hides after 4s
+      act(() => {
+        mockDriver.stateCallback?.('playing');
+      });
+      expect(screen.queryByTestId('player-buffering-spinner')).not.toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(4500);
+      });
+      expect(screen.queryByTestId('player-osd')).not.toBeInTheDocument();
+
+      // Mid-stream rebuffer while OSD is hidden -> centered spinner still renders!
+      act(() => {
+        mockDriver.stateCallback?.('buffering');
+      });
+      expect(screen.getByTestId('player-buffering-spinner')).toBeInTheDocument();
+      expect(screen.queryByText(/^buffering$/i)).not.toBeInTheDocument();
+
+      // On playback error -> spinner hides cleanly
+      act(() => {
+        mockDriver.errorCallback?.('Stream stalled');
+      });
+      expect(screen.queryByTestId('player-buffering-spinner')).not.toBeInTheDocument();
     });
   });
 });

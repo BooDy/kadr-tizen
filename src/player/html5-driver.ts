@@ -3,31 +3,72 @@ import Hls from 'hls.js';
 
 export class Html5PlayerDriver implements PlayerDriver {
   readonly name = 'HTML5 Video';
+  readonly supportsSeamlessSwap = true;
   private video: HTMLVideoElement | null = null;
   private hls: Hls | null = null;
   private timeCallback?: (posMs: number, durationMs: number) => void;
   private stateCallback?: (state: PlayerState) => void;
   private errorCallback?: (error: string) => void;
+  private hasUserSeeked = false;
 
   async init(container: HTMLElement, streamUrl: string, startMs: number): Promise<void> {
+    this.hasUserSeeked = false;
     this.video = document.createElement('video');
-    this.video.className = 'w-full h-full object-contain bg-black';
+    // Absolutely positioned so a replacement video can load on top of a still-playing one
+    this.video.className = 'absolute inset-0 w-full h-full object-contain bg-black';
     this.video.preload = 'auto';
 
+    // When another video is still playing in this container (seek swap), stay invisible until the
+    // first frame is playing, so the old picture keeps showing instead of a black box.
+    const overlapsPlayingVideo = container.querySelector('video') !== null;
+    if (overlapsPlayingVideo) {
+      this.video.style.opacity = '0';
+    }
+
     const isHls = streamUrl.includes('.m3u8') || streamUrl.includes('/hls/');
+    const targetStartSec = startMs > 0 ? startMs / 1000 : 0;
     if (isHls && Hls.isSupported()) {
       const hls = new Hls({
-        startPosition: startMs > 0 ? startMs / 1000 : -1,
+        startPosition: targetStartSec,
+        lowLatencyMode: false,
         enableWorker: true,
       });
       this.hls = hls;
       hls.loadSource(streamUrl);
       hls.attachMedia(this.video);
+      let networkRetries = 0;
+      hls.on(Hls.Events.FRAG_LOADED, () => {
+        networkRetries = 0;
+      });
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (data.fatal) {
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
-              hls.startLoad();
+              // Retry a few times, then report the real cause instead of spinning forever
+              // (which only ever surfaced as a generic "buffering timeout").
+              if (networkRetries < 3) {
+                networkRetries++;
+                setTimeout(() => {
+                  try {
+                    // Pass explicit position so hls.js never falls back to -1 (EVENT live edge)
+                    const resumeSec =
+                      this.video && this.video.currentTime > 0
+                        ? this.video.currentTime
+                        : targetStartSec;
+                    hls.startLoad(resumeSec);
+                  } catch {
+                    // Ignored
+                  }
+                }, 500 * networkRetries);
+              } else {
+                const code = data.response?.code;
+                this.errorCallback?.(
+                  `HLS Network Error: ${data.details || 'request failed'}${
+                    code ? ` (HTTP ${code})` : ''
+                  }`
+                );
+                hls.destroy();
+              }
               break;
             case Hls.ErrorTypes.MEDIA_ERROR:
               hls.recoverMediaError();
@@ -41,18 +82,44 @@ export class Html5PlayerDriver implements PlayerDriver {
       });
     } else {
       this.video.src = streamUrl;
-      if (startMs > 0) {
-        this.video.currentTime = startMs / 1000;
+      if (targetStartSec > 0) {
+        this.video.currentTime = targetStartSec;
       }
+      this.video.addEventListener(
+        'loadedmetadata',
+        () => {
+          if (!this.video || this.hasUserSeeked) return;
+          if (targetStartSec > 0 && Math.abs(this.video.currentTime - targetStartSec) > 1) {
+            this.video.currentTime = targetStartSec;
+          } else if (isHls && targetStartSec === 0 && this.video.currentTime > 3) {
+            // Rewind native HLS playback if an un-ended EVENT playlist joined at the live edge
+            this.video.currentTime = 0;
+          }
+        },
+        { once: true }
+      );
     }
 
-    this.video.addEventListener('timeupdate', () => {
+    const emitTimeUpdate = () => {
       if (this.video && this.timeCallback) {
-        this.timeCallback(Math.round(this.video.currentTime * 1000), Math.round(this.video.duration * 1000) || 0);
+        const rawPos = this.video.currentTime;
+        const rawDur = this.video.duration;
+        const posMs = Number.isFinite(rawPos) && rawPos > 0 ? Math.round(rawPos * 1000) : 0;
+        const durMs = Number.isFinite(rawDur) && rawDur > 0 ? Math.round(rawDur * 1000) : 0;
+        this.timeCallback(posMs, durMs);
       }
-    });
+    };
 
-    this.video.addEventListener('playing', () => this.stateCallback?.('playing'));
+    this.video.addEventListener('timeupdate', emitTimeUpdate);
+    this.video.addEventListener('loadedmetadata', emitTimeUpdate);
+    this.video.addEventListener('durationchange', emitTimeUpdate);
+
+    this.video.addEventListener('playing', () => {
+      if (this.video && this.video.style.opacity === '0') {
+        this.video.style.opacity = '1';
+      }
+      this.stateCallback?.('playing');
+    });
     this.video.addEventListener('pause', () => this.stateCallback?.('paused'));
     this.video.addEventListener('waiting', () => this.stateCallback?.('buffering'));
     this.video.addEventListener('ended', () => this.stateCallback?.('ended'));
@@ -117,6 +184,7 @@ export class Html5PlayerDriver implements PlayerDriver {
   }
 
   seekTo(ms: number, onComplete?: () => void): void {
+    this.hasUserSeeked = true;
     if (this.video) {
       this.video.currentTime = Math.max(0, ms / 1000);
       onComplete?.();

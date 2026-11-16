@@ -221,6 +221,87 @@ describe('TVModal', () => {
     fireEvent.keyDown(window, { key: 'Escape', keyCode: TVKeys.BACK_WEB });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it('allows Backspace to edit text input inside modal without blurring or closing modal', () => {
+    const onClose = vi.fn();
+    render(
+      <FocusProvider>
+        <TVModal isOpen={true} onClose={onClose} trapGroupId="test-modal">
+          <input data-testid="modal-input" defaultValue="test" />
+        </TVModal>
+      </FocusProvider>
+    );
+
+    const input = screen.getByTestId('modal-input') as HTMLInputElement;
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
+    fireEvent.keyDown(input, { key: 'Backspace', keyCode: TVKeys.BACKSPACE });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('blurs active text input on BACK_TIZEN / Escape without closing modal, then closes on second Back', () => {
+    const onClose = vi.fn();
+    render(
+      <FocusProvider>
+        <TVModal isOpen={true} onClose={onClose} trapGroupId="test-modal">
+          <input data-testid="modal-input" defaultValue="test" />
+        </TVModal>
+      </FocusProvider>
+    );
+
+    const input = screen.getByTestId('modal-input') as HTMLInputElement;
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
+    // First Back blurs input without calling onClose
+    fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN, key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(document.activeElement).not.toBe(input);
+
+    // Second Back closes modal
+    fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN, key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes modal on BACKSPACE key when focus is outside any text input', () => {
+    const onClose = vi.fn();
+    render(
+      <FocusProvider>
+        <TVModal isOpen={true} onClose={onClose} trapGroupId="test-modal">
+          <button data-testid="modal-btn">Button</button>
+        </TVModal>
+      </FocusProvider>
+    );
+
+    fireEvent.keyDown(window, { keyCode: TVKeys.BACKSPACE, key: 'Backspace' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores Back key when activeTrap belongs to a different trap group', () => {
+    const onClose = vi.fn();
+    function TrapTest() {
+      const { pushTrap } = useFocusContext();
+      return (
+        <div>
+          <button onClick={() => pushTrap('other-modal')} data-testid="push-other">Push</button>
+          <TVModal isOpen={true} onClose={onClose} trapGroupId="test-modal">
+            <div>Modal Content</div>
+          </TVModal>
+        </div>
+      );
+    }
+    render(
+      <FocusProvider>
+        <TrapTest />
+      </FocusProvider>
+    );
+
+    fireEvent.click(screen.getByTestId('push-other'));
+    fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN, key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });
 
 describe('KeypadGrid', () => {
@@ -327,7 +408,8 @@ describe('Theme Tokens and Focus Ring CSS', () => {
     expect(cssContent).toContain('--color-text-main: #F5E5E5');
     expect(cssContent).toContain('--color-muted: #5C3C3C');
     expect(cssContent).toContain('--color-border-subtle: rgba(245, 229, 229, 0.08)');
-    expect(cssContent).toMatch(/box-shadow:\s*0\s+0\s+0\s+3px\s+#FFB800,\s*0\s+0\s+28px\s+rgba\(255,\s*184,\s*0,\s*0\.55\);/);
+    expect(cssContent).toMatch(/box-shadow:\s*0\s+0\s+0\s+3px\s+#FFB800/);
+    expect(cssContent).not.toContain('box-shadow 0.15s');
   });
 
   it('configures body styling in index.html with #2A0A0A and #F5E5E5', () => {

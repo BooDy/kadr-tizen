@@ -42,24 +42,30 @@ export function ServerConnectScreen({ onServerSelected }: ServerConnectScreenPro
     onEnter: () => handleManualConnect(),
   });
 
-  const runDiscovery = async () => {
+  const runDiscovery = async (isCancelled?: () => boolean) => {
     setScanning(true);
     setErrorMsg(null);
     try {
       const found = await discoverLocalServers();
+      if (typeof isCancelled === 'function' && isCancelled()) return;
       setServers(found);
       setScanning(false);
       if (found.length === 1) {
         onServerSelected(found[0].url, found[0].name);
       }
     } catch {
+      if (typeof isCancelled === 'function' && isCancelled()) return;
       setServers([]);
       setScanning(false);
     }
   };
 
   useEffect(() => {
-    runDiscovery();
+    let cancelled = false;
+    runDiscovery(() => cancelled);
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleManualConnect = async () => {
@@ -148,8 +154,8 @@ export function ServerConnectScreen({ onServerSelected }: ServerConnectScreenPro
           id="retry-discovery-btn"
           groupId="retry"
           variant="secondary"
-          onEnter={runDiscovery}
-          onClick={runDiscovery}
+          onEnter={() => runDiscovery()}
+          onClick={() => runDiscovery()}
         >
           <RefreshCw className="w-5 h-5" /> Retry Auto-Discovery
         </TVButton>
