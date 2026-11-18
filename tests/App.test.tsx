@@ -1691,5 +1691,18 @@ describe('App State Machine & Router', () => {
       expect(screen.getByText('Paul Atreides unites with Chani and the Fremen.')).toBeInTheDocument();
     });
   });
+
+  it('disarms the pre-boot HTML error trap immediately when App mounts', async () => {
+    const disarmSpy = vi.fn();
+    (window as any).__kadrDisarmBootTrap = disarmSpy;
+    try {
+      render(<App />);
+      await waitFor(() => {
+        expect(disarmSpy).toHaveBeenCalledTimes(1);
+      });
+    } finally {
+      delete (window as any).__kadrDisarmBootTrap;
+    }
+  });
 });
 

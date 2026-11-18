@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
 import postcss from 'postcss';
+import { buildBootErrorTrapScriptTag } from './src/utils/bootTrapScript';
 
 function tizenClassicBundlePlugin() {
   return {
@@ -143,28 +144,8 @@ function tizenClassicBundlePlugin() {
         transformed = transformed.replace('</head>', '    <link rel="stylesheet" href="./assets/style.css">\n  </head>');
       }
 
-      // 3. Add an on-screen diagnostic error overlay in case of any runtime crash
-      const errorTrapScript = `
-    <script>
-      (function() {
-        function showStartupError(title, err) {
-          var el = document.getElementById('kadr-startup-error');
-          if (!el) {
-            el = document.createElement('div');
-            el.id = 'kadr-startup-error';
-            el.style.cssText = 'position:fixed;bottom:24px;left:24px;right:24px;background:#7f1d1d;color:#fee2e2;padding:24px;font-family:monospace;font-size:20px;z-index:999999;border:3px solid #ef4444;border-radius:12px;white-space:pre-wrap;line-height:1.5;box-shadow:0 10px 25px rgba(0,0,0,0.8);';
-            (document.body || document.documentElement).appendChild(el);
-          }
-          el.textContent = title + '\\n' + (err && err.stack ? err.stack : (err && err.message ? err.message : err));
-        }
-        window.addEventListener('error', function(e) {
-          showStartupError('Startup / Runtime Error:', e.error || (e.message + ' at ' + e.filename + ':' + e.lineno + ':' + e.colno));
-        });
-        window.addEventListener('unhandledrejection', function(e) {
-          showStartupError('Unhandled Promise Rejection:', e.reason);
-        });
-      })();
-    </script>`;
+      // 3. Add a boot-scoped on-screen diagnostic error overlay in case of startup crash
+      const errorTrapScript = buildBootErrorTrapScriptTag();
 
       transformed = transformed.replace('</head>', errorTrapScript + '\n  </head>');
       return transformed;

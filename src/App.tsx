@@ -24,6 +24,7 @@ import {
   applyOptimisticProgress,
   PlaybackProgressSnapshot,
 } from './utils/playbackProgress';
+import { disarmBootErrorTrap } from './utils/bootTrap';
 
 export type AppView = 'connect' | 'profiles' | 'browse' | 'player';
 
@@ -87,6 +88,8 @@ export default function App() {
     if (token) c.setToken(token);
     return c;
   }, [serverUrl, token]);
+
+  useEffect(() => disarmBootErrorTrap(), []);
 
   useEffect(() => {
     const handleOnline = () => setIsOffline(false);
