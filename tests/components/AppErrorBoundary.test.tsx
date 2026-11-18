@@ -164,4 +164,72 @@ describe('AppErrorBoundary', () => {
     expect(document.getElementById(BOOT_ERROR_ELEMENT_ID)).toBeNull();
     expect(screen.getByRole('alertdialog')).toBeInTheDocument();
   });
+
+  it('normalizes non-Error thrown values (undefined, null, and string primitive) and recovers cleanly', () => {
+    let thrownValue: unknown = undefined;
+    let shouldCrash = true;
+
+    function NonErrorCrash() {
+      if (shouldCrash) {
+        throw thrownValue;
+      }
+      return <div data-testid="recovered-non-error">Recovered</div>;
+    }
+
+    // 1. throw undefined
+    const { unmount } = render(
+      <AppErrorBoundary>
+        <NonErrorCrash />
+      </AppErrorBoundary>
+    );
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
+    expect(screen.getByText(/An unexpected application error occurred\./i)).toBeInTheDocument();
+    unmount();
+
+    // 2. throw null
+    thrownValue = null;
+    const nullRender = render(
+      <AppErrorBoundary>
+        <NonErrorCrash />
+      </AppErrorBoundary>
+    );
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
+    expect(screen.getByText(/An unexpected application error occurred\./i)).toBeInTheDocument();
+    nullRender.unmount();
+
+    // 3. throw 'string error' + verify recovery
+    thrownValue = 'string error';
+    render(
+      <AppErrorBoundary>
+        <NonErrorCrash />
+      </AppErrorBoundary>
+    );
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
+    expect(screen.getByText('string error')).toBeInTheDocument();
+
+    shouldCrash = false;
+    fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN, key: 'Escape' });
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(screen.getByTestId('recovered-non-error')).toBeInTheDocument();
+  });
+
+  it('renders recovery buttons with tabIndex=-1 and constant border classes to prevent layout shift', () => {
+    function AlwaysCrash(): never {
+      throw new Error('Layout check');
+    }
+
+    render(
+      <AppErrorBoundary>
+        <AlwaysCrash />
+      </AppErrorBoundary>
+    );
+
+    const tryAgainBtn = screen.getByRole('button', { name: /Try Again/i });
+    const reloadBtn = screen.getByRole('button', { name: /Reload App/i });
+    expect(tryAgainBtn).toHaveAttribute('tabindex', '-1');
+    expect(reloadBtn).toHaveAttribute('tabindex', '-1');
+    expect(tryAgainBtn.className).toContain('border');
+    expect(tryAgainBtn.className).toContain('border-transparent');
+    expect(reloadBtn.className).toContain('border');
+  });
 });

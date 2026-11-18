@@ -13,6 +13,31 @@ export interface AppErrorBoundaryState {
   resetCount: number;
 }
 
+const DEFAULT_ERROR_MESSAGE = 'An unexpected application error occurred.';
+
+function normalizeError(error: unknown): Error {
+  if (error instanceof Error) {
+    return error;
+  }
+  if (typeof error === 'string') {
+    return new Error(error.trim() ? error : DEFAULT_ERROR_MESSAGE);
+  }
+  if (
+    error !== null &&
+    typeof error === 'object' &&
+    'message' in error &&
+    typeof (error as { message: unknown }).message === 'string'
+  ) {
+    const msg = (error as { message: string }).message;
+    return new Error(msg.trim() ? msg : DEFAULT_ERROR_MESSAGE);
+  }
+  if (error === null || error === undefined) {
+    return new Error(DEFAULT_ERROR_MESSAGE);
+  }
+  const str = String(error);
+  return new Error(str.trim() ? str : DEFAULT_ERROR_MESSAGE);
+}
+
 /**
  * Root React ErrorBoundary for Samsung Tizen 5.5 / Chromium 69.
  * Renders zero wrapper DOM elements during normal operation so hardware
@@ -31,14 +56,14 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
     };
   }
 
-  static getDerivedStateFromError(error: Error): Partial<AppErrorBoundaryState> {
+  static getDerivedStateFromError(error: unknown): Partial<AppErrorBoundaryState> {
     return {
-      error,
+      error: normalizeError(error),
       focusedAction: 'recover',
     };
   }
 
-  componentDidCatch(error: Error, info: ErrorInfo): void {
+  componentDidCatch(error: unknown, info: ErrorInfo): void {
     if (typeof window !== 'undefined') {
       window.__kadrDisarmBootTrap?.();
     }
@@ -155,7 +180,7 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
     const { error, focusedAction } = this.state;
     const isRecoverFocused = focusedAction === 'recover';
     const isReloadFocused = focusedAction === 'reload';
-    const message = error.message || 'An unexpected application error occurred.';
+    const message = error?.message || DEFAULT_ERROR_MESSAGE;
 
     return (
       <div
@@ -182,24 +207,26 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
           <div className="flex items-center justify-center">
             <button
               type="button"
+              tabIndex={-1}
               onClick={this.handleRecover}
               aria-current={isRecoverFocused ? 'true' : undefined}
-              className={`px-8 py-4 rounded-xl font-semibold text-xl tracking-wide transition-transform duration-75 outline-none flex items-center justify-center cursor-pointer select-none mr-4 ${
+              className={`px-8 py-4 rounded-xl font-semibold text-xl tracking-wide transition-transform duration-75 outline-none flex items-center justify-center cursor-pointer select-none border mr-4 ${
                 isRecoverFocused
-                  ? 'bg-[#FF6B00] text-white tv-focus-ring'
-                  : 'bg-[#4A1616] text-[#F5E5E5] border border-[rgba(245,229,229,0.08)]'
+                  ? 'bg-[#FF6B00] text-white border-transparent tv-focus-ring'
+                  : 'bg-[#4A1616] text-[#F5E5E5] border-[rgba(245,229,229,0.08)]'
               }`}
             >
               Try Again
             </button>
             <button
               type="button"
+              tabIndex={-1}
               onClick={this.handleReload}
               aria-current={isReloadFocused ? 'true' : undefined}
-              className={`px-8 py-4 rounded-xl font-semibold text-xl tracking-wide transition-transform duration-75 outline-none flex items-center justify-center cursor-pointer select-none ${
+              className={`px-8 py-4 rounded-xl font-semibold text-xl tracking-wide transition-transform duration-75 outline-none flex items-center justify-center cursor-pointer select-none border ${
                 isReloadFocused
-                  ? 'bg-[#FF6B00] text-white tv-focus-ring'
-                  : 'bg-[#4A1616] text-[#F5E5E5] border border-[rgba(245,229,229,0.08)]'
+                  ? 'bg-[#FF6B00] text-white border-transparent tv-focus-ring'
+                  : 'bg-[#4A1616] text-[#F5E5E5] border-[rgba(245,229,229,0.08)]'
               }`}
             >
               Reload App
