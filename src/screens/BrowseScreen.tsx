@@ -41,6 +41,7 @@ export interface BrowseScreenProps {
   ) => void;
   onSwitchProfile: () => void;
   onSwitchServer?: () => void;
+  onRequestExit?: () => void;
   onLockedLibrary?: (libraryId: string) => void;
   onBrowseFolder?: (libraryId: string, folderPath?: string) => void;
   onOpenPlaylist?: (playlistId: string) => void;
@@ -717,6 +718,7 @@ export function BrowseScreen({
   onPlayItem,
   onSwitchProfile,
   onSwitchServer,
+  onRequestExit,
   onLockedLibrary,
   onBrowseFolder,
   onOpenPlaylist,
@@ -765,6 +767,18 @@ export function BrowseScreen({
 
   const onSwitchProfileRef = useRef(onSwitchProfile);
   onSwitchProfileRef.current = onSwitchProfile;
+
+  const onRequestExitRef = useRef(onRequestExit);
+  onRequestExitRef.current = onRequestExit;
+
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
+
+  const layoutErrorRef = useRef(layoutError);
+  layoutErrorRef.current = layoutError;
 
   const handleSwitchProfileStable = useCallback(() => {
     onSwitchProfileRef.current?.();
@@ -942,15 +956,19 @@ export function BrowseScreen({
           '[aria-modal="true"], [role="dialog"], [role="alertdialog"], [data-modal-overlay="true"]'
         )
       );
-      if (isTargetInModal || isModalActive(activeTrap)) {
+      if (isTargetInModal || isModalActive(activeTrapRef.current)) {
         return;
       }
 
       const code = e.keyCode || e.which;
       const currentFocused = focusedIdRef.current;
       const onSidebar = isSidebarFocusedRef.current;
+      const currentLayout = layoutRef.current;
+      const currentTab = activeTabRef.current;
+      const currentLayoutError = layoutErrorRef.current;
 
-      // Back navigation (Escape / TV Back 10009 / Backspace) from content area returns focus to sidebar
+      // Back navigation (Escape / TV Back 10009 / Backspace) from content area returns focus to sidebar;
+      // pressing Back from the root sidebar requests exit confirmation.
       if (
         code === TVKeys.BACK_TIZEN ||
         code === TVKeys.BACK_WEB ||
@@ -958,10 +976,17 @@ export function BrowseScreen({
         e.key === 'Escape' ||
         e.key === 'Backspace'
       ) {
-        if (!onSidebar && isValidContentNode(currentFocused, layout, activeTab)) {
+        if (!onSidebar && isValidContentNode(currentFocused, currentLayout, currentTab)) {
           e.preventDefault();
           e.stopPropagation();
-          setFocusedId(`nav-screen-${activeTab}`);
+          e.stopImmediatePropagation();
+          setFocusedId(`nav-screen-${currentTab}`);
+          return;
+        } else {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+          onRequestExitRef.current?.();
           return;
         }
       }
@@ -970,30 +995,32 @@ export function BrowseScreen({
       if (code === TVKeys.LEFT || e.key === 'ArrowLeft') {
         if (
           !onSidebar &&
-          isValidContentNode(currentFocused, layout, activeTab) &&
-          isLeftmostContentNode(currentFocused, layout, activeTab)
+          isValidContentNode(currentFocused, currentLayout, currentTab) &&
+          isLeftmostContentNode(currentFocused, currentLayout, currentTab)
         ) {
           e.preventDefault();
           e.stopPropagation();
-          setFocusedId(`nav-screen-${activeTab}`);
+          e.stopImmediatePropagation();
+          setFocusedId(`nav-screen-${currentTab}`);
           return;
         }
       }
 
       // ArrowRight from sidebar transitions into content area
       if (code === TVKeys.RIGHT || e.key === 'ArrowRight') {
-        if (onSidebar && (layout || activeTab === 'playlists' || layoutError)) {
+        if (onSidebar && (currentLayout || currentTab === 'playlists' || currentLayoutError)) {
           e.preventDefault();
           e.stopPropagation();
+          e.stopImmediatePropagation();
           const lastId = lastContentFocusedIdRef.current;
-          const targetId = isValidContentNode(lastId, layout, activeTab)
+          const targetId = isValidContentNode(lastId, currentLayout, currentTab)
             ? lastId
-            : activeTab === 'playlists'
+            : currentTab === 'playlists'
             ? getFirstPlaylistsFocusableId()
-            : layoutError
+            : currentLayoutError
             ? 'retry-layout-btn'
-            : layout
-            ? getFirstFocusableId(layout)
+            : currentLayout
+            ? getFirstFocusableId(currentLayout)
             : null;
           if (targetId && !isModalActive(activeTrapRef.current)) {
             setFocusedId(targetId);

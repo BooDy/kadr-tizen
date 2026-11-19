@@ -13,6 +13,7 @@ export interface ProfileSelectScreenProps {
     pin: string
   ) => Promise<{ success: boolean; error?: string; lockedOutSecs?: number }>;
   onBackToServerConnect?: () => void;
+  noticeMessage?: string | null;
 }
 
 const AVATAR_GRADIENTS = [
@@ -49,7 +50,7 @@ function ProfileItem({ profile, index, autoFocus, onSelect }: ProfileItemProps) 
       tabIndex={-1}
       role="button"
       onClick={onSelect}
-      className={`group flex flex-col items-center rounded-2xl p-4 bg-[#3B1111] border border-[rgba(245,229,229,0.08)] cursor-pointer transition-all duration-200 outline-none ${
+      className={`group flex flex-col items-center rounded-2xl p-4 bg-[#3B1111] border border-[rgba(245,229,229,0.08)] cursor-pointer transition-all duration-200 outline-none mr-8 last:mr-0 ${
         isFocused ? 'tv-focus-ring scale-105 z-10' : 'scale-100 opacity-90'
       }`}
     >
@@ -77,12 +78,12 @@ function ProfileItem({ profile, index, autoFocus, onSelect }: ProfileItemProps) 
       </div>
 
       {/* Username & Metadata */}
-      <div className="mt-4 text-center flex flex-col items-center gap-1.5 w-36">
-        <span className="block text-xl font-bold truncate text-[#F5E5E5] w-full">
+      <div className="mt-4 text-center flex flex-col items-center w-36">
+        <span className="block text-xl font-bold truncate text-[#F5E5E5] w-full mb-1.5">
           {profile.username}
         </span>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center justify-center">
           {profile.role === 'admin' ? (
             <span className="inline-block text-xs font-semibold uppercase tracking-wider bg-[#D43F15] text-white px-2.5 py-0.5 rounded-full shadow-xs">
               Administrator
@@ -103,6 +104,7 @@ export function ProfileSelectScreen({
   serverName,
   onLogin,
   onBackToServerConnect,
+  noticeMessage,
 }: ProfileSelectScreenProps) {
   const [selectedUser, setSelectedUser] = useState<ProfileCard | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | undefined>();
@@ -159,7 +161,17 @@ export function ProfileSelectScreen({
         <p className="text-xs font-semibold uppercase tracking-wider text-[#FF6B00] mt-1">{serverName}</p>
       </div>
 
-      <div className="flex gap-8 justify-center items-center">
+      {noticeMessage && (
+        <div
+          data-testid="session-expired-banner"
+          role="status"
+          className="mb-6 px-6 py-3 rounded-full bg-[#D43F15]/15 border border-[#D43F15]/40 text-[#FFB800] text-lg font-semibold flex items-center justify-center shadow-lg"
+        >
+          {noticeMessage}
+        </div>
+      )}
+
+      <div className="flex justify-center items-center">
         {profiles.map((profile, idx) => (
           <ProfileItem
             key={profile.id}

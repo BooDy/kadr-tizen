@@ -1,13 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { discoverLocalServers, verifyServer } from '../api/discovery';
 import { DiscoveredServer } from '../types/kadr';
 import { TVButton } from '../components/tv/TVButton';
 import { TVCard } from '../components/tv/TVCard';
-import { useFocusable } from '../navigation/useFocusable';
+import { useFocusContext } from '../navigation/FocusContext';
+import { TVKeys } from '../navigation/keys';
+import { isTextInputElement, useFocusable } from '../navigation/useFocusable';
 import { Wifi, RefreshCw } from 'lucide-react';
 
 export interface ServerConnectScreenProps {
   onServerSelected: (url: string, name: string) => void;
+  onRequestExit?: () => void;
 }
 
 export function formatServerUrl(input: string): string {
@@ -29,11 +32,18 @@ export function formatServerUrl(input: string): string {
   }
 }
 
-export function ServerConnectScreen({ onServerSelected }: ServerConnectScreenProps) {
+export function ServerConnectScreen({ onServerSelected, onRequestExit }: ServerConnectScreenProps) {
   const [scanning, setScanning] = useState(true);
   const [servers, setServers] = useState<DiscoveredServer[]>([]);
   const [manualIp, setManualIp] = useState('192.168.1.');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const { activeTrap, getActiveTrap } = useFocusContext();
+  const activeTrapRef = useRef(activeTrap);
+  activeTrapRef.current = activeTrap;
+
+  const onRequestExitRef = useRef(onRequestExit);
+  onRequestExitRef.current = onRequestExit;
 
   const { ref: inputRef, isFocused: isInputFocused } = useFocusable<HTMLInputElement>({
     id: 'manual-ip-input',
@@ -68,6 +78,57 @@ export function ServerConnectScreen({ onServerSelected }: ServerConnectScreenPro
     };
   }, []);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const currentTrap = getActiveTrap?.() ?? activeTrapRef.current;
+      if (currentTrap) return;
+
+      const targetEl = e.target as HTMLElement | null;
+      if (
+        targetEl?.closest?.(
+          '[aria-modal="true"], [role="dialog"], [role="alertdialog"], [data-modal-overlay="true"]'
+        ) ||
+        (typeof document !== 'undefined' &&
+          document.querySelector(
+            '[aria-modal="true"], [role="dialog"], [role="alertdialog"], [data-modal-overlay="true"]'
+          ))
+      ) {
+        return;
+      }
+
+      const code = e.keyCode || e.which;
+      const activeEl =
+        typeof document !== 'undefined' ? (document.activeElement as HTMLElement | null) : null;
+
+      if (
+        (code === TVKeys.BACKSPACE || e.key === 'Backspace') &&
+        (isTextInputElement(activeEl) || isTextInputElement(targetEl))
+      ) {
+        return;
+      }
+
+      if (
+        code === TVKeys.BACK_TIZEN ||
+        code === TVKeys.BACK_WEB ||
+        code === TVKeys.BACKSPACE ||
+        e.key === 'Escape' ||
+        e.key === 'Backspace'
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        if (isTextInputElement(activeEl)) {
+          activeEl.blur();
+          return;
+        }
+        onRequestExitRef.current?.();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [getActiveTrap]);
+
   const handleManualConnect = async () => {
     setErrorMsg(null);
     const url = formatServerUrl(manualIp);
@@ -81,7 +142,7 @@ export function ServerConnectScreen({ onServerSelected }: ServerConnectScreenPro
 
   return (
     <div className="w-full h-full flex flex-col items-center justify-center bg-[#2A0A0A] p-16 select-none">
-      <div className="flex flex-col items-center gap-2 mb-6">
+      <div className="flex flex-col items-center mb-6">
         <img
           src="./kadr-logo.png"
           alt="Kadr"
@@ -93,14 +154,14 @@ export function ServerConnectScreen({ onServerSelected }: ServerConnectScreenPro
       </div>
 
       {scanning ? (
-        <div className="flex flex-col items-center gap-4 my-12">
-          <Wifi className="w-16 h-16 text-[#FF6B00] animate-pulse" />
+        <div className="flex flex-col items-center my-12">
+          <Wifi className="w-16 h-16 text-[#FF6B00] animate-pulse mb-4" />
           <p className="text-2xl text-[#F5E5E5]/90">Searching your Wi-Fi/LAN for Kadr servers...</p>
         </div>
       ) : servers.length > 0 ? (
-        <div className="flex flex-col items-center gap-6 my-8">
-          <h2 className="text-2xl text-[#F5E5E5]/90">Select Discovered Server:</h2>
-          <div className="flex gap-6">
+        <div className="flex flex-col items-center my-8">
+          <h2 className="text-2xl text-[#F5E5E5]/90 mb-6">Select Discovered Server:</h2>
+          <div className="flex items-center">
             {servers.map((s, idx) => (
               <TVCard
                 key={s.server_id}
@@ -110,14 +171,15 @@ export function ServerConnectScreen({ onServerSelected }: ServerConnectScreenPro
                 subtitle={s.url}
                 onSelect={() => onServerSelected(s.url, s.name)}
                 autoFocus={idx === 0}
+                className="mr-6 last:mr-0"
               />
             ))}
           </div>
         </div>
       ) : (
-        <div className="flex flex-col items-center gap-4 my-8">
-          <p className="text-xl text-[#5C3C3C]">No servers discovered on the local network.</p>
-          <div className="flex items-center gap-4 mt-4">
+        <div className="flex flex-col items-center my-8">
+          <p className="text-xl text-[#5C3C3C] mb-4">No servers discovered on the local network.</p>
+          <div className="flex items-center mt-4">
             <input
               ref={inputRef}
               id="manual-ip-input"
@@ -128,7 +190,7 @@ export function ServerConnectScreen({ onServerSelected }: ServerConnectScreenPro
                 if (e.key === 'Enter') handleManualConnect();
               }}
               placeholder="e.g. 192.168.1.100"
-              className={`bg-[#3B1111] border px-6 py-4 rounded-xl text-xl text-[#F5E5E5] outline-none w-96 text-center transition-all ${
+              className={`bg-[#3B1111] border px-6 py-4 rounded-xl text-xl text-[#F5E5E5] outline-none w-96 text-center transition-all mr-4 ${
                 isInputFocused
                   ? 'border-[#FFB800] ring-4 ring-[#FFB800]/30'
                   : 'border-[rgba(245,229,229,0.08)] focus:border-[#FF6B00]'
@@ -145,7 +207,7 @@ export function ServerConnectScreen({ onServerSelected }: ServerConnectScreenPro
               Connect
             </TVButton>
           </div>
-          {errorMsg && <p className="text-[#D43F15] mt-2 text-lg">{errorMsg}</p>}
+          {errorMsg && <p className="text-[#D43F15] mt-4 text-lg">{errorMsg}</p>}
         </div>
       )}
 
@@ -157,7 +219,7 @@ export function ServerConnectScreen({ onServerSelected }: ServerConnectScreenPro
           onEnter={() => runDiscovery()}
           onClick={() => runDiscovery()}
         >
-          <RefreshCw className="w-5 h-5" /> Retry Auto-Discovery
+          <RefreshCw className="w-5 h-5 mr-2" /> Retry Auto-Discovery
         </TVButton>
       </div>
     </div>

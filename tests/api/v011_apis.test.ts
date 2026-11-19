@@ -246,6 +246,7 @@ describe('Kadr v0.1.1-alpha API Clients & Data Contracts', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pin: '1234' }),
+        skipUnauthorizedHandler: true,
       });
       expect(res.unlock_token).toBe('jwt-unlock');
     });

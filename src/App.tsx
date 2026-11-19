@@ -18,6 +18,7 @@ import {
   AddToPlaylistTarget,
 } from './components/playlists/AddToPlaylistModal';
 import { PinPadModal } from './components/pin/PinPadModal';
+import { ExitConfirmModal } from './components/tv/ExitConfirmModal';
 import { PlayerScreen } from './screens/PlayerScreen';
 import { WifiOff } from 'lucide-react';
 import {
@@ -25,6 +26,7 @@ import {
   PlaybackProgressSnapshot,
 } from './utils/playbackProgress';
 import { disarmBootErrorTrap } from './utils/bootTrap';
+import { exitTvApp } from './utils/tizenLifecycle';
 
 export type AppView = 'connect' | 'profiles' | 'browse' | 'player';
 
@@ -79,6 +81,9 @@ export default function App() {
     viewState: { itemId: string; selectedSeason: number; lastFocusedId: string | null } | null;
   } | null>(null);
   const sessionProgressRef = useRef<Map<string, PlaybackProgressSnapshot>>(new Map());
+  const unauthorizedRedirectRef = useRef(false);
+  const [isExitModalOpen, setIsExitModalOpen] = useState(false);
+  const [sessionExpiredNotice, setSessionExpiredNotice] = useState<string | null>(null);
   const [isOffline, setIsOffline] = useState(
     typeof navigator !== 'undefined' ? !navigator.onLine : false
   );
@@ -90,6 +95,38 @@ export default function App() {
   }, [serverUrl, token]);
 
   useEffect(() => disarmBootErrorTrap(), []);
+
+  useEffect(() => {
+    setIsExitModalOpen(false);
+  }, [view]);
+
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      unauthorizedRedirectRef.current = true;
+      localStorage.removeItem('kadr_token');
+      setToken(null);
+      setCurrentUserId(null);
+      setActiveItem(null);
+      setActivePlaylistId(null);
+      setAddToPlaylistTarget(null);
+      setFolderBrowserState(null);
+      setImageViewerState(null);
+      setUnlockLibraryId(null);
+      setUnlockError(undefined);
+      setUnlockLockoutSecs(0);
+      setItemDetailViewState(null);
+      setSuspendedItemDetail(null);
+      setPlayerItem(null);
+      sessionProgressRef.current.clear();
+      client.clearLibraryUnlockTokens();
+      setSessionExpiredNotice('Session expired — please enter your PIN to continue');
+      setView('profiles');
+    };
+    client.setOnUnauthorized(handleUnauthorized);
+    return () => {
+      client.setOnUnauthorized(null);
+    };
+  }, [client]);
 
   useEffect(() => {
     const handleOnline = () => setIsOffline(false);
@@ -155,6 +192,8 @@ export default function App() {
   }, [serverUrl, token]);
 
   const handleServerSelected = async (url: string, name: string) => {
+    unauthorizedRedirectRef.current = false;
+    setSessionExpiredNotice(null);
     localStorage.setItem('kadr_server_url', url);
     localStorage.setItem('kadr_server_name', name);
     setServerUrl(url);
@@ -172,6 +211,8 @@ export default function App() {
     if (!serverUrl) return { success: false };
     const res = await authenticatePin(serverUrl, userId, pin);
     if (res.success && res.data) {
+      unauthorizedRedirectRef.current = false;
+      setSessionExpiredNotice(null);
       localStorage.setItem('kadr_token', res.data.token);
       setToken(res.data.token);
       setCurrentUserId(res.data.user_id || userId);
@@ -182,6 +223,8 @@ export default function App() {
   };
 
   const handleSwitchServer = () => {
+    unauthorizedRedirectRef.current = false;
+    setSessionExpiredNotice(null);
     localStorage.removeItem('kadr_server_url');
     localStorage.removeItem('kadr_server_name');
     localStorage.removeItem('kadr_token');
@@ -420,15 +463,23 @@ export default function App() {
         )}
 
         {view === 'connect' && (
-          <ServerConnectScreen onServerSelected={handleServerSelected} />
+          <ServerConnectScreen
+            onServerSelected={handleServerSelected}
+            onRequestExit={() => setIsExitModalOpen(true)}
+          />
         )}
 
         {view === 'profiles' && (
           <ProfileSelectScreen
             profiles={profiles}
             serverName={serverName}
+            noticeMessage={sessionExpiredNotice}
             onLogin={handleLogin}
-            onBackToServerConnect={() => setView('connect')}
+            onBackToServerConnect={() => {
+              unauthorizedRedirectRef.current = false;
+              setSessionExpiredNotice(null);
+              setView('connect');
+            }}
           />
         )}
 
@@ -455,7 +506,10 @@ export default function App() {
               onLockedLibrary={(libraryId) => {
                 setUnlockLibraryId(libraryId);
               }}
+              onRequestExit={() => setIsExitModalOpen(true)}
               onSwitchProfile={() => {
+                if (unauthorizedRedirectRef.current) return;
+                setSessionExpiredNotice(null);
                 localStorage.removeItem('kadr_token');
                 setToken(null);
                 setCurrentUserId(null);
@@ -681,6 +735,17 @@ export default function App() {
             onPrevious={playerItem.playlist ? handlePreviousEpisode : undefined}
             onEpisodeProgress={handleEpisodeProgress}
             onExit={handleExitPlayer}
+          />
+        )}
+
+        {view !== 'player' && (
+          <ExitConfirmModal
+            isOpen={isExitModalOpen}
+            onCancel={() => setIsExitModalOpen(false)}
+            onConfirmExit={() => {
+              setIsExitModalOpen(false);
+              exitTvApp();
+            }}
           />
         )}
       </div>

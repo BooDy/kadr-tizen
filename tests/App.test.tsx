@@ -1704,5 +1704,283 @@ describe('App State Machine & Router', () => {
       delete (window as any).__kadrDisarmBootTrap;
     }
   });
+
+  it('opens ExitConfirmModal on Back from BrowseScreen root sidebar (after retreating from content) and calls Tizen exit on confirm', async () => {
+    localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
+    const exitSpy = vi.fn();
+    (window as any).tizen = {
+      application: {
+        getCurrentApplication: () => ({ exit: exitSpy }),
+      },
+    };
+
+    try {
+      await renderAuthenticatedApp();
+
+      await waitFor(() => {
+        expect(screen.getByText('Hero Dune Feature')).toBeInTheDocument();
+      });
+
+      // Ensure focus is on content card (PinPadModal trap pop during layout load may place focus on nav-screen-home)
+      if (document.activeElement?.id === 'nav-screen-home') {
+        await act(async () => {
+          fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+        });
+      }
+      expect(document.activeElement?.id).toBe('hero-play-hero-1');
+
+      // First Back: retreats from content to sidebar without opening ExitConfirmModal
+      await act(async () => {
+        fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN });
+      });
+
+      expect(document.activeElement?.id).toBe('nav-screen-home');
+      expect(screen.queryByRole('dialog', { name: /Exit Kadr/i })).not.toBeInTheDocument();
+
+      // Second Back while on root sidebar: opens ExitConfirmModal
+      await act(async () => {
+        fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN });
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole('dialog', { name: /Exit Kadr/i })).toBeInTheDocument();
+        expect(document.getElementById('exit-cancel-btn')).toHaveClass('tv-focus-ring');
+      });
+
+      // Press Back once inside ExitConfirmModal -> cancels without exiting and restores sidebar focus
+      await act(async () => {
+        fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN });
+      });
+
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog', { name: /Exit Kadr/i })).not.toBeInTheDocument();
+      });
+      expect(exitSpy).not.toHaveBeenCalled();
+      expect(document.activeElement?.id).toBe('nav-screen-home');
+
+      // Press Back on sidebar again -> ArrowRight + Enter confirms exit
+      await act(async () => {
+        fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN });
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole('dialog', { name: /Exit Kadr/i })).toBeInTheDocument();
+        expect(document.getElementById('exit-cancel-btn')).toHaveClass('tv-focus-ring');
+      });
+
+      await act(async () => {
+        fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+      });
+      expect(document.getElementById('exit-confirm-btn')).toHaveClass('tv-focus-ring');
+
+      await act(async () => {
+        fireEvent.keyDown(window, { key: 'Enter', keyCode: TVKeys.ENTER });
+      });
+
+      expect(exitSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      delete (window as any).tizen;
+    }
+  });
+
+  it('opens ExitConfirmModal on Back from ServerConnectScreen after blurring manual IP input and ignores Backspace while editing', async () => {
+    const exitSpy = vi.fn();
+    (window as any).tizen = {
+      application: {
+        getCurrentApplication: () => ({ exit: exitSpy }),
+      },
+    };
+
+    try {
+      render(<App />);
+
+      await waitFor(() => {
+        expect(screen.getByPlaceholderText('e.g. 192.168.1.100')).toBeInTheDocument();
+      });
+
+      const input = screen.getByPlaceholderText('e.g. 192.168.1.100') as HTMLInputElement;
+      input.focus();
+      expect(document.activeElement).toBe(input);
+
+      // Backspace while editing input must NOT open ExitConfirmModal
+      await act(async () => {
+        fireEvent.keyDown(input, { key: 'Backspace', keyCode: TVKeys.BACKSPACE });
+      });
+      expect(screen.queryByRole('dialog', { name: /Exit Kadr/i })).not.toBeInTheDocument();
+      expect(document.activeElement).toBe(input);
+
+      // First TV Back while editing blurs the input without opening ExitConfirmModal
+      await act(async () => {
+        fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN });
+      });
+      expect(document.activeElement).not.toBe(input);
+      expect(screen.queryByRole('dialog', { name: /Exit Kadr/i })).not.toBeInTheDocument();
+
+      // Second TV Back opens ExitConfirmModal
+      await act(async () => {
+        fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN });
+      });
+      await waitFor(() => {
+        expect(screen.getByRole('dialog', { name: /Exit Kadr/i })).toBeInTheDocument();
+        expect(document.getElementById('exit-cancel-btn')).toHaveClass('tv-focus-ring');
+      });
+
+      // Back inside ExitConfirmModal cancels cleanly without exiting
+      await act(async () => {
+        fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN });
+      });
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog', { name: /Exit Kadr/i })).not.toBeInTheDocument();
+      });
+      expect(exitSpy).not.toHaveBeenCalled();
+
+      // Open again and click Exit Kadr
+      await act(async () => {
+        fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN });
+      });
+      await waitFor(() => {
+        expect(screen.getByRole('dialog', { name: /Exit Kadr/i })).toBeInTheDocument();
+        expect(document.getElementById('exit-cancel-btn')).toHaveClass('tv-focus-ring');
+      });
+      fireEvent.click(screen.getByRole('button', { name: /Exit Kadr/i }));
+      expect(exitSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      delete (window as any).tizen;
+    }
+  });
+
+  it('redirects cleanly to ProfileSelectScreen with session-expired banner on mid-session 401 without logging out on invalid private-library PIN', async () => {
+    localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
+
+    const actualLibraries = await vi.importActual<typeof import('../src/api/libraries')>(
+      '../src/api/libraries'
+    );
+    const lockedErr = new Error('HTTP error 403: LIBRARY_LOCKED');
+    (lockedErr as any).status = 403;
+
+    vi.mocked(foldersApi.fetchLibraryFolders)
+      .mockRejectedValueOnce(lockedErr)
+      .mockResolvedValue(mockFolderResponse);
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        statusText: 'Unauthorized',
+      })
+    );
+
+    vi.mocked(librariesApi.unlockLibrary).mockImplementationOnce(async (client, libraryId, pin) =>
+      actualLibraries.unlockLibrary(client, libraryId, pin)
+    );
+    vi.mocked(librariesApi.unlockLibrary).mockResolvedValueOnce({
+      token: 'jwt-unlock',
+      unlock_token: 'unlock-token-999',
+    });
+
+    try {
+      await renderAuthenticatedApp();
+
+      await waitFor(() => {
+        expect(screen.getByText('Trending Dune Part Two')).toBeInTheDocument();
+      });
+      expect(localStorage.getItem('kadr_token')).toBe('valid-test-token');
+
+      fireEvent.click(screen.getByText('Trending Dune Part Two'));
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /Browse Folder/i })).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /Browse Folder/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText('Unlock Private Library')).toBeInTheDocument();
+        expect(document.getElementById('keypad-1')).toHaveClass('tv-focus-ring');
+      });
+
+      // Wrong private-library PIN returns HTTP 401 with skipUnauthorizedHandler: true -> MUST NOT log out
+      await act(async () => {
+        fireEvent.keyDown(window, { key: '0', keyCode: 48 });
+        fireEvent.keyDown(window, { key: '0', keyCode: 48 });
+        fireEvent.keyDown(window, { key: '0', keyCode: 48 });
+        fireEvent.keyDown(window, { key: '0', keyCode: 48 });
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/HTTP error 401/i)).toBeInTheDocument();
+      });
+      expect(localStorage.getItem('kadr_token')).toBe('valid-test-token');
+      expect(screen.queryByTestId('session-expired-banner')).not.toBeInTheDocument();
+
+      // Valid private-library PIN unlocks FolderBrowserModal
+      await act(async () => {
+        fireEvent.keyDown(window, { key: '1', keyCode: 49 });
+        fireEvent.keyDown(window, { key: '2', keyCode: 50 });
+        fireEvent.keyDown(window, { key: '3', keyCode: 51 });
+        fireEvent.keyDown(window, { key: '4', keyCode: 52 });
+      });
+
+      await waitFor(() => {
+        expect(screen.queryByText('Unlock Private Library')).not.toBeInTheDocument();
+        expect(screen.getByText('Dune: Part Two')).toBeInTheDocument();
+      });
+
+      // Now trigger a real ApiClient 401 on fetchMediaItem inside FolderBrowserModal
+      vi.mocked(items.fetchMediaItem).mockImplementationOnce(async (client, itemId) =>
+        client.fetch<MediaItemDetail>(`/api/v1/items/${itemId}`)
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Dune: Part Two'));
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("Who's watching?")).toBeInTheDocument();
+        expect(screen.getByTestId('session-expired-banner')).toHaveTextContent(
+          'Session expired — please enter your PIN to continue'
+        );
+      });
+      expect(localStorage.getItem('kadr_token')).toBeNull();
+      expect(screen.queryByRole('heading', { name: 'Movies Library' })).not.toBeInTheDocument();
+
+      // Re-authenticating clears the session-expired notice
+      vi.mocked(auth.authenticatePin).mockResolvedValueOnce({
+        success: true,
+        data: {
+          token: 'refreshed-token-456',
+          user_id: 'user-1',
+          username: 'Alice',
+          role: 'admin',
+        },
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('Alice'));
+      });
+      await waitFor(() => {
+        expect(screen.getByText(/Enter PIN for Alice/i)).toBeInTheDocument();
+        expect(document.getElementById('keypad-1')).toHaveClass('tv-focus-ring');
+      });
+      await act(async () => {
+        fireEvent.keyDown(window, { key: '1', keyCode: 49 });
+        fireEvent.keyDown(window, { key: '2', keyCode: 50 });
+        fireEvent.keyDown(window, { key: '3', keyCode: 51 });
+        fireEvent.keyDown(window, { key: '4', keyCode: 52 });
+      });
+      await waitFor(() => {
+        expect(screen.getByText('Hero Dune Feature')).toBeInTheDocument();
+      });
+      expect(localStorage.getItem('kadr_token')).toBe('refreshed-token-456');
+
+      // Manual switch profile should NOT show the old session-expired banner
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /Profiles/i }));
+      });
+      await waitFor(() => {
+        expect(screen.getByText("Who's watching?")).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId('session-expired-banner')).not.toBeInTheDocument();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
 });
 
