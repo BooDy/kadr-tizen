@@ -30,6 +30,7 @@ export async function unlockLibrary(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ pin }),
+      skipUnauthorizedHandler: true,
     }
   );
 }

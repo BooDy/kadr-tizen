@@ -1,7 +1,12 @@
+export interface ApiRequestOptions extends RequestInit {
+  skipUnauthorizedHandler?: boolean;
+}
+
 export class ApiClient {
   private baseUrl: string;
   private token: string | null = null;
   private libraryUnlockTokens: Map<string, string> = new Map();
+  private onUnauthorizedHandler: (() => void) | null = null;
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl.replace(/\/+$/, '');
@@ -9,6 +14,10 @@ export class ApiClient {
 
   setToken(token: string | null) {
     this.token = token;
+  }
+
+  setOnUnauthorized(handler: (() => void) | null): void {
+    this.onUnauthorizedHandler = handler;
   }
 
   setLibraryUnlockToken(libraryId: string, token: string): void {
@@ -35,12 +44,17 @@ export class ApiClient {
     return this.baseUrl;
   }
 
-  async fetch<T>(path: string, options: RequestInit = {}): Promise<T> {
-    const headers = new Headers(options.headers || {});
+  private async request(
+    url: string,
+    accept: string,
+    options: ApiRequestOptions = {}
+  ): Promise<Response> {
+    const { skipUnauthorizedHandler, ...fetchInit } = options;
+    const headers = new Headers(fetchInit.headers || {});
     if (this.token) {
       headers.set('Authorization', `Bearer ${this.token}`);
     }
-    headers.set('Accept', 'application/json');
+    headers.set('Accept', accept);
 
     if (this.libraryUnlockTokens.size > 0) {
       const tokens = Array.from(this.libraryUnlockTokens.values());
@@ -48,12 +62,24 @@ export class ApiClient {
       headers.set('X-Library-Unlock-Token', tokens[0]);
     }
 
-    const url = `${this.baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
-    const res = await fetch(url, { ...options, headers });
+    const res = await fetch(url, { ...fetchInit, headers });
 
     if (!res.ok) {
+      if (res.status === 401 && this.token !== null && !skipUnauthorizedHandler) {
+        // Clear token synchronously so concurrent 401s trigger the callback once.
+        this.token = null;
+        this.onUnauthorizedHandler?.();
+      }
       throw new Error(`HTTP error ${res.status}: ${res.statusText}`);
     }
+
+    return res;
+  }
+
+  async fetch<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
+    const url = `${this.baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
+    const res = await this.request(url, 'application/json', options);
+
     if (res.status === 204) {
       return undefined as T;
     }
@@ -68,26 +94,15 @@ export class ApiClient {
   }
 
   /** Fetch a text resource (e.g. a subtitle file) with the same auth headers as `fetch`. */
-  async fetchText(urlOrPath: string, options: RequestInit = {}): Promise<string> {
-    const headers = new Headers(options.headers || {});
-    if (this.token) {
-      headers.set('Authorization', `Bearer ${this.token}`);
-    }
-    headers.set('Accept', 'text/vtt, text/plain, application/x-subrip, */*');
-
-    if (this.libraryUnlockTokens.size > 0) {
-      const tokens = Array.from(this.libraryUnlockTokens.values());
-      headers.set('X-Kadr-Unlocked', tokens.join(','));
-      headers.set('X-Library-Unlock-Token', tokens[0]);
-    }
-
+  async fetchText(urlOrPath: string, options: ApiRequestOptions = {}): Promise<string> {
     const url = /^https?:\/\//i.test(urlOrPath)
       ? urlOrPath
       : `${this.baseUrl}${urlOrPath.startsWith('/') ? urlOrPath : `/${urlOrPath}`}`;
-    const res = await fetch(url, { ...options, headers });
-    if (!res.ok) {
-      throw new Error(`HTTP error ${res.status}: ${res.statusText}`);
-    }
+    const res = await this.request(
+      url,
+      'text/vtt, text/plain, application/x-subrip, */*',
+      options
+    );
     return res.text();
   }
 }

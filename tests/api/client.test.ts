@@ -87,3 +87,38 @@ describe('ApiClient', () => {
     expect(client.getLibraryUnlockToken('lib-2')).toBeUndefined();
   });
 });
+
+import { unlockLibrary } from '../../src/api/libraries';
+
+describe('ApiClient 401 session-expiry guard', () => {
+  it('fires onUnauthorized strictly once across concurrent 401 responses and skips it when skipUnauthorizedHandler is set', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        statusText: 'Unauthorized',
+      })
+    );
+
+    try {
+      const client = new ApiClient('http://localhost:8492');
+      const onUnauthorized = vi.fn();
+      client.setToken('expired-jwt');
+      client.setOnUnauthorized(onUnauthorized);
+
+      // Private-library PIN check (skipUnauthorizedHandler: true) must NOT trigger logout
+      await expect(unlockLibrary(client, 'lib-vault', '0000')).rejects.toThrow(/401/);
+      expect(onUnauthorized).not.toHaveBeenCalled();
+
+      // Concurrent authenticated requests failing with 401 fire onUnauthorized strictly once
+      await Promise.allSettled([
+        client.fetch('/api/v1/screens'),
+        client.fetch('/api/v1/items/10'),
+        client.fetchText('/api/v1/subtitles/1/stream.vtt'),
+      ]);
+
+      expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+});
