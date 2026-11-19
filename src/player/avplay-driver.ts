@@ -358,7 +358,13 @@ export class TizenAvplayDriver implements PlayerDriver {
   }
 
   private flushQueuedSeek(): void {
-    if (this.isDestroyed || this.isPreparing || this.isSeeking || !this.queuedSeek) {
+    if (
+      this.isDestroyed ||
+      this.isSuspended ||
+      this.isPreparing ||
+      this.isSeeking ||
+      !this.queuedSeek
+    ) {
       return;
     }
     const next = this.queuedSeek;
@@ -368,21 +374,21 @@ export class TizenAvplayDriver implements PlayerDriver {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private rewindHlsLiveEdge(avplay: any): void {
-    if (this.isDestroyed || typeof avplay?.seekTo !== 'function') return;
+    if (this.isDestroyed || this.isSuspended || typeof avplay?.seekTo !== 'function') return;
     this.isSeeking = true;
     this.armSeekSafetyTimer();
     try {
       avplay.seekTo(
         0,
         () => {
-          if (this.isDestroyed) return;
+          if (this.isDestroyed || this.isSuspended) return;
           this.clearSeekInFlight();
           this.currentTimeMs = 0;
           this.stateCallback?.('playing');
           this.flushQueuedSeek();
         },
         (err: any) => {
-          if (this.isDestroyed) return;
+          if (this.isDestroyed || this.isSuspended) return;
           console.warn('[AVPlay] HLS live-edge rewind to 0ms failed:', err);
           this.clearSeekInFlight();
           this.stateCallback?.('playing');
@@ -392,7 +398,9 @@ export class TizenAvplayDriver implements PlayerDriver {
     } catch (e) {
       console.warn('[AVPlay] HLS live-edge rewind exception:', e);
       this.clearSeekInFlight();
-      this.stateCallback?.('playing');
+      if (!this.isDestroyed && !this.isSuspended) {
+        this.stateCallback?.('playing');
+      }
       this.flushQueuedSeek();
     }
   }
@@ -709,7 +717,6 @@ export class TizenAvplayDriver implements PlayerDriver {
     const targetMs = Math.max(0, Math.floor(resumeMs));
     try {
       avplay.restore(this.currentStreamUrl, targetMs, false);
-      this.isSuspended = false;
       this.isPreparing = false;
       this.isReady = true;
       this.queuedSeek = null;
@@ -724,20 +731,30 @@ export class TizenAvplayDriver implements PlayerDriver {
       if (autoPlay) {
         avplay.play?.();
         this.applyLetterboxDisplayMode(avplay);
+        this.isSuspended = false;
         this.stateCallback?.('playing');
       } else {
-        avplay.pause?.();
+        try {
+          const currentState = avplay.getState?.();
+          if (currentState === undefined || currentState === 'PLAYING') {
+            avplay.pause?.();
+          }
+        } catch (pauseErr) {
+          console.warn('[AVPlay] pause after restore failed:', pauseErr);
+        }
+        this.isSuspended = false;
         this.stateCallback?.('paused');
       }
       return true;
     } catch (e) {
+      this.isSuspended = true;
       console.warn('[AVPlay] restore failed, falling back to full reload:', e);
       return false;
     }
   }
 
   seekTo(ms: number, onComplete?: () => void): void {
-    if (this.isDestroyed) return;
+    if (this.isDestroyed || this.isSuspended) return;
     this.awaitingHlsStartSync = false;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const avplay = (window as any).webapis?.avplay;
@@ -760,7 +777,7 @@ export class TizenAvplayDriver implements PlayerDriver {
   }
 
   private executeSeek(targetMs: number, onComplete?: () => void): void {
-    if (this.isDestroyed) return;
+    if (this.isDestroyed || this.isSuspended) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const avplay = (window as any).webapis?.avplay;
     if (!avplay || typeof avplay.seekTo !== 'function') {
@@ -772,6 +789,7 @@ export class TizenAvplayDriver implements PlayerDriver {
     this.armSeekSafetyTimer();
 
     const finishSeek = (succeeded: boolean) => {
+      if (this.isDestroyed || this.isSuspended) return;
       this.clearSeekInFlight();
       if (succeeded) {
         this.currentTimeMs = targetMs;
@@ -783,6 +801,7 @@ export class TizenAvplayDriver implements PlayerDriver {
     };
 
     const tryRelativeJump = () => {
+      if (this.isDestroyed || this.isSuspended) return;
       try {
         const avplayCur =
           typeof avplay.getCurrentTime === 'function' ? avplay.getCurrentTime() : 0;

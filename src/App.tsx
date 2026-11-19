@@ -114,6 +114,8 @@ export default function App() {
       setUnlockLibraryId(null);
       setUnlockError(undefined);
       setUnlockLockoutSecs(0);
+      setActiveBrowseTab('home');
+      setLastBrowseFocusId(null);
       setItemDetailViewState(null);
       setSuspendedItemDetail(null);
       setPlayerItem(null);

@@ -970,6 +970,121 @@ describe('TizenAvplayDriver', () => {
         warnSpy.mockRestore();
       }
     });
+
+    it('succeeds in restore(ms, false) when avplay.getState returns READY and pause throws PLAYER_ERROR_INVALID_STATE', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        let nativeState = 'PLAYING';
+        mockAvplay.getState = vi.fn(() => nativeState);
+        mockAvplay.suspend = vi.fn(() => {
+          nativeState = 'PAUSED';
+        });
+        mockAvplay.restore = vi.fn(() => {
+          nativeState = 'READY';
+        });
+        mockAvplay.pause = vi.fn(() => {
+          if (nativeState !== 'PLAYING') {
+            throw new Error('PLAYER_ERROR_INVALID_STATE');
+          }
+          nativeState = 'PAUSED';
+        });
+
+        const driver = new TizenAvplayDriver();
+        const stateSpy = vi.fn();
+        const timeSpy = vi.fn();
+        driver.onStateChange(stateSpy);
+        driver.onTimeUpdate(timeSpy);
+
+        await driver.init(
+          document.createElement('div'),
+          'http://localhost:8492/api/v1/stream/42',
+          0
+        );
+        const listener = mockAvplay.setListener.mock.calls.at(-1)?.[0];
+        stateSpy.mockClear();
+        timeSpy.mockClear();
+        mockAvplay.pause.mockClear();
+
+        driver.suspend();
+
+        // avplay.restore leaves native player in READY state; restore() must NOT call avplay.pause() or fail
+        expect(driver.restore(45000, false)).toBe(true);
+        expect(mockAvplay.pause).not.toHaveBeenCalled();
+        expect(stateSpy).toHaveBeenCalledWith('paused');
+
+        // isSuspended was cleared before returning true -> playtime updates flow again
+        listener.oncurrentplaytime(46000);
+        expect(timeSpy).toHaveBeenCalledWith(46000, 60000);
+
+        // Even if getState reports PLAYING and pause throws PLAYER_ERROR_INVALID_STATE, restore still succeeds
+        driver.suspend();
+        mockAvplay.restore = vi.fn(() => {
+          nativeState = 'PLAYING';
+        });
+        mockAvplay.pause = vi.fn(() => {
+          throw new Error('PLAYER_ERROR_INVALID_STATE');
+        });
+        stateSpy.mockClear();
+        expect(driver.restore(45000, false)).toBe(true);
+        expect(mockAvplay.pause).toHaveBeenCalledTimes(1);
+        expect(stateSpy).toHaveBeenCalledWith('paused');
+        expect(warnSpy).toHaveBeenCalled();
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('keeps isSuspended active when restore throws during play() and blocks seekTo while suspended', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        mockAvplay.suspend = vi.fn();
+        mockAvplay.restore = vi.fn();
+
+        const driver = new TizenAvplayDriver();
+        const timeSpy = vi.fn();
+        const seekFailSpy = vi.fn();
+        driver.onTimeUpdate(timeSpy);
+        driver.onSeekFailure(seekFailSpy);
+
+        await driver.init(
+          document.createElement('div'),
+          'http://localhost:8492/api/v1/stream/42',
+          0
+        );
+        const listener = mockAvplay.setListener.mock.calls.at(-1)?.[0];
+        mockAvplay.seekTo.mockClear();
+        timeSpy.mockClear();
+
+        driver.suspend();
+
+        // Calling seekTo while suspended must be ignored (no native seekTo, no seekFailCallback)
+        driver.seekTo(50000);
+        expect(mockAvplay.seekTo).not.toHaveBeenCalled();
+        expect(seekFailSpy).not.toHaveBeenCalled();
+
+        // If avplay.play() throws during restore(..., true), restore returns false and stays suspended
+        mockAvplay.play = vi.fn(() => {
+          throw new Error('PLAYER_ERROR_INVALID_STATE');
+        });
+        expect(driver.restore(45000, true)).toBe(false);
+        driver.seekTo(51000);
+        expect(mockAvplay.seekTo).not.toHaveBeenCalled();
+        listener.oncurrentplaytime(52000);
+        expect(timeSpy).not.toHaveBeenCalled();
+
+        // Once restore succeeds, seekTo works again
+        mockAvplay.play = vi.fn();
+        expect(driver.restore(45000, true)).toBe(true);
+        driver.seekTo(55000);
+        expect(mockAvplay.seekTo).toHaveBeenCalledWith(
+          55000,
+          expect.any(Function),
+          expect.any(Function)
+        );
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
   });
 });
 

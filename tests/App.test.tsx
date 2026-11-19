@@ -1982,5 +1982,166 @@ describe('App State Machine & Router', () => {
       fetchSpy.mockRestore();
     }
   });
+
+  it('resets activeBrowseTab and lastBrowseFocusId on mid-session 401 so re-authentication returns to Home cleanly', async () => {
+    localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
+
+    const mockMoviesLayout: ScreenLayout = {
+      id: 'movies',
+      title: 'Movies',
+      widgets: [
+        {
+          id: 'carousel-1',
+          type: 'carousel',
+          title: 'Movies Grid',
+          items: [{ id: 200, title: 'Movies Card Dune', media_type: 'movie' }],
+        },
+      ],
+    };
+
+    const layoutSpy = vi
+      .mocked(screensApi.fetchScreenLayout)
+      .mockImplementation(async (_client, screenId) => {
+        if (screenId === 'movies') return mockMoviesLayout;
+        return mockHomeLayout;
+      });
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        statusText: 'Unauthorized',
+      })
+    );
+
+    try {
+      vi.mocked(auth.authenticatePin).mockResolvedValueOnce({
+        success: true,
+        data: {
+          token: 'valid-test-token',
+          user_id: 'user-1',
+          username: 'Alice',
+          role: 'admin',
+        },
+      });
+
+      await act(async () => {
+        render(<App />);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText('Alice')).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Alice'));
+        await Promise.resolve();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/Enter PIN for Alice/i)).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.keyDown(window, { key: '1', keyCode: 49 });
+        fireEvent.keyDown(window, { key: '2', keyCode: 50 });
+        fireEvent.keyDown(window, { key: '3', keyCode: 51 });
+        fireEvent.keyDown(window, { key: '4', keyCode: 52 });
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText('Hero Dune Feature')).toBeInTheDocument();
+      });
+
+      // Switch to Movies tab and move focus onto card-carousel-1-200 (an ID that also exists on Home)
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /^Movies$/i }));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText('Movies Card Dune')).toBeInTheDocument();
+      });
+
+      if (document.activeElement?.id !== 'card-carousel-1-200') {
+        await act(async () => {
+          fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+        });
+      }
+      expect(document.activeElement?.id).toBe('card-carousel-1-200');
+
+      // Trigger a 401 via ApiClient while on the Movies tab with card-carousel-1-200 focused
+      vi.mocked(items.fetchMediaItem).mockImplementationOnce(async (client, itemId) =>
+        client.fetch<MediaItemDetail>(`/api/v1/items/${itemId}`)
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Movies Card Dune'));
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("Who's watching?")).toBeInTheDocument();
+        expect(screen.getByTestId('session-expired-banner')).toBeInTheDocument();
+      });
+
+      // Re-authenticate as Alice and verify BrowseScreen starts fresh on Home with default focus
+      layoutSpy.mockClear();
+      vi.mocked(auth.authenticatePin).mockResolvedValueOnce({
+        success: true,
+        data: {
+          token: 'refreshed-token-home',
+          user_id: 'user-1',
+          username: 'Alice',
+          role: 'admin',
+        },
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Alice'));
+        await Promise.resolve();
+      });
+      await waitFor(() => {
+        expect(screen.getByText(/Enter PIN for Alice/i)).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.keyDown(window, { key: '1', keyCode: 49 });
+        fireEvent.keyDown(window, { key: '2', keyCode: 50 });
+        fireEvent.keyDown(window, { key: '3', keyCode: 51 });
+        fireEvent.keyDown(window, { key: '4', keyCode: 52 });
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText('Hero Dune Feature')).toBeInTheDocument();
+      });
+
+      if (document.activeElement?.id === 'nav-screen-home') {
+        await act(async () => {
+          fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+        });
+      }
+
+      const homeTabBtn = screen.getByRole('button', { name: /^Home$/i });
+      const moviesTabBtn = screen.getByRole('button', { name: /^Movies$/i });
+      expect(homeTabBtn.className).toContain('bg-[#FF6B00]/15');
+      expect(moviesTabBtn.className).not.toContain('bg-[#FF6B00]/15');
+      expect(layoutSpy).toHaveBeenCalledWith(expect.anything(), 'home');
+      expect(layoutSpy).not.toHaveBeenCalledWith(expect.anything(), 'movies');
+      expect(document.activeElement?.id).toBe('hero-play-hero-1');
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
 });
 

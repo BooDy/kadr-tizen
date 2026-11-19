@@ -911,13 +911,9 @@ export function PlayerScreen({
     }
 
     const activeStartMs =
-      hlsSeekOffsetMs !== null
-        ? hlsSeekOffsetMs
-        : restoreResumeMsRef.current !== null
-        ? restoreResumeMsRef.current
-        : sessionResumeMsRef.current > 0
-        ? sessionResumeMsRef.current
-        : initialResume;
+      hlsSeekOffsetMs ??
+      restoreResumeMsRef.current ??
+      (sessionResumeMsRef.current > 0 ? sessionResumeMsRef.current : initialResume);
 
     const playbackResult = getPlaybackUrl({
       serverUrl: cleanServerUrl,
@@ -1147,13 +1143,9 @@ export function PlayerScreen({
       if (!isMounted || !containerRef.current || isDocumentHiddenRef.current) return;
       driverInitialized = true;
       const currentStartMs =
-        hlsSeekOffsetMsRef.current !== null
-          ? hlsSeekOffsetMsRef.current
-          : restoreResumeMsRef.current !== null
-          ? restoreResumeMsRef.current
-          : sessionResumeMsRef.current > 0
-          ? sessionResumeMsRef.current
-          : initialResume;
+        hlsSeekOffsetMsRef.current ??
+        restoreResumeMsRef.current ??
+        (sessionResumeMsRef.current > 0 ? sessionResumeMsRef.current : initialResume);
       const initialDriverTime = isHls && streamStartOffsetMs > 0 ? 0 : currentStartMs;
       isDriverInitializedRef.current = true;
       driver.init(containerRef.current, streamUrl, initialDriverTime).catch((err) => {
@@ -1412,6 +1404,7 @@ export function PlayerScreen({
             allowSessionAutoResumeRef.current &&
             session.resume_position_seconds > 0 &&
             hlsSeekOffsetMsRef.current === null &&
+            restoreResumeMsRef.current === null &&
             targetSeekMsRef.current === null &&
             seekDebounceTimerRef.current === null
           ) {
@@ -1419,12 +1412,14 @@ export function PlayerScreen({
             sessionResumeMsRef.current = resumeMs;
             setPositionMs(resumeMs);
             positionMsRef.current = resumeMs;
-            if (isHlsRef.current) {
-              hlsSeekOffsetMsRef.current = resumeMs;
-              setHlsSeekOffsetMs(resumeMs);
-              setReloadKey((k) => k + 1);
-            } else if (isDriverInitializedRef.current) {
-              driverRef.current?.seekTo(resumeMs);
+            if (!isDocumentHiddenRef.current) {
+              if (isHlsRef.current) {
+                hlsSeekOffsetMsRef.current = resumeMs;
+                setHlsSeekOffsetMs(resumeMs);
+                setReloadKey((k) => k + 1);
+              } else if (isDriverInitializedRef.current) {
+                driverRef.current?.seekTo(resumeMs);
+              }
             }
           }
         }
@@ -1470,6 +1465,11 @@ export function PlayerScreen({
       if (document.hidden) {
         setIsDocumentHidden(true);
         isDocumentHiddenRef.current = true;
+        seamlessSwapRef.current = false;
+        if (retiringDriverRef.current) {
+          retiringDriverRef.current.release();
+          retiringDriverRef.current = null;
+        }
         if (playbackErrorRef.current) {
           return;
         }
@@ -1518,11 +1518,13 @@ export function PlayerScreen({
           if (autoPlay) {
             playerStateRef.current = 'buffering';
             setPlayerState('buffering');
-          } else if (targetPos > 0) {
+          } else if (hasStartedPlaybackRef.current || targetPos > 0) {
             if (isHlsRef.current) {
               hlsSeekOffsetMsRef.current = targetPos;
               setHlsSeekOffsetMs(targetPos);
             } else {
+              hlsSeekOffsetMsRef.current = null;
+              setHlsSeekOffsetMs(null);
               restoreResumeMsRef.current = targetPos;
             }
           }

@@ -9,6 +9,7 @@ import { ApiClient } from '../../src/api/client';
 import { FocusProvider } from '../../src/navigation/FocusContext';
 import * as itemsApi from '../../src/api/items';
 import { resetScreenSaverStateForTests } from '../../src/utils/tizenLifecycle';
+import { PlaybackSession } from '../../src/types/kadr';
 
 const SAMPLE_VTT = 'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHi\n';
 
@@ -27,6 +28,7 @@ let mockDriver: {
   onTimeUpdate: ReturnType<typeof vi.fn>;
   onStateChange: ReturnType<typeof vi.fn>;
   onError: ReturnType<typeof vi.fn>;
+  supportsSeamlessSwap?: boolean;
   timeCallback?: (posMs: number, durationMs: number) => void;
   stateCallback?: (state: PlayerState) => void;
   errorCallback?: (error: string) => void;
@@ -1799,6 +1801,458 @@ describe('PlayerScreen', () => {
         mockDriver.stateCallback?.('playing');
       });
       expect(mockDriver.pause).not.toHaveBeenCalled();
+    });
+
+    it('guards sessionManager.start() resume against hidden document for both HLS and Direct Play, then restores at resumeMs on foreground return', async () => {
+      const setHidden = setupDocumentHidden(false);
+      let resolveHlsSession!: (session: PlaybackSession) => void;
+      vi.spyOn(playbackApi, 'startPlaybackSession').mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveHlsSession = resolve;
+          })
+      );
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+        return {
+          ok: true,
+          status: 200,
+          text: async () =>
+            '#EXTM3U\n#EXTINF:4.000,\n/api/v1/media/301/hls/sessions/11111111-1111-1111-1111-111111111111/segment_0000.ts\n',
+        } as unknown as Response;
+      });
+
+      const { unmount } = render(
+        <PlayerScreen
+          itemId={301}
+          title="Hidden Session HLS"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          technical={{ video_codec: 'h264', audio_codec: 'dts', container: 'mkv' }}
+          onExit={vi.fn()}
+        />
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      // Background before sessionManager.start() resolves
+      act(() => {
+        setHidden(true);
+      });
+      mockDriver.init.mockClear();
+      mockDriver.seekTo.mockClear();
+      fetchSpy.mockClear();
+
+      await act(async () => {
+        resolveHlsSession({
+          session_id: 'sess-hidden-hls',
+          media_item_id: 301,
+          duration_seconds: 180,
+          resume_position_seconds: 45,
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      // Must NOT spawn background HLS probe/reload or call seekTo while hidden
+      expect(mockDriver.init).not.toHaveBeenCalled();
+      expect(mockDriver.seekTo).not.toHaveBeenCalled();
+      expect(
+        fetchSpy.mock.calls.some(([input]) => String(input).includes('/hls/master.m3u8'))
+      ).toBe(false);
+
+      // Returning to foreground restores HLS cleanly at 45s paused
+      const hlsBeforeRestore = mockDriver;
+      await act(async () => {
+        setHidden(false);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(hlsBeforeRestore.restore).toHaveBeenCalledWith(45000, false);
+      expect(mockDriver.init).toHaveBeenCalledWith(
+        expect.any(HTMLElement),
+        expect.stringContaining('start_time=45.000'),
+        0
+      );
+      act(() => {
+        mockDriver.stateCallback?.('playing');
+      });
+      expect(mockDriver.pause).toHaveBeenCalledTimes(1);
+      unmount();
+
+      // Direct Play: sessionManager.start() resolves while hidden -> must NOT call seekTo on suspended driver
+      let resolveDirectSession!: (session: PlaybackSession) => void;
+      vi.spyOn(playbackApi, 'startPlaybackSession').mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveDirectSession = resolve;
+          })
+      );
+      fetchSpy.mockImplementation(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        if (url.includes('/hls/master.m3u8')) {
+          return {
+            ok: false,
+            status: 409,
+            json: async () => ({ error: 'PLAYBACK_DIRECT_ONLY' }),
+          } as unknown as Response;
+        }
+        return { ok: true, status: 206, json: async () => ({}) } as unknown as Response;
+      });
+
+      render(
+        <PlayerScreen
+          itemId={302}
+          title="Hidden Session Direct"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          technical={{ video_codec: 'h264', audio_codec: 'aac', container: 'mp4' }}
+          onExit={vi.fn()}
+        />
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(mockDriver.init).toHaveBeenCalledWith(
+        expect.any(HTMLElement),
+        expect.stringContaining('/api/v1/stream/302'),
+        0
+      );
+
+      act(() => {
+        setHidden(true);
+      });
+      expect(mockDriver.suspend).toHaveBeenCalledTimes(1);
+      mockDriver.seekTo.mockClear();
+      mockDriver.init.mockClear();
+
+      await act(async () => {
+        resolveDirectSession({
+          session_id: 'sess-hidden-direct',
+          media_item_id: 302,
+          duration_seconds: 180,
+          resume_position_seconds: 75,
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(mockDriver.seekTo).not.toHaveBeenCalled();
+      expect(mockDriver.init).not.toHaveBeenCalled();
+
+      mockDriver.restore.mockReturnValue(true);
+      act(() => {
+        setHidden(false);
+      });
+      expect(mockDriver.restore).toHaveBeenCalledWith(75000, false);
+    });
+
+    it('releases retiringDriverRef and clears its safety timer and HLS session when hidden during an HTML5 seamless seek swap', async () => {
+      const setHidden = setupDocumentHidden(false);
+      const sessions = [
+        '11111111-1111-1111-1111-111111111111',
+        '22222222-2222-2222-2222-222222222222',
+        '33333333-3333-3333-3333-333333333333',
+      ];
+      let playlistIndex = 0;
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        if (url.includes('/hls/master.m3u8')) {
+          const id = sessions[Math.min(playlistIndex++, sessions.length - 1)];
+          return {
+            ok: true,
+            status: 200,
+            text: async () =>
+              `#EXTM3U\n#EXTINF:4.000,\n/api/v1/media/401/hls/sessions/${id}/segment_0000.ts\n`,
+          } as unknown as Response;
+        }
+        return { ok: true, status: 204, text: async () => '' } as unknown as Response;
+      });
+
+      render(
+        <PlayerScreen
+          itemId={401}
+          title="Seamless Swap Movie"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          technical={{ video_codec: 'h264', audio_codec: 'dts', container: 'mkv' }}
+          onExit={vi.fn()}
+        />
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      const outgoingDriver = mockDriver;
+      outgoingDriver.supportsSeamlessSwap = true;
+      act(() => {
+        outgoingDriver.stateCallback?.('playing');
+        outgoingDriver.timeCallback?.(30000, 180000);
+      });
+
+      // Seek +10s -> starts new HLS stream while outgoingDriver stays alive as retiringDriverRef
+      await act(async () => {
+        fireEvent.keyDown(window, { keyCode: TVKeys.RIGHT });
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(1000);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      const incomingDriver = mockDriver;
+      expect(incomingDriver).not.toBe(outgoingDriver);
+      expect(outgoingDriver.destroy).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining(`/hls/sessions/${sessions[0]}`),
+        expect.objectContaining({ method: 'DELETE' })
+      );
+
+      // Background while swap is in progress -> retiringDriverRef MUST be released immediately
+      act(() => {
+        setHidden(true);
+      });
+      expect(outgoingDriver.destroy).toHaveBeenCalledTimes(1);
+      expect(fetchSpy).toHaveBeenCalledWith(
+        `http://localhost:8492/api/v1/media/401/hls/sessions/${sessions[0]}`,
+        expect.objectContaining({ method: 'DELETE' })
+      );
+      expect(incomingDriver.suspend).toHaveBeenCalledTimes(1);
+
+      // 20s safety timer was cleared -> advancing 20s does not double-destroy outgoingDriver
+      act(() => {
+        vi.advanceTimersByTime(20000);
+      });
+      expect(outgoingDriver.destroy).toHaveBeenCalledTimes(1);
+
+      // Returning to foreground starts a fresh driver cleanly without stale retiringDriverRef interference
+      await act(async () => {
+        setHidden(false);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(mockDriver).not.toBe(incomingDriver);
+      act(() => {
+        mockDriver.stateCallback?.('buffering');
+      });
+      expect(screen.getByTestId('player-buffering-spinner')).toBeInTheDocument();
+      act(() => {
+        mockDriver.stateCallback?.('playing');
+      });
+      expect(mockDriver.pause).toHaveBeenCalledTimes(1);
+    });
+
+    it('honors 0ms position instead of reverting to stale initialTimeMs or sessionResumeMsRef on foreground fallback reload', async () => {
+      const setHidden = setupDocumentHidden(false);
+
+      // 1. Direct Play with initialTimeMs=120000, scrubbed back to 0ms
+      const { unmount } = render(
+        <PlayerScreen
+          itemId={501}
+          title="Direct Scrub Zero"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          initialTimeMs={120000}
+          technical={{ video_codec: 'h264', container: 'mp4' }}
+          onExit={vi.fn()}
+        />
+      );
+
+      expect(mockDriver.init).toHaveBeenCalledWith(
+        expect.any(HTMLElement),
+        expect.stringContaining('/api/v1/stream/501'),
+        120000
+      );
+
+      act(() => {
+        mockDriver.stateCallback?.('playing');
+        mockDriver.timeCallback?.(120000, 300000);
+      });
+
+      // Rewind back to 0ms (progressive steps: -30s, -60s, -120s -> clamps to 0)
+      await act(async () => {
+        fireEvent.keyDown(window, { keyCode: TVKeys.REWIND });
+        fireEvent.keyDown(window, { keyCode: TVKeys.REWIND });
+        fireEvent.keyDown(window, { keyCode: TVKeys.REWIND });
+      });
+      act(() => {
+        vi.advanceTimersByTime(1000);
+        mockDriver.timeCallback?.(0, 300000);
+      });
+      expect(mockDriver.seekTo).toHaveBeenCalledWith(0, expect.any(Function));
+
+      // Hide & foreground with restore() returning false -> fallback reload MUST init at 0, not 120000
+      const driverBeforeDirectZero = mockDriver;
+      driverBeforeDirectZero.restore.mockReturnValue(false);
+      mockDriver.init.mockClear();
+
+      act(() => {
+        setHidden(true);
+      });
+      act(() => {
+        setHidden(false);
+      });
+
+      expect(driverBeforeDirectZero.restore).toHaveBeenCalledWith(0, false);
+      expect(mockDriver.init).toHaveBeenCalledWith(
+        expect.any(HTMLElement),
+        expect.stringContaining('/api/v1/stream/501'),
+        0
+      );
+      unmount();
+
+      // 2. Direct Play via 409 fallback where sessionResumeMsRef=90000 (and hlsSeekOffsetMs was initially 90000), scrubbed back to 0ms
+      vi.spyOn(playbackApi, 'startPlaybackSession').mockResolvedValue({
+        session_id: 'sess-zero-2',
+        media_item_id: 502,
+        duration_seconds: 300,
+        resume_position_seconds: 90,
+      });
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        if (url.includes('/hls/master.m3u8')) {
+          return {
+            ok: false,
+            status: 409,
+            json: async () => ({ error: 'PLAYBACK_DIRECT_ONLY' }),
+          } as unknown as Response;
+        }
+        return { ok: true, status: 206, json: async () => ({}) } as unknown as Response;
+      });
+
+      const { unmount: unmountSessionDirect } = render(
+        <PlayerScreen
+          itemId={502}
+          title="Session Scrub Zero"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          technical={{ video_codec: 'h264', audio_codec: 'aac', container: 'mp4' }}
+          onExit={vi.fn()}
+        />
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      act(() => {
+        mockDriver.stateCallback?.('playing');
+        mockDriver.timeCallback?.(90000, 300000);
+      });
+
+      // Scrub back to 0ms
+      await act(async () => {
+        fireEvent.keyDown(window, { keyCode: TVKeys.REWIND });
+        fireEvent.keyDown(window, { keyCode: TVKeys.REWIND });
+      });
+      act(() => {
+        vi.advanceTimersByTime(1000);
+        mockDriver.timeCallback?.(0, 300000);
+      });
+      expect(mockDriver.seekTo).toHaveBeenCalledWith(0, expect.any(Function));
+
+      const driverBeforeSessionZero = mockDriver;
+      driverBeforeSessionZero.restore.mockReturnValue(false);
+      mockDriver.init.mockClear();
+
+      act(() => {
+        setHidden(true);
+      });
+      await act(async () => {
+        setHidden(false);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(driverBeforeSessionZero.restore).toHaveBeenCalledWith(0, false);
+      expect(mockDriver.init).toHaveBeenCalledWith(
+        expect.any(HTMLElement),
+        expect.stringContaining('/api/v1/stream/502'),
+        0
+      );
+      unmountSessionDirect();
+
+      // 3. HLS with initialTimeMs=120000, scrubbed back to 0ms, hide & foreground -> no start_time=120.000
+      vi.spyOn(playbackApi, 'startPlaybackSession').mockResolvedValue({
+        session_id: 'sess-zero-3',
+        media_item_id: 503,
+        duration_seconds: 300,
+        resume_position_seconds: 0,
+      });
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+        return {
+          ok: true,
+          status: 200,
+          text: async () =>
+            '#EXTM3U\n#EXTINF:4.000,\n/api/v1/media/503/hls/sessions/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/segment_0000.ts\n',
+        } as unknown as Response;
+      });
+
+      render(
+        <PlayerScreen
+          itemId={503}
+          title="HLS Scrub Zero"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          initialTimeMs={120000}
+          technical={{ video_codec: 'h264', audio_codec: 'dts', container: 'mkv' }}
+          onExit={vi.fn()}
+        />
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      act(() => {
+        mockDriver.stateCallback?.('playing');
+        mockDriver.timeCallback?.(1000, 300000);
+      });
+
+      // Scrub back to 0ms
+      await act(async () => {
+        fireEvent.keyDown(window, { keyCode: TVKeys.REWIND });
+        fireEvent.keyDown(window, { keyCode: TVKeys.REWIND });
+        fireEvent.keyDown(window, { keyCode: TVKeys.REWIND });
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(1000);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      const driverBeforeHlsZero = mockDriver;
+      driverBeforeHlsZero.restore.mockReturnValue(false);
+      mockDriver.init.mockClear();
+
+      act(() => {
+        setHidden(true);
+      });
+      await act(async () => {
+        setHidden(false);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(driverBeforeHlsZero.restore).toHaveBeenCalledWith(0, false);
+      const reloadedUrl = mockDriver.init.mock.calls.at(-1)?.[1] as string;
+      expect(reloadedUrl).toContain('/api/v1/media/503/hls/master.m3u8');
+      expect(reloadedUrl).not.toContain('start_time=');
+      expect(mockDriver.init).toHaveBeenLastCalledWith(
+        expect.any(HTMLElement),
+        reloadedUrl,
+        0
+      );
     });
   });
 });
