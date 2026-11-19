@@ -74,3 +74,76 @@ export function applyOptimisticProgress(
 
   return nextItem;
 }
+
+/**
+ * Optimistically applies a watched/unwatched state mutation to a MediaItemDetail
+ * and any matching episodes while preserving object references on no-ops.
+ */
+export function applyWatchStateMutation(
+  item: MediaItemDetail,
+  targetIds: ReadonlySet<string>,
+  watched: boolean
+): MediaItemDetail {
+  if (targetIds.size === 0) return item;
+
+  let nextItem = item;
+  const nextProgress = watched ? 1 : 0;
+  const selfId = String(item.id ?? item.card?.id ?? '');
+
+  if (selfId && targetIds.has(selfId)) {
+    const nextBadge = nextItem.card?.badge === 'RESUME' ? undefined : nextItem.card?.badge;
+    const isSelfUnchanged =
+      nextItem.resume_position_ms === 0 &&
+      nextItem.resume_position_seconds === 0 &&
+      nextItem.card !== undefined &&
+      nextItem.card.playback_progress === nextProgress &&
+      nextItem.card.badge === nextBadge;
+
+    if (!isSelfUnchanged) {
+      const numericId = typeof item.id === 'number' ? item.id : Number(item.id);
+      nextItem = {
+        ...nextItem,
+        resume_position_ms: 0,
+        resume_position_seconds: 0,
+        card: nextItem.card
+          ? {
+              ...nextItem.card,
+              playback_progress: nextProgress,
+              badge: nextBadge,
+            }
+          : {
+              id: Number.isFinite(numericId) ? numericId : 0,
+              title: item.title ?? '',
+              media_type: item.media_type ?? 'movie',
+              playback_progress: nextProgress,
+            },
+      };
+    }
+  }
+
+  if (nextItem.episodes && nextItem.episodes.length > 0) {
+    let changed = false;
+    const updatedEpisodes = nextItem.episodes.map((ep) => {
+      if (!targetIds.has(String(ep.id))) return ep;
+      const nextBadge = ep.badge === 'RESUME' ? undefined : ep.badge;
+      if (ep.playback_progress === nextProgress && ep.badge === nextBadge) {
+        return ep;
+      }
+      changed = true;
+      return {
+        ...ep,
+        playback_progress: nextProgress,
+        badge: nextBadge,
+      };
+    });
+
+    if (changed) {
+      nextItem = {
+        ...nextItem,
+        episodes: updatedEpisodes,
+      };
+    }
+  }
+
+  return nextItem;
+}

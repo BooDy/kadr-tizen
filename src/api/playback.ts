@@ -58,3 +58,34 @@ export async function endPlaybackSession(
     method: 'DELETE',
   });
 }
+
+export async function setItemWatchState(
+  client: ApiClient,
+  itemId: number | string,
+  watched: boolean
+): Promise<void> {
+  await client.fetch<unknown>(`/api/v1/playback/states/${encodeURIComponent(String(itemId))}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ watched }),
+  });
+}
+
+export async function setBatchWatchState(
+  client: ApiClient,
+  itemIds: Array<number | string>,
+  watched: boolean
+): Promise<{ updated: number; watched: boolean }> {
+  const numericIds = itemIds
+    .map((id) => (typeof id === 'number' ? id : parseInt(String(id), 10)))
+    .filter((id) => Number.isFinite(id));
+  return client.fetch<{ updated: number; watched: boolean }>('/api/v1/playback/states', {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ item_ids: numericIds, watched }),
+  });
+}
