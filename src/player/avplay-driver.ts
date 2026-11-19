@@ -697,7 +697,6 @@ export class TizenAvplayDriver implements PlayerDriver {
 
   restore(resumeMs: number, autoPlay: boolean): boolean {
     if (this.isDestroyed || !this.currentStreamUrl) return false;
-    this.isSuspended = false;
     if (this.currentIsHls) {
       // HLS sessions on Kadr may be reaped while backgrounded; let PlayerScreen re-init cleanly
       return false;
@@ -710,6 +709,7 @@ export class TizenAvplayDriver implements PlayerDriver {
     const targetMs = Math.max(0, Math.floor(resumeMs));
     try {
       avplay.restore(this.currentStreamUrl, targetMs, false);
+      this.isSuspended = false;
       this.isPreparing = false;
       this.isReady = true;
       this.queuedSeek = null;

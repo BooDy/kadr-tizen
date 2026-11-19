@@ -1691,23 +1691,65 @@ describe('PlayerScreen', () => {
 
       act(() => {
         setHidden(false);
+        mockDriver.stateCallback?.('playing');
       });
       expect(mockDriver.restore).toHaveBeenCalledWith(15000, true);
 
-      // Live HLS stream fallback (restore returns false -> reloads and auto-plays without pausing)
+      // Live HLS stream fallback (restore returns false -> enters buffering, reloads, and auto-plays without pausing)
+      const setScreenSaverSpy = vi.fn((_state, onSuccess) => onSuccess?.());
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).webapis = {
+        appcommon: {
+          AppCommonScreenSaverState: {
+            SCREEN_SAVER_ON: 0,
+            SCREEN_SAVER_OFF: 1,
+          },
+          setScreenSaver: setScreenSaverSpy,
+        },
+      };
+      resetScreenSaverStateForTests();
       const liveHlsDriverBeforeRestore = mockDriver;
       liveHlsDriverBeforeRestore.restore.mockReturnValue(false);
+      act(() => {
+        setHidden(true);
+      });
+      expect(setScreenSaverSpy).toHaveBeenLastCalledWith(
+        0,
+        expect.any(Function),
+        expect.any(Function)
+      );
+
+      act(() => {
+        setHidden(false);
+      });
+      expect(liveHlsDriverBeforeRestore.restore).toHaveBeenCalledWith(15000, true);
+      expect(screen.getByTestId('player-buffering-spinner')).toBeInTheDocument();
+      expect(setScreenSaverSpy).toHaveBeenLastCalledWith(
+        1,
+        expect.any(Function),
+        expect.any(Function)
+      );
+
+      act(() => {
+        mockDriver.stateCallback?.('playing');
+      });
+      expect(mockDriver.pause).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('player-buffering-spinner')).not.toBeInTheDocument();
+
+      // If reloaded live stream stalls during buffering after foreground return, 10s watchdog still fires
+      const stallingLiveDriver = mockDriver;
+      stallingLiveDriver.restore.mockReturnValue(false);
       act(() => {
         setHidden(true);
       });
       act(() => {
         setHidden(false);
       });
-      expect(liveHlsDriverBeforeRestore.restore).toHaveBeenCalledWith(15000, true);
+      expect(screen.getByTestId('player-buffering-spinner')).toBeInTheDocument();
       act(() => {
-        mockDriver.stateCallback?.('playing');
+        vi.advanceTimersByTime(10000);
       });
-      expect(mockDriver.pause).not.toHaveBeenCalled();
+      expect(screen.getByText(/Buffering timeout after 10s/i)).toBeInTheDocument();
     });
 
     it('resets pauseAfterRestoreRef when switching episodes and avoids buffering timeout while hidden or restored paused', () => {

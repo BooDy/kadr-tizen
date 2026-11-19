@@ -881,47 +881,94 @@ describe('TizenAvplayDriver', () => {
 
       // On HLS streams, restore() returns false so PlayerScreen opens a fresh transcode session
       const hlsDriver = new TizenAvplayDriver();
+      const hlsStateSpy = vi.fn();
+      const hlsTimeSpy = vi.fn();
+      const hlsErrorSpy = vi.fn();
+      hlsDriver.onStateChange(hlsStateSpy);
+      hlsDriver.onTimeUpdate(hlsTimeSpy);
+      hlsDriver.onError(hlsErrorSpy);
       await hlsDriver.init(
         document.createElement('div'),
         'http://localhost:8492/api/v1/media/42/hls/master.m3u8',
         0
       );
+      const hlsListener = mockAvplay.setListener.mock.calls.at(-1)?.[0];
+      hlsStateSpy.mockClear();
+      hlsTimeSpy.mockClear();
+      hlsErrorSpy.mockClear();
       mockAvplay.restore.mockClear();
 
       hlsDriver.suspend();
       expect(hlsDriver.restore(45000, false)).toBe(false);
       expect(mockAvplay.restore).not.toHaveBeenCalled();
+
+      // Failed/HLS restore must keep isSuspended=true so late callbacks before destroy() are suppressed
+      hlsListener.onerror('reaped');
+      hlsListener.onbufferingcomplete();
+      hlsListener.oncurrentplaytime(5000);
+      expect(hlsErrorSpy).not.toHaveBeenCalled();
+      expect(hlsStateSpy).not.toHaveBeenCalled();
+      expect(hlsTimeSpy).not.toHaveBeenCalled();
     });
 
     it('falls back to avplay.pause when suspend is missing, returns false if restore fails/missing, and guards after destroy', async () => {
-      const driver = new TizenAvplayDriver();
-      await driver.init(
-        document.createElement('div'),
-        'http://localhost:8492/api/v1/stream/42',
-        0
-      );
-      mockAvplay.pause.mockClear();
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const driver = new TizenAvplayDriver();
+        const stateSpy = vi.fn();
+        const timeSpy = vi.fn();
+        const errorSpy = vi.fn();
+        driver.onStateChange(stateSpy);
+        driver.onTimeUpdate(timeSpy);
+        driver.onError(errorSpy);
 
-      // Missing avplay.suspend -> falls back to pause
-      driver.suspend();
-      expect(mockAvplay.pause).toHaveBeenCalledTimes(1);
+        await driver.init(
+          document.createElement('div'),
+          'http://localhost:8492/api/v1/stream/42',
+          0
+        );
+        const listener = mockAvplay.setListener.mock.calls.at(-1)?.[0];
+        mockAvplay.pause.mockClear();
 
-      // Missing avplay.restore -> returns false
-      expect(driver.restore(10000, false)).toBe(false);
+        // Missing avplay.suspend -> falls back to pause
+        driver.suspend();
+        expect(mockAvplay.pause).toHaveBeenCalledTimes(1);
 
-      // Throwing avplay.restore -> returns false cleanly
-      mockAvplay.restore = vi.fn(() => {
-        throw new Error('restore failed');
-      });
-      expect(driver.restore(10000, false)).toBe(false);
+        // Missing avplay.restore -> returns false and keeps suspended guard active
+        expect(driver.restore(10000, false)).toBe(false);
+        stateSpy.mockClear();
+        timeSpy.mockClear();
+        errorSpy.mockClear();
+        listener.onerror('late error before destroy');
+        listener.onbufferingcomplete();
+        listener.oncurrentplaytime(12000);
+        expect(errorSpy).not.toHaveBeenCalled();
+        expect(stateSpy).not.toHaveBeenCalled();
+        expect(timeSpy).not.toHaveBeenCalled();
 
-      // After destroy -> suspend is no-op and restore returns false
-      mockAvplay.suspend = vi.fn();
-      mockAvplay.restore = vi.fn();
-      driver.destroy();
-      driver.suspend();
-      expect(mockAvplay.suspend).not.toHaveBeenCalled();
-      expect(driver.restore(10000, false)).toBe(false);
+        // Throwing avplay.restore -> returns false cleanly and keeps suspended guard active
+        mockAvplay.restore = vi.fn(() => {
+          throw new Error('restore failed');
+        });
+        expect(driver.restore(10000, false)).toBe(false);
+        expect(warnSpy).toHaveBeenCalled();
+        listener.onerror('late error after throw');
+        listener.onbufferingcomplete();
+        listener.oncurrentplaytime(13000);
+        expect(errorSpy).not.toHaveBeenCalled();
+        expect(stateSpy).not.toHaveBeenCalled();
+        expect(timeSpy).not.toHaveBeenCalled();
+
+        // After destroy -> suspend is no-op and restore returns false
+        mockAvplay.suspend = vi.fn();
+        mockAvplay.restore = vi.fn();
+        driver.destroy();
+        driver.suspend();
+        expect(mockAvplay.suspend).not.toHaveBeenCalled();
+        expect(driver.restore(10000, false)).toBe(false);
+      } finally {
+        warnSpy.mockRestore();
+      }
     });
   });
 });

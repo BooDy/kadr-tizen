@@ -1515,7 +1515,10 @@ export function PlayerScreen({
 
         if (!handled) {
           pauseAfterRestoreRef.current = !autoPlay;
-          if (!autoPlay && targetPos > 0) {
+          if (autoPlay) {
+            playerStateRef.current = 'buffering';
+            setPlayerState('buffering');
+          } else if (targetPos > 0) {
             if (isHlsRef.current) {
               hlsSeekOffsetMsRef.current = targetPos;
               setHlsSeekOffsetMs(targetPos);
