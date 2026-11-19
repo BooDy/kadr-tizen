@@ -553,6 +553,53 @@ describe('ItemDetailModal', () => {
     warnSpy.mockRestore();
   });
 
+  it('invokes onLockedLibrary and rolls back watch state on 403 in standalone fallback mode', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: 'LIBRARY_LOCKED' }), {
+        status: 403,
+        statusText: 'Forbidden',
+      })
+    );
+    const onLockedLibrary = vi.fn();
+    const client = new ApiClient('http://localhost:8492');
+
+    try {
+      render(
+        <FocusProvider>
+          <ItemDetailModal
+            isOpen={true}
+            item={{ ...mockMovieWithResume, library_id: 'lib-private-9' }}
+            serverUrl="http://localhost:8492"
+            client={client}
+            onPlay={vi.fn()}
+            onClose={vi.fn()}
+            onLockedLibrary={onLockedLibrary}
+          />
+        </FocusProvider>
+      );
+
+      act(() => {
+        fireEvent.click(document.getElementById('detail-watch-toggle-btn')!);
+      });
+      expect(document.getElementById('detail-watch-toggle-btn')).toHaveTextContent(
+        'Mark Unwatched'
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(onLockedLibrary).toHaveBeenCalledWith('lib-private-9');
+      expect(document.getElementById('detail-watch-toggle-btn')).toHaveTextContent('Mark Watched');
+      expect(screen.getByText(/Resume \(60m\)/i)).toBeInTheDocument();
+    } finally {
+      fetchSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  });
+
   describe('TV Show Multi-Season & Episode Carousel', () => {
     const mockShowDetail: MediaItemDetail = {
       id: 205,

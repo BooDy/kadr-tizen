@@ -32,6 +32,10 @@ export class ApiClient {
     return this.libraryUnlockTokens.has(libraryId);
   }
 
+  removeLibraryUnlockToken(libraryId: string): void {
+    this.libraryUnlockTokens.delete(libraryId);
+  }
+
   clearLibraryUnlockTokens(): void {
     this.libraryUnlockTokens.clear();
   }

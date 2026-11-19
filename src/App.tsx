@@ -466,6 +466,16 @@ export default function App() {
           return curSuspId === prevSuspId ? { ...prev, item: previousSuspendedItem } : prev;
         });
       }
+      const errMsg = err instanceof Error ? err.message : String(err ?? '');
+      const is403 =
+        (err as { status?: number })?.status === 403 ||
+        errMsg.includes('403') ||
+        errMsg.includes('LIBRARY_LOCKED');
+      const lockedLibId = previousActiveItem?.library_id || activeItem?.library_id;
+      if (is403 && lockedLibId) {
+        client.removeLibraryUnlockToken(lockedLibId);
+        setUnlockLibraryId(lockedLibId);
+      }
       throw err;
     }
   };
@@ -731,6 +741,12 @@ export default function App() {
                 setPlaylistRefreshKey((k) => k + 1);
               }}
               onWatchStateChange={handleWatchStateChange}
+              onLockedLibrary={(libraryId) => {
+                if (libraryId) {
+                  client.removeLibraryUnlockToken(libraryId);
+                  setUnlockLibraryId(libraryId);
+                }
+              }}
             />
             {addToPlaylistTarget && (
               <AddToPlaylistModal

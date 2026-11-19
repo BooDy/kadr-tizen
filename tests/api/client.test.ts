@@ -86,6 +86,18 @@ describe('ApiClient', () => {
     expect(client.getLibraryUnlockToken('lib-1')).toBeUndefined();
     expect(client.getLibraryUnlockToken('lib-2')).toBeUndefined();
   });
+
+  it('removes a single library unlock token when removeLibraryUnlockToken is called', () => {
+    const client = new ApiClient('http://192.168.1.50:8492');
+    client.setLibraryUnlockToken('lib-1', 'token-1');
+    client.setLibraryUnlockToken('lib-2', 'token-2');
+
+    client.removeLibraryUnlockToken('lib-1');
+    expect(client.isLibraryUnlocked('lib-1')).toBe(false);
+    expect(client.getLibraryUnlockToken('lib-1')).toBeUndefined();
+    expect(client.isLibraryUnlocked('lib-2')).toBe(true);
+    expect(client.getLibraryUnlockToken('lib-2')).toBe('token-2');
+  });
 });
 
 import { unlockLibrary } from '../../src/api/libraries';

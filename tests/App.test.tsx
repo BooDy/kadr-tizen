@@ -2334,5 +2334,114 @@ describe('App State Machine & Router', () => {
       fetchSpy.mockRestore();
     }
   });
+
+  it('rolls back watch state, clears stale library unlock token, and opens PinPadModal on 403 LIBRARY_LOCKED watch toggle', async () => {
+    localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
+
+    const actualPlayback = await vi.importActual<typeof import('../src/api/playback')>(
+      '../src/api/playback'
+    );
+
+    const removeTokenSpy = vi.spyOn(ApiClient.prototype, 'removeLibraryUnlockToken');
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    vi.mocked(items.fetchMediaItem).mockResolvedValueOnce({
+      ...mockItemDetail,
+      library_id: 'lib-private-vault',
+    });
+
+    let putAttempt = 0;
+    const capturedHeaders: Array<string | null> = [];
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url =
+        typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
+      if (url.includes('/api/v1/playback/states')) {
+        putAttempt++;
+        const hdrs = new Headers(init?.headers);
+        capturedHeaders.push(hdrs.get('X-Kadr-Unlocked'));
+        if (putAttempt === 1) {
+          return new Response(JSON.stringify({ error: 'LIBRARY_LOCKED' }), {
+            status: 403,
+            statusText: 'Forbidden',
+          });
+        }
+        return new Response(JSON.stringify({ watch_state: 'completed' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+
+    vi.mocked(playbackApi.setItemWatchState).mockImplementation(actualPlayback.setItemWatchState);
+    vi.mocked(librariesApi.unlockLibrary).mockResolvedValueOnce({
+      token: 'jwt-fresh',
+      unlock_token: 'fresh-unlock-token',
+    });
+
+    try {
+      await renderAuthenticatedApp();
+
+      await waitFor(() => {
+        expect(screen.getByText('Trending Dune Part Two')).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Trending Dune Part Two'));
+      });
+      await waitFor(() => {
+        expect(screen.getByRole('dialog', { name: 'Dune: Part Two' })).toBeInTheDocument();
+        expect(screen.getByText(/Resume \(2m\)/i)).toBeInTheDocument();
+      });
+
+      // Trigger watch toggle -> 403 LIBRARY_LOCKED
+      await act(async () => {
+        fireEvent.click(document.getElementById('detail-watch-toggle-btn')!);
+      });
+
+      await waitFor(() => {
+        expect(removeTokenSpy).toHaveBeenCalledWith('lib-private-vault');
+        expect(screen.getByText('Unlock Private Library')).toBeInTheDocument();
+        expect(document.getElementById('detail-watch-toggle-btn')).toHaveTextContent('Mark Watched');
+        expect(screen.getByText(/Resume \(2m\)/i)).toBeInTheDocument();
+      });
+
+      // Enter PIN in PinPadModal -> unlocks library with fresh token and closes PinPadModal
+      await act(async () => {
+        fireEvent.keyDown(window, { key: '1', keyCode: 49 });
+        fireEvent.keyDown(window, { key: '2', keyCode: 50 });
+        fireEvent.keyDown(window, { key: '3', keyCode: 51 });
+        fireEvent.keyDown(window, { key: '4', keyCode: 52 });
+      });
+
+      await waitFor(() => {
+        expect(librariesApi.unlockLibrary).toHaveBeenCalledWith(
+          expect.any(ApiClient),
+          'lib-private-vault',
+          '1234'
+        );
+        expect(screen.queryByText('Unlock Private Library')).not.toBeInTheDocument();
+      });
+
+      // Retrying watch toggle succeeds with the new unlock token header
+      await act(async () => {
+        fireEvent.click(document.getElementById('detail-watch-toggle-btn')!);
+      });
+
+      await waitFor(() => {
+        expect(document.getElementById('detail-watch-toggle-btn')).toHaveTextContent(
+          'Mark Unwatched'
+        );
+      });
+      expect(capturedHeaders[1]).toContain('fresh-unlock-token');
+    } finally {
+      removeTokenSpy.mockRestore();
+      warnSpy.mockRestore();
+      fetchSpy.mockRestore();
+    }
+  });
 });
 

@@ -47,6 +47,7 @@ export interface ItemDetailModalProps {
   onAddToPlaylist?: (target: AddToPlaylistTarget) => void;
   onPlaylistChanged?: () => void;
   onWatchStateChange?: (itemIds: Array<number | string>, watched: boolean) => Promise<void> | void;
+  onLockedLibrary?: (libraryId: string) => void;
 }
 
 interface PrimaryDetailActionButtonProps {
@@ -527,6 +528,7 @@ export function ItemDetailModal({
   onAddToPlaylist,
   onPlaylistChanged,
   onWatchStateChange,
+  onLockedLibrary,
 }: ItemDetailModalProps) {
   const onViewStateChangeRef = useRef(onViewStateChange);
   useEffect(() => {
@@ -1209,9 +1211,19 @@ export function ItemDetailModal({
           if (prevKey !== targetItemKey) return prev;
           return snapshot;
         });
+        if (!onWatchStateChange) {
+          const errMsg = err instanceof Error ? err.message : String(err ?? '');
+          const is403 =
+            (err as { status?: number })?.status === 403 ||
+            errMsg.includes('403') ||
+            errMsg.includes('LIBRARY_LOCKED');
+          if (is403 && resolvedLibraryId) {
+            onLockedLibrary?.(resolvedLibraryId);
+          }
+        }
       });
     },
-    [effectiveItem, onWatchStateChange, fallbackClient]
+    [effectiveItem, onWatchStateChange, fallbackClient, resolvedLibraryId, onLockedLibrary]
   );
 
   const handleToggleMovieWatchState = useCallback(() => {
@@ -1627,11 +1639,11 @@ export function ItemDetailModal({
         <section className="relative z-10 flex flex-col w-full px-14 pt-2 pb-4 flex-1 justify-end">
           {/* Season Selector Tabs Bar */}
           <div className="flex items-center justify-between pb-4">
-            <div className="flex items-center">
-              <h2 className="text-3xl font-bold text-[#e3e1e9] tracking-tight mr-6">
+            <div className="flex items-center flex-1 min-w-0 mr-4">
+              <h2 className="text-3xl font-bold text-[#e3e1e9] tracking-tight mr-6 shrink-0">
                 Episodes
               </h2>
-              <div className="flex items-center overflow-x-auto scrollbar-none">
+              <div className="flex items-center min-w-0 overflow-x-auto scrollbar-none">
                 {seasons.map((season, idx) => (
                   <SeasonTabButton
                     key={season}

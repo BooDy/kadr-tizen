@@ -209,5 +209,52 @@ describe('ItemDetailModal Season Navigation', () => {
     expect(seasonWatchBtn).toHaveTextContent('Mark Season 1 Watched');
     expect(screen.queryByText('WATCHED')).not.toBeInTheDocument();
   });
+
+  it('keeps season tabs scroll container shrinkable (min-w-0) alongside shrink-0 SeasonWatchToggleButton on 9+ season shows with zero gap-* classes', () => {
+    const tenSeasonEpisodes = Array.from({ length: 10 }, (_, idx) => ({
+      id: 1000 + idx + 1,
+      title: `Episode S${idx + 1}E1`,
+      season: idx + 1,
+      episode: 1,
+      type: 'video' as const,
+    }));
+
+    const { container } = render(
+      <FocusProvider>
+        <ItemDetailModal
+          item={{
+            id: 99,
+            title: 'Long Running Series',
+            media_type: 'show',
+            episodes: tenSeasonEpisodes,
+          }}
+          isOpen={true}
+          onClose={vi.fn()}
+          onPlay={vi.fn()}
+          serverUrl="http://127.0.0.1:8492"
+        />
+      </FocusProvider>
+    );
+
+    const season1Tab = document.getElementById('season-tab-1')!;
+    const season10Tab = document.getElementById('season-tab-10')!;
+    expect(season1Tab).toBeInTheDocument();
+    expect(season10Tab).toBeInTheDocument();
+
+    const scrollContainer = season1Tab.parentElement!;
+    expect(scrollContainer).toHaveClass('flex', 'items-center', 'min-w-0', 'overflow-x-auto');
+
+    const tabsWrapper = scrollContainer.parentElement!;
+    expect(tabsWrapper).toHaveClass('flex', 'items-center', 'flex-1', 'min-w-0', 'mr-4');
+
+    const seasonWatchBtn = document.getElementById('season-watch-toggle-btn')!;
+    expect(seasonWatchBtn).toBeInTheDocument();
+    expect(seasonWatchBtn).toHaveClass('shrink-0');
+
+    const allClassNames = Array.from(container.querySelectorAll('*'))
+      .map((el) => el.getAttribute('class') || '')
+      .join(' ');
+    expect(allClassNames).not.toMatch(/\bgap-/);
+  });
 });
 
