@@ -22,7 +22,8 @@ import {
   AddToPlaylistTarget,
 } from '../components/playlists/AddToPlaylistModal';
 import { getAuthenticatedImageUrl } from '../utils/imageUrl';
-import { toResumePercentageSentinel } from '../utils/playbackProgress';
+import { applyWatchStateMutation, toResumePercentageSentinel } from '../utils/playbackProgress';
+import { setItemWatchState, setBatchWatchState } from '../api/playback';
 
 export interface ItemDetailModalProps {
   isOpen?: boolean;
@@ -45,6 +46,7 @@ export interface ItemDetailModalProps {
   onBrowseFolder?: (libraryId: string, folderPath: string) => void;
   onAddToPlaylist?: (target: AddToPlaylistTarget) => void;
   onPlaylistChanged?: () => void;
+  onWatchStateChange?: (itemIds: Array<number | string>, watched: boolean) => Promise<void> | void;
 }
 
 interface PrimaryDetailActionButtonProps {
@@ -54,6 +56,7 @@ interface PrimaryDetailActionButtonProps {
   eyebrowAriaHidden?: boolean;
   label: string;
   onActivate: () => void;
+  onFocusAction?: (id: string) => void;
   autoFocus?: boolean;
 }
 
@@ -64,9 +67,13 @@ const PrimaryDetailActionButton = memo(function PrimaryDetailActionButton({
   eyebrowAriaHidden = false,
   label,
   onActivate,
+  onFocusAction,
   autoFocus,
 }: PrimaryDetailActionButtonProps) {
   const isFocused = useIsFocused(id);
+  const handleFocus = useCallback(() => {
+    onFocusAction?.(id);
+  }, [onFocusAction, id]);
 
   return (
     <TVButton
@@ -77,7 +84,8 @@ const PrimaryDetailActionButton = memo(function PrimaryDetailActionButton({
       variant="primary"
       onEnter={onActivate}
       onClick={onActivate}
-      className={`group relative !px-6 !py-4 !rounded-xl mr-4 bg-gradient-to-r from-[#ff5e1e] to-[#ff7a18] !text-[#532200] !text-base font-bold tracking-wide transition-transform duration-75 ${
+      onFocus={handleFocus}
+      className={`group relative !px-6 !py-4 !rounded-xl mr-4 mb-2 bg-gradient-to-r from-[#ff5e1e] to-[#ff7a18] !text-[#532200] !text-base font-bold tracking-wide transition-transform duration-75 ${
         isFocused ? 'scale-[1.04]' : 'opacity-95'
       }`}
       style={{
@@ -119,6 +127,7 @@ interface SecondaryDetailActionButtonProps {
   icon: ReactNode;
   label: string;
   onActivate: () => void;
+  onFocusAction?: (id: string) => void;
 }
 
 const SecondaryDetailActionButton = memo(function SecondaryDetailActionButton({
@@ -127,8 +136,12 @@ const SecondaryDetailActionButton = memo(function SecondaryDetailActionButton({
   icon,
   label,
   onActivate,
+  onFocusAction,
 }: SecondaryDetailActionButtonProps) {
   const isFocused = useIsFocused(id);
+  const handleFocus = useCallback(() => {
+    onFocusAction?.(id);
+  }, [onFocusAction, id]);
 
   return (
     <TVButton
@@ -139,7 +152,8 @@ const SecondaryDetailActionButton = memo(function SecondaryDetailActionButton({
       variant="secondary"
       onEnter={onActivate}
       onClick={onActivate}
-      className={`!px-5 !py-4 !rounded-xl !text-base font-semibold tracking-wide mr-4 transition-transform duration-75 ${
+      onFocus={handleFocus}
+      className={`!px-5 !py-4 !rounded-xl !text-base font-semibold tracking-wide mr-4 mb-2 transition-transform duration-75 ${
         isFocused
           ? '!bg-[#38393f] !text-white !border-[#ff7a18] scale-[1.04]'
           : '!bg-[#292a2f] !text-[#e3e1e9] border border-[rgba(255,122,24,0.18)]'
@@ -234,6 +248,124 @@ const SeasonTabButton = memo(function SeasonTabButton({
   );
 });
 
+interface SeasonWatchToggleButtonProps {
+  order: number;
+  selectedSeason: number;
+  allSeasonWatched: boolean;
+  onActivate: () => void;
+  onFocusButton: (id: string) => void;
+}
+
+const SeasonWatchToggleButton = memo(function SeasonWatchToggleButton({
+  order,
+  selectedSeason,
+  allSeasonWatched,
+  onActivate,
+  onFocusButton,
+}: SeasonWatchToggleButtonProps) {
+  const id = 'season-watch-toggle-btn';
+  const isFocused = useIsFocused(id);
+  const handleFocus = useCallback(() => {
+    onFocusButton(id);
+  }, [onFocusButton]);
+
+  const accessibleLabel = `Mark S${String(selectedSeason).padStart(2, '0')} ${
+    allSeasonWatched ? 'Unwatched' : 'Watched'
+  }`;
+
+  return (
+    <TVButton
+      id={id}
+      data-focus-id={id}
+      aria-label={accessibleLabel}
+      groupId="season-tabs"
+      order={order}
+      variant="secondary"
+      onClick={onActivate}
+      onEnter={onActivate}
+      onFocus={handleFocus}
+      className={`!px-4 !py-2 !text-sm font-bold !rounded-xl shrink-0 transition-transform duration-75 ${
+        isFocused
+          ? '!bg-[#38393f] !text-white !border-[#ff7a18] scale-[1.03]'
+          : '!bg-[#292a2f] !text-[#e3e1e9] border border-[rgba(255,122,24,0.18)]'
+      }`}
+      style={{
+        padding: '10px 16px',
+        borderRadius: '12px',
+        backgroundColor: isFocused ? '#38393f' : '#292a2f',
+        color: isFocused ? '#ffffff' : '#e3e1e9',
+        border: isFocused ? '2px solid #ff7a18' : '1px solid rgba(255, 122, 24, 0.18)',
+        boxShadow: isFocused ? '0 0 0 2px #FFB800' : 'none',
+        transform: isFocused ? 'scale(1.03)' : 'scale(1)',
+      }}
+    >
+      {allSeasonWatched ? (
+        <RotateCcw className="w-4 h-4 mr-2 text-[#ffb871] shrink-0" />
+      ) : (
+        <CheckCircle2 className="w-4 h-4 mr-2 text-[#ffb871] shrink-0" />
+      )}
+      <span>
+        {allSeasonWatched
+          ? `Mark Season ${selectedSeason} Unwatched`
+          : `Mark Season ${selectedSeason} Watched`}
+      </span>
+    </TVButton>
+  );
+});
+
+interface EpisodeActionPillProps {
+  id: string;
+  order: number;
+  icon: ReactNode;
+  label: string;
+  onActivate: () => void;
+  onFocusPill: (id: string) => void;
+}
+
+const EpisodeActionPill = memo(function EpisodeActionPill({
+  id,
+  order,
+  icon,
+  label,
+  onActivate,
+  onFocusPill,
+}: EpisodeActionPillProps) {
+  const isFocused = useIsFocused(id);
+  const handleFocus = useCallback(() => {
+    onFocusPill(id);
+  }, [onFocusPill, id]);
+
+  return (
+    <TVButton
+      id={id}
+      data-focus-id={id}
+      groupId="item-detail-episode-actions"
+      order={order}
+      variant="secondary"
+      onClick={onActivate}
+      onEnter={onActivate}
+      onFocus={handleFocus}
+      className={`!px-4 !py-2 !rounded-xl !text-sm font-semibold mr-3 last:mr-0 shrink-0 transition-transform duration-75 ${
+        isFocused
+          ? '!bg-[#38393f] !text-white !border-[#ff7a18] scale-[1.03]'
+          : '!bg-[#292a2f] !text-[#e3e1e9] border border-[rgba(255,122,24,0.18)]'
+      }`}
+      style={{
+        padding: '8px 16px',
+        borderRadius: '10px',
+        backgroundColor: isFocused ? '#38393f' : '#292a2f',
+        color: isFocused ? '#ffffff' : '#e3e1e9',
+        border: isFocused ? '2px solid #ff7a18' : '1px solid rgba(255, 122, 24, 0.18)',
+        boxShadow: isFocused ? '0 0 0 2px #FFB800' : 'none',
+        transform: isFocused ? 'scale(1.03)' : 'scale(1)',
+      }}
+    >
+      {icon}
+      <span>{label}</span>
+    </TVButton>
+  );
+});
+
 interface EpisodeLandscapeCardProps {
   episode: EpisodeCard;
   index: number;
@@ -241,6 +373,7 @@ interface EpisodeLandscapeCardProps {
   imageUrl?: string;
   isNextUp: boolean;
   onSelectEpisode: (episode: EpisodeCard) => void;
+  onFocusEpisode: (episodeId: number | string, cardFocusId?: string) => void;
 }
 
 const EpisodeLandscapeCard = memo(function EpisodeLandscapeCard({
@@ -250,6 +383,7 @@ const EpisodeLandscapeCard = memo(function EpisodeLandscapeCard({
   imageUrl,
   isNextUp,
   onSelectEpisode,
+  onFocusEpisode,
 }: EpisodeLandscapeCardProps) {
   const id = `episode-card-${episode.id}`;
   const handleSelect = useCallback(() => {
@@ -262,6 +396,16 @@ const EpisodeLandscapeCard = memo(function EpisodeLandscapeCard({
     order: index + 1,
     onEnter: handleSelect,
   });
+
+  const handleDomFocus = useCallback(() => {
+    onFocusEpisode(episode.id, id);
+  }, [onFocusEpisode, episode.id, id]);
+
+  useEffect(() => {
+    if (isFocused) {
+      onFocusEpisode(episode.id);
+    }
+  }, [isFocused, episode.id, onFocusEpisode]);
 
   const progress = episode.playback_progress || 0;
   const isWatched = progress >= 0.9;
@@ -287,6 +431,7 @@ const EpisodeLandscapeCard = memo(function EpisodeLandscapeCard({
       tabIndex={-1}
       role="button"
       onClick={handleSelect}
+      onFocus={handleDomFocus}
       className={`group relative flex flex-col w-80 shrink-0 mr-6 rounded-2xl overflow-hidden transition-transform duration-75 cursor-pointer outline-none ${
         isFocused
           ? 'bg-[#292a2f] scale-[1.03] border-2 border-[#ff7a18] z-20 tv-focus-ring'
@@ -381,38 +526,56 @@ export function ItemDetailModal({
   onBrowseFolder,
   onAddToPlaylist,
   onPlaylistChanged,
+  onWatchStateChange,
 }: ItemDetailModalProps) {
   const onViewStateChangeRef = useRef(onViewStateChange);
   useEffect(() => {
     onViewStateChangeRef.current = onViewStateChange;
   }, [onViewStateChange]);
 
-  const effectiveOpen = Boolean(isOpen && item);
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
-  const resolvedId = item?.id ?? item?.card?.id;
-  const resolvedTitle = item?.title ?? item?.card?.title ?? '';
-  const resolvedOverview = item?.overview ?? item?.card?.subtitle;
-  const resolvedReleaseYear = item?.release_year ?? item?.card?.release_year;
-  const resolvedResolution = item?.resolution ?? item?.technical?.resolution;
-  const resolvedPosterUrl = item?.poster_url ?? item?.card?.poster_url;
-  const resolvedBackdropUrl = item?.backdrop_url ?? item?.card?.backdrop_url;
+  const [prevPropItem, setPrevPropItem] = useState(item);
+  const [localItem, setLocalItem] = useState(item);
+  if (prevPropItem !== item) {
+    setPrevPropItem(item);
+    setLocalItem(item);
+  }
+  const effectiveItem = localItem ?? item;
+
+  const effectiveOpen = Boolean(isOpen && effectiveItem);
+
+  const resolvedId = effectiveItem?.id ?? effectiveItem?.card?.id;
+  const resolvedTitle = effectiveItem?.title ?? effectiveItem?.card?.title ?? '';
+  const resolvedOverview = effectiveItem?.overview ?? effectiveItem?.card?.subtitle;
+  const resolvedReleaseYear = effectiveItem?.release_year ?? effectiveItem?.card?.release_year;
+  const resolvedResolution = effectiveItem?.resolution ?? effectiveItem?.technical?.resolution;
+  const resolvedPosterUrl = effectiveItem?.poster_url ?? effectiveItem?.card?.poster_url;
+  const resolvedBackdropUrl = effectiveItem?.backdrop_url ?? effectiveItem?.card?.backdrop_url;
   const resolvedDurationMs =
-    item?.duration_ms ??
-    (item?.duration_seconds && item.duration_seconds > 0
-      ? item.duration_seconds * 1000
+    effectiveItem?.duration_ms ??
+    (effectiveItem?.duration_seconds && effectiveItem.duration_seconds > 0
+      ? effectiveItem.duration_seconds * 1000
       : undefined);
   const isLiveChannel = Boolean(
-    item?.media_type === 'live_channel' ||
-      item?.card?.media_type === 'live_channel' ||
-      (item?.duration_seconds !== undefined && item.duration_seconds <= 0) ||
-      (item?.technical?.duration_seconds !== undefined &&
-        item.technical.duration_seconds <= 0)
+    effectiveItem?.media_type === 'live_channel' ||
+      effectiveItem?.card?.media_type === 'live_channel' ||
+      (effectiveItem?.duration_seconds !== undefined && effectiveItem.duration_seconds <= 0) ||
+      (effectiveItem?.technical?.duration_seconds !== undefined &&
+        effectiveItem.technical.duration_seconds <= 0)
   );
-  const isItemCompleted = (item?.card?.playback_progress ?? 0) >= 0.9;
+  const isItemCompleted = (effectiveItem?.card?.playback_progress ?? 0) >= 0.9;
   const rawResumeMs =
-    item?.resume_position_ms ??
-    (item?.resume_position_seconds !== undefined && item.resume_position_seconds > 0
-      ? item.resume_position_seconds * 1000
+    effectiveItem?.resume_position_ms ??
+    (effectiveItem?.resume_position_seconds !== undefined &&
+    effectiveItem.resume_position_seconds > 0
+      ? effectiveItem.resume_position_seconds * 1000
       : undefined);
   const resolvedResumeMs =
     !isLiveChannel &&
@@ -422,8 +585,8 @@ export function ItemDetailModal({
     (!resolvedDurationMs || rawResumeMs < resolvedDurationMs * 0.95)
       ? rawResumeMs
       : undefined;
-  const resolvedLibraryId = item?.library_id;
-  const resolvedFolderPath = item?.folder_path;
+  const resolvedLibraryId = effectiveItem?.library_id;
+  const resolvedFolderPath = effectiveItem?.folder_path;
 
   const [internalAddTarget, setInternalAddTarget] = useState<AddToPlaylistTarget | null>(null);
   const fallbackClient = useMemo(
@@ -432,12 +595,12 @@ export function ItemDetailModal({
   );
 
   const isShow = Boolean(
-    item?.card?.media_type === 'show' ||
-      item?.media_type === 'show' ||
-      (item?.episodes && item.episodes.length > 0)
+    effectiveItem?.card?.media_type === 'show' ||
+      effectiveItem?.media_type === 'show' ||
+      (effectiveItem?.episodes && effectiveItem.episodes.length > 0)
   );
 
-  const episodes = useMemo(() => item?.episodes || [], [item?.episodes]);
+  const episodes = useMemo(() => effectiveItem?.episodes || [], [effectiveItem?.episodes]);
 
   const seasons = useMemo(() => {
     return Array.from(new Set(episodes.map((e) => e.season))).sort((a, b) => a - b);
@@ -602,6 +765,66 @@ export function ItemDetailModal({
     [episodes, selectedSeason]
   );
 
+  const seasonScopeKey = `${resolvedId ?? ''}:${selectedSeason}`;
+  const [prevSeasonScopeKey, setPrevSeasonScopeKey] = useState(seasonScopeKey);
+  const [activeEpisodeId, setActiveEpisodeId] = useState<number | string | null>(
+    () => visibleSeasonEpisodes[0]?.id ?? null
+  );
+  if (prevSeasonScopeKey !== seasonScopeKey) {
+    setPrevSeasonScopeKey(seasonScopeKey);
+    setActiveEpisodeId(visibleSeasonEpisodes[0]?.id ?? null);
+  }
+
+  const activeEpisode = useMemo(() => {
+    if (visibleSeasonEpisodes.length === 0) return null;
+    if (activeEpisodeId !== null && activeEpisodeId !== undefined) {
+      const matched = visibleSeasonEpisodes.find(
+        (ep) => String(ep.id) === String(activeEpisodeId)
+      );
+      if (matched) return matched;
+    }
+    return visibleSeasonEpisodes[0] ?? null;
+  }, [visibleSeasonEpisodes, activeEpisodeId]);
+
+  const activeEpProgress = activeEpisode?.playback_progress ?? 0;
+  const activeEpWatched = activeEpProgress >= 0.9;
+  const activeEpResumable = activeEpProgress > 0 && activeEpProgress < 0.9;
+
+  const episodeActionIds = useMemo(() => {
+    if (!activeEpisode) return [] as string[];
+    const ids: string[] = [];
+    if (activeEpResumable) ids.push('episode-action-restart');
+    ids.push('episode-action-watch-toggle');
+    if (activeEpResumable) ids.push('episode-action-clear-progress');
+    return ids;
+  }, [activeEpisode, activeEpResumable]);
+
+  const allSeasonWatched = useMemo(
+    () =>
+      visibleSeasonEpisodes.length > 0 &&
+      visibleSeasonEpisodes.every((ep) => (ep.playback_progress ?? 0) >= 0.9),
+    [visibleSeasonEpisodes]
+  );
+
+  const focusTargetById = useCallback(
+    (targetId: string) => {
+      setFocusedId(targetId);
+      if (typeof document !== 'undefined') {
+        const el =
+          document.querySelector<HTMLElement>(`[data-focus-id="${targetId}"]`) ||
+          document.getElementById(targetId);
+        if (el && document.activeElement !== el) {
+          try {
+            el.focus({ preventScroll: true });
+          } catch {
+            el.focus();
+          }
+        }
+      }
+    },
+    [setFocusedId]
+  );
+
   useEffect(() => {
     if (!effectiveOpen) return;
 
@@ -656,68 +879,146 @@ export function ItemDetailModal({
           current === 'item-detail-modal';
         const isSeasonTab =
           current.startsWith('season-tab-') || activeDomId.startsWith('season-tab-');
+        const isSeasonWatchToggle =
+          current === 'season-watch-toggle-btn' ||
+          activeDomId === 'season-watch-toggle-btn';
+        const isSeasonRow = isSeasonTab || isSeasonWatchToggle;
         const isEpisodeCard =
           current.startsWith('episode-card-') || activeDomId.startsWith('episode-card-');
+        const isEpisodeAction =
+          current.startsWith('episode-action-') || activeDomId.startsWith('episode-action-');
 
         // Down Navigation
         if (code === TVKeys.DOWN || e.key === 'ArrowDown') {
           if (isDetailAction) {
             e.preventDefault();
             e.stopImmediatePropagation();
-            setFocusedId(`season-tab-${selectedSeason}`);
-          } else if (isSeasonTab) {
+            focusTargetById(`season-tab-${selectedSeason}`);
+          } else if (isSeasonRow) {
             if (visibleSeasonEpisodes.length > 0) {
               e.preventDefault();
               e.stopImmediatePropagation();
-              setFocusedId(`episode-card-${visibleSeasonEpisodes[0].id}`);
+              focusTargetById(`episode-card-${visibleSeasonEpisodes[0].id}`);
             }
+          } else if (isEpisodeCard) {
+            const epCardId = current.startsWith('episode-card-')
+              ? current
+              : activeDomId.startsWith('episode-card-')
+              ? activeDomId
+              : '';
+            const epIdStr = epCardId.replace('episode-card-', '');
+            const targetEp =
+              visibleSeasonEpisodes.find((ep) => String(ep.id) === epIdStr) ??
+              activeEpisode ??
+              visibleSeasonEpisodes[0];
+            if (targetEp) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              if (String(activeEpisodeId) !== String(targetEp.id)) {
+                setActiveEpisodeId(targetEp.id);
+              }
+              const targetProg = targetEp.playback_progress ?? 0;
+              const targetResumable = targetProg > 0 && targetProg < 0.9;
+              focusTargetById(
+                targetResumable ? 'episode-action-restart' : 'episode-action-watch-toggle'
+              );
+            }
+          } else if (isEpisodeAction) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
           }
         }
         // Up Navigation
         else if (code === TVKeys.UP || e.key === 'ArrowUp') {
-          if (isEpisodeCard) {
+          if (isEpisodeAction) {
+            const targetEp = activeEpisode ?? visibleSeasonEpisodes[0];
+            if (targetEp) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              focusTargetById(`episode-card-${targetEp.id}`);
+            }
+          } else if (isEpisodeCard) {
             e.preventDefault();
             e.stopImmediatePropagation();
-            setFocusedId(`season-tab-${selectedSeason}`);
-          } else if (isSeasonTab) {
+            focusTargetById(`season-tab-${selectedSeason}`);
+          } else if (isSeasonRow) {
             e.preventDefault();
             e.stopImmediatePropagation();
-            setFocusedId(primaryBtnId);
+            focusTargetById(primaryBtnId);
           }
         }
-        // Left Navigation on Season Tabs
+        // Left Navigation on Season Tabs / Season Watch Toggle / Episode Actions
         else if (code === TVKeys.LEFT || e.key === 'ArrowLeft') {
-          const tabId = current.startsWith('season-tab-')
-            ? current
-            : activeDomId.startsWith('season-tab-')
-            ? activeDomId
-            : '';
-          if (tabId) {
+          if (isSeasonWatchToggle) {
             e.preventDefault();
             e.stopImmediatePropagation();
-            const seasonNum = parseInt(tabId.replace('season-tab-', ''), 10);
-            const currentIdx = seasons.indexOf(seasonNum);
+            if (seasons.length > 0) {
+              focusTargetById(`season-tab-${seasons[seasons.length - 1]}`);
+            }
+          } else if (isSeasonTab) {
+            const tabId = current.startsWith('season-tab-')
+              ? current
+              : activeDomId.startsWith('season-tab-')
+              ? activeDomId
+              : '';
+            if (tabId) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              const seasonNum = parseInt(tabId.replace('season-tab-', ''), 10);
+              const currentIdx = seasons.indexOf(seasonNum);
+              if (currentIdx > 0) {
+                const prevSeason = seasons[currentIdx - 1];
+                focusTargetById(`season-tab-${prevSeason}`);
+              }
+            }
+          } else if (isEpisodeAction) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            const actionId = current.startsWith('episode-action-')
+              ? current
+              : activeDomId.startsWith('episode-action-')
+              ? activeDomId
+              : '';
+            const currentIdx = episodeActionIds.indexOf(actionId);
             if (currentIdx > 0) {
-              const prevSeason = seasons[currentIdx - 1];
-              setFocusedId(`season-tab-${prevSeason}`);
+              focusTargetById(episodeActionIds[currentIdx - 1]);
             }
           }
         }
-        // Right Navigation on Season Tabs
+        // Right Navigation on Season Tabs / Season Watch Toggle / Episode Actions
         else if (code === TVKeys.RIGHT || e.key === 'ArrowRight') {
-          const tabId = current.startsWith('season-tab-')
-            ? current
-            : activeDomId.startsWith('season-tab-')
-            ? activeDomId
-            : '';
-          if (tabId) {
+          if (isSeasonWatchToggle) {
             e.preventDefault();
             e.stopImmediatePropagation();
-            const seasonNum = parseInt(tabId.replace('season-tab-', ''), 10);
-            const currentIdx = seasons.indexOf(seasonNum);
-            if (currentIdx >= 0 && currentIdx < seasons.length - 1) {
-              const nextSeason = seasons[currentIdx + 1];
-              setFocusedId(`season-tab-${nextSeason}`);
+          } else if (isSeasonTab) {
+            const tabId = current.startsWith('season-tab-')
+              ? current
+              : activeDomId.startsWith('season-tab-')
+              ? activeDomId
+              : '';
+            if (tabId) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              const seasonNum = parseInt(tabId.replace('season-tab-', ''), 10);
+              const currentIdx = seasons.indexOf(seasonNum);
+              if (currentIdx >= 0 && currentIdx < seasons.length - 1) {
+                const nextSeason = seasons[currentIdx + 1];
+                focusTargetById(`season-tab-${nextSeason}`);
+              } else if (currentIdx === seasons.length - 1 && visibleSeasonEpisodes.length > 0) {
+                focusTargetById('season-watch-toggle-btn');
+              }
+            }
+          } else if (isEpisodeAction) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            const actionId = current.startsWith('episode-action-')
+              ? current
+              : activeDomId.startsWith('episode-action-')
+              ? activeDomId
+              : '';
+            const currentIdx = episodeActionIds.indexOf(actionId);
+            if (currentIdx >= 0 && currentIdx < episodeActionIds.length - 1) {
+              focusTargetById(episodeActionIds[currentIdx + 1]);
             }
           }
         }
@@ -748,9 +1049,12 @@ export function ItemDetailModal({
     seasons,
     selectedSeason,
     visibleSeasonEpisodes,
+    activeEpisode,
+    activeEpisodeId,
+    episodeActionIds,
     getFocusedId,
     getActiveTrap,
-    setFocusedId,
+    focusTargetById,
     primaryBtnId,
   ]);
 
@@ -868,7 +1172,84 @@ export function ItemDetailModal({
     [setFocusedId]
   );
 
-  if (!effectiveOpen || !item) return null;
+  const handleFocusEpisodeCard = useCallback(
+    (epId: number | string, cardFocusId?: string) => {
+      setActiveEpisodeId((prev) => (String(prev) === String(epId) ? prev : epId));
+      if (cardFocusId && getFocusedId() !== cardFocusId) {
+        setFocusedId(cardFocusId);
+      }
+    },
+    [getFocusedId, setFocusedId]
+  );
+
+  const handleSetWatchState = useCallback(
+    (targetIds: Array<number | string>, watched: boolean) => {
+      const base = effectiveItem;
+      if (!base || targetIds.length === 0) return;
+      const idSet = new Set(targetIds.map(String));
+      const snapshot = base;
+      const targetItemKey = String(base.id ?? base.card?.id ?? '');
+
+      setLocalItem((prev) => {
+        const current = prev ?? base;
+        return applyWatchStateMutation(current, idSet, watched);
+      });
+
+      const persistPromise = onWatchStateChange
+        ? Promise.resolve(onWatchStateChange(targetIds, watched))
+        : targetIds.length === 1
+        ? setItemWatchState(fallbackClient, targetIds[0], watched)
+        : setBatchWatchState(fallbackClient, targetIds, watched).then(() => undefined);
+
+      persistPromise.catch((err) => {
+        console.warn('[ItemDetailModal] Failed to update watch state:', err);
+        if (!isMountedRef.current) return;
+        setLocalItem((prev) => {
+          const prevKey = String(prev?.id ?? prev?.card?.id ?? '');
+          if (prevKey !== targetItemKey) return prev;
+          return snapshot;
+        });
+      });
+    },
+    [effectiveItem, onWatchStateChange, fallbackClient]
+  );
+
+  const handleToggleMovieWatchState = useCallback(() => {
+    if (resolvedId === undefined || resolvedId === null) return;
+    focusTargetById('detail-watch-toggle-btn');
+    handleSetWatchState([resolvedId], !isItemCompleted);
+  }, [resolvedId, isItemCompleted, focusTargetById, handleSetWatchState]);
+
+  const handleClearMovieProgress = useCallback(() => {
+    if (resolvedId === undefined || resolvedId === null) return;
+    focusTargetById('detail-watch-toggle-btn');
+    handleSetWatchState([resolvedId], false);
+  }, [resolvedId, focusTargetById, handleSetWatchState]);
+
+  const handleToggleSeasonWatchState = useCallback(() => {
+    if (visibleSeasonEpisodes.length === 0) return;
+    const targetIds = visibleSeasonEpisodes.map((ep) => ep.id);
+    focusTargetById('season-watch-toggle-btn');
+    handleSetWatchState(targetIds, !allSeasonWatched);
+  }, [visibleSeasonEpisodes, allSeasonWatched, focusTargetById, handleSetWatchState]);
+
+  const handlePlayEpisodeFromStart = useCallback(
+    (ep: EpisodeCard) => {
+      notifyViewState(`episode-card-${ep.id}`);
+      const playlistIdx = episodePlaylist.findIndex((p) => String(p.id) === String(ep.id));
+      onPlay(
+        ep.id,
+        0,
+        ep.title,
+        undefined,
+        episodePlaylist.length > 0 ? episodePlaylist : undefined,
+        playlistIdx >= 0 ? playlistIdx : undefined
+      );
+    },
+    [episodePlaylist, notifyViewState, onPlay]
+  );
+
+  if (!effectiveOpen || !effectiveItem) return null;
 
   const unlockTokens = client?.getUnlockTokens ? client.getUnlockTokens() : [];
   const formatImageUrl = (path?: string) => {
@@ -882,7 +1263,13 @@ export function ItemDetailModal({
     return `${cleanServer}${cleanPath}`;
   };
 
-  const hasRestartBtn = !isShow && Boolean(resolvedResumeMs && resolvedResumeMs > 0);
+  const hasShowRestartBtn = Boolean(isShow && nextEpisode && isEpisodeResume);
+  const hasMovieRestartBtn = Boolean(!isShow && resolvedResumeMs && resolvedResumeMs > 0);
+  const hasRestartBtn = hasShowRestartBtn || hasMovieRestartBtn;
+  const hasWatchToggleBtn = Boolean(!isShow && !isLiveChannel && canAddToPlaylist);
+  const hasClearProgressBtn = Boolean(
+    hasWatchToggleBtn && resolvedResumeMs && resolvedResumeMs > 0
+  );
   const hasBrowseFolderBtn = Boolean(
     resolvedLibraryId &&
       resolvedFolderPath &&
@@ -894,6 +1281,8 @@ export function ItemDetailModal({
   let nextActionOrder = 1;
   const primaryActionOrder = nextActionOrder++;
   const restartActionOrder = hasRestartBtn ? nextActionOrder++ : undefined;
+  const watchToggleOrder = hasWatchToggleBtn ? nextActionOrder++ : undefined;
+  const clearProgressOrder = hasClearProgressBtn ? nextActionOrder++ : undefined;
   const browseFolderOrder = hasBrowseFolderBtn ? nextActionOrder++ : undefined;
   const addPlaylistOrder = canAddToPlaylist ? nextActionOrder++ : undefined;
   const closeActionOrder = nextActionOrder++;
@@ -904,22 +1293,22 @@ export function ItemDetailModal({
   const durationMins = resolvedDurationMs ? Math.round(resolvedDurationMs / 60000) : null;
   const resumeMins = resolvedResumeMs ? Math.round(resolvedResumeMs / 60000) : null;
 
-  const videoCodecChip = item.technical?.video_codec
-    ? item.technical.video_codec.toUpperCase()
+  const videoCodecChip = effectiveItem.technical?.video_codec
+    ? effectiveItem.technical.video_codec.toUpperCase()
     : null;
-  const audioCodecChip = item.technical?.audio_codec
+  const audioCodecChip = effectiveItem.technical?.audio_codec
     ? `${
-        item.technical.audio_channels === 6
+        effectiveItem.technical.audio_channels === 6
           ? '5.1 '
-          : item.technical.audio_channels === 8
+          : effectiveItem.technical.audio_channels === 8
           ? '7.1 '
-          : item.technical.audio_channels
-          ? `${item.technical.audio_channels}ch `
+          : effectiveItem.technical.audio_channels
+          ? `${effectiveItem.technical.audio_channels}ch `
           : ''
-      }${item.technical.audio_codec.toUpperCase()}`
+      }${effectiveItem.technical.audio_codec.toUpperCase()}`
     : null;
-  const containerChip = item.technical?.container
-    ? item.technical.container.toUpperCase()
+  const containerChip = effectiveItem.technical?.container
+    ? effectiveItem.technical.container.toUpperCase()
     : null;
 
   return (
@@ -1034,10 +1423,10 @@ export function ItemDetailModal({
                       • {episodes.length} {episodes.length === 1 ? 'Episode' : 'Episodes'}
                     </span>
                   )}
-                  {item.genres && item.genres.length > 0 && (
+                  {effectiveItem.genres && effectiveItem.genres.length > 0 && (
                     <span className="text-[#ffb871] font-medium">
                       {resolvedReleaseYear || (!isLiveChannel && durationMins) || isShow ? '• ' : ''}
-                      <span>{item.genres.join(', ')}</span>
+                      <span>{effectiveItem.genres.join(', ')}</span>
                     </span>
                   )}
                 </div>
@@ -1063,20 +1452,36 @@ export function ItemDetailModal({
               >
                 {isShow && nextEpisode ? (
                   isEpisodeResume ? (
-                    <PrimaryDetailActionButton
-                      id="detail-resume-btn"
-                      order={primaryActionOrder}
-                      eyebrow="Resume Next"
-                      label={`S${String(nextEpisode.season ?? 1).padStart(2, '0')}E${String(
-                        nextEpisode.episode ?? 1
-                      ).padStart(2, '0')} • "${nextEpisode.title}"`}
-                      onActivate={handlePlayShowResume}
-                      autoFocus
-                    />
+                    <>
+                      <PrimaryDetailActionButton
+                        id="detail-resume-btn"
+                        order={primaryActionOrder}
+                        eyebrow="Resume Next"
+                        label={`S${String(nextEpisode.season ?? 1).padStart(2, '0')}E${String(
+                          nextEpisode.episode ?? 1
+                        ).padStart(2, '0')} • "${nextEpisode.title}"`}
+                        onActivate={handlePlayShowResume}
+                        onFocusAction={setFocusedId}
+                        autoFocus
+                      />
+                      <SecondaryDetailActionButton
+                        id="detail-restart-btn"
+                        order={restartActionOrder}
+                        icon={
+                          <RotateCcw
+                            className="w-5 h-5 mr-2.5 text-[#ffb871] shrink-0"
+                            style={{ marginRight: '10px' }}
+                          />
+                        }
+                        label="Play from Beginning"
+                        onActivate={handlePlayShowStart}
+                        onFocusAction={setFocusedId}
+                      />
+                    </>
                   ) : (
                     <PrimaryDetailActionButton
                       id="detail-play-btn"
-                      order={1}
+                      order={primaryActionOrder}
                       eyebrow={`Direct Stream • S${String(nextEpisode.season ?? 1).padStart(
                         2,
                         '0'
@@ -1084,6 +1489,7 @@ export function ItemDetailModal({
                       eyebrowAriaHidden
                       label="Play"
                       onActivate={handlePlayShowStart}
+                      onFocusAction={setFocusedId}
                       autoFocus
                     />
                   )
@@ -1091,11 +1497,12 @@ export function ItemDetailModal({
                   <>
                     <PrimaryDetailActionButton
                       id="detail-resume-btn"
-                      order={1}
+                      order={primaryActionOrder}
                       eyebrow="Continue Watching"
                       eyebrowAriaHidden
                       label={`Resume (${resumeMins}m)`}
                       onActivate={handlePlayMovieResume}
+                      onFocusAction={setFocusedId}
                       autoFocus
                     />
                     <SecondaryDetailActionButton
@@ -1109,17 +1516,58 @@ export function ItemDetailModal({
                       }
                       label="Play from Beginning"
                       onActivate={handlePlayMovieStart}
+                      onFocusAction={setFocusedId}
                     />
                   </>
                 ) : (
                   <PrimaryDetailActionButton
                     id="detail-play-btn"
-                    order={1}
+                    order={primaryActionOrder}
                     eyebrow="Direct Stream"
                     eyebrowAriaHidden
                     label="Play"
                     onActivate={handlePlayMovieStart}
+                    onFocusAction={setFocusedId}
                     autoFocus
+                  />
+                )}
+
+                {hasWatchToggleBtn && (
+                  <SecondaryDetailActionButton
+                    id="detail-watch-toggle-btn"
+                    order={watchToggleOrder}
+                    icon={
+                      isItemCompleted ? (
+                        <RotateCcw
+                          className="w-5 h-5 mr-2.5 text-[#ffb871] shrink-0"
+                          style={{ marginRight: '10px' }}
+                        />
+                      ) : (
+                        <CheckCircle2
+                          className="w-5 h-5 mr-2.5 text-[#ffb871] shrink-0"
+                          style={{ marginRight: '10px' }}
+                        />
+                      )
+                    }
+                    label={isItemCompleted ? 'Mark Unwatched' : 'Mark Watched'}
+                    onActivate={handleToggleMovieWatchState}
+                    onFocusAction={setFocusedId}
+                  />
+                )}
+
+                {hasClearProgressBtn && (
+                  <SecondaryDetailActionButton
+                    id="detail-clear-progress-btn"
+                    order={clearProgressOrder}
+                    icon={
+                      <X
+                        className="w-5 h-5 mr-2.5 text-[#ffb871] shrink-0"
+                        style={{ marginRight: '10px' }}
+                      />
+                    }
+                    label="Mark Unwatched"
+                    onActivate={handleClearMovieProgress}
+                    onFocusAction={setFocusedId}
                   />
                 )}
 
@@ -1135,6 +1583,7 @@ export function ItemDetailModal({
                     }
                     label="Browse Folder"
                     onActivate={handleBrowseFolderClick}
+                    onFocusAction={setFocusedId}
                   />
                 )}
 
@@ -1150,6 +1599,7 @@ export function ItemDetailModal({
                     }
                     label="Add to Playlist"
                     onActivate={handleOpenAddToPlaylist}
+                    onFocusAction={setFocusedId}
                   />
                 )}
 
@@ -1164,6 +1614,7 @@ export function ItemDetailModal({
                   }
                   label="Back"
                   onActivate={onClose}
+                  onFocusAction={setFocusedId}
                 />
               </div>
             </div>
@@ -1194,9 +1645,19 @@ export function ItemDetailModal({
                 ))}
               </div>
             </div>
-            <div className="flex items-center text-[#a8a29e] font-mono text-xs tracking-wider uppercase">
-              <span>ALL EPISODES DIRECT STREAM READY</span>
-            </div>
+            {visibleSeasonEpisodes.length > 0 ? (
+              <SeasonWatchToggleButton
+                order={seasons.length + 1}
+                selectedSeason={selectedSeason}
+                allSeasonWatched={allSeasonWatched}
+                onActivate={handleToggleSeasonWatchState}
+                onFocusButton={setFocusedId}
+              />
+            ) : (
+              <div className="flex items-center text-[#a8a29e] font-mono text-xs tracking-wider uppercase">
+                <span>ALL EPISODES DIRECT STREAM READY</span>
+              </div>
+            )}
           </div>
 
           {/* Horizontal Episode Carousel Cards (16:9 Landscape Aspect) */}
@@ -1210,9 +1671,67 @@ export function ItemDetailModal({
                 imageUrl={formatImageUrl(ep.poster_url) || backdrop || poster}
                 isNextUp={Boolean(nextEpisode && String(nextEpisode.id) === String(ep.id))}
                 onSelectEpisode={handleSelectEpisode}
+                onFocusEpisode={handleFocusEpisodeCard}
               />
             ))}
           </div>
+
+          {/* Active-Episode Inline Action Strip */}
+          {activeEpisode && (
+            <div
+              id="episode-action-strip"
+              data-testid="episode-action-strip"
+              className="flex items-center justify-between pt-2 pb-1 px-1"
+            >
+              <span className="text-sm font-mono text-[#ffb871] font-semibold mr-4 truncate">
+                {`S${String(activeEpisode.season ?? 1).padStart(2, '0')}E${String(
+                  activeEpisode.episode ?? 1
+                ).padStart(2, '0')} • "${activeEpisode.title}"`}
+              </span>
+              <div className="flex items-center shrink-0">
+                {activeEpResumable && (
+                  <EpisodeActionPill
+                    id="episode-action-restart"
+                    order={101}
+                    icon={<RotateCcw className="w-4 h-4 mr-2 text-[#ffb871] shrink-0" />}
+                    label="Play from Beginning"
+                    onActivate={() => handlePlayEpisodeFromStart(activeEpisode)}
+                    onFocusPill={setFocusedId}
+                  />
+                )}
+                <EpisodeActionPill
+                  id="episode-action-watch-toggle"
+                  order={102}
+                  icon={
+                    activeEpWatched ? (
+                      <RotateCcw className="w-4 h-4 mr-2 text-[#ffb871] shrink-0" />
+                    ) : (
+                      <CheckCircle2 className="w-4 h-4 mr-2 text-[#ffb871] shrink-0" />
+                    )
+                  }
+                  label={activeEpWatched ? 'Mark Unwatched' : 'Mark Watched'}
+                  onActivate={() => {
+                    focusTargetById('episode-action-watch-toggle');
+                    handleSetWatchState([activeEpisode.id], !activeEpWatched);
+                  }}
+                  onFocusPill={setFocusedId}
+                />
+                {activeEpResumable && (
+                  <EpisodeActionPill
+                    id="episode-action-clear-progress"
+                    order={103}
+                    icon={<X className="w-4 h-4 mr-2 text-[#ffb871] shrink-0" />}
+                    label="Mark Unwatched"
+                    onActivate={() => {
+                      focusTargetById('episode-action-watch-toggle');
+                      handleSetWatchState([activeEpisode.id], false);
+                    }}
+                    onFocusPill={setFocusedId}
+                  />
+                )}
+              </div>
+            </div>
+          )}
         </section>
       )}
 
@@ -1235,6 +1754,14 @@ export function ItemDetailModal({
               </strong>
               Return
             </span>
+            {seasons.length > 0 && (
+              <span className="mr-8">
+                <strong className="text-white bg-[#292a2f] border border-[rgba(255,122,24,0.18)] px-2 py-0.5 rounded font-mono font-bold mr-1.5">
+                  [▼]
+                </strong>
+                Episode Options
+              </span>
+            )}
             {seasons.length > 1 && (
               <span className="mr-8">
                 <strong className="text-white bg-[#292a2f] border border-[rgba(255,122,24,0.18)] px-2 py-0.5 rounded font-mono font-bold mr-1.5">

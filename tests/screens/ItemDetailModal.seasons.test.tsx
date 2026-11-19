@@ -139,5 +139,75 @@ describe('ItemDetailModal Season Navigation', () => {
     // Should return focus to Play button
     expect(document.activeElement).toBe(playBtn);
   });
+
+  it('navigates Right from last Season tab to season-watch-toggle-btn, Left back, and toggles Season watch state', async () => {
+    const onWatchStateChange = vi.fn().mockResolvedValue(undefined);
+    const threeSeasonItem = {
+      ...mockSeriesItem,
+      episodes: [
+        ...mockSeriesItem.episodes,
+        { id: 301, title: 'No Mas', season: 3, episode: 1, type: 'video' as const },
+      ],
+    };
+
+    render(
+      <FocusProvider>
+        <ItemDetailModal
+          item={threeSeasonItem}
+          isOpen={true}
+          onClose={vi.fn()}
+          onPlay={vi.fn()}
+          onWatchStateChange={onWatchStateChange}
+          serverUrl="http://127.0.0.1:8492"
+        />
+      </FocusProvider>
+    );
+
+    const season3Tab = screen.getByRole('button', { name: /Season 3/i });
+    const seasonWatchBtn = document.getElementById('season-watch-toggle-btn')!;
+    expect(seasonWatchBtn).toBeInTheDocument();
+    expect(seasonWatchBtn).toHaveTextContent('Mark Season 1 Watched');
+
+    // Focus last season tab (Season 3)
+    act(() => {
+      season3Tab.focus();
+    });
+    expect(document.activeElement).toBe(season3Tab);
+
+    // ArrowRight from last season tab focuses season-watch-toggle-btn
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+    });
+    expect(document.activeElement).toBe(seasonWatchBtn);
+
+    // ArrowLeft from season-watch-toggle-btn returns to season-tab-3
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'ArrowLeft', keyCode: TVKeys.LEFT });
+    });
+    expect(document.activeElement).toBe(season3Tab);
+
+    // ArrowRight back to season-watch-toggle-btn and Enter to mark Season 1 watched
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+    });
+    expect(document.activeElement).toBe(seasonWatchBtn);
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'Enter', keyCode: TVKeys.ENTER });
+    });
+
+    expect(onWatchStateChange).toHaveBeenCalledWith([101, 102], true);
+    expect(seasonWatchBtn).toHaveTextContent('Mark Season 1 Unwatched');
+    expect(screen.getAllByText('WATCHED')).toHaveLength(2);
+    expect(document.activeElement).toBe(seasonWatchBtn);
+
+    // Pressing Enter again marks Season 1 unwatched
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'Enter', keyCode: TVKeys.ENTER });
+    });
+    expect(onWatchStateChange).toHaveBeenLastCalledWith([101, 102], false);
+    expect(seasonWatchBtn).toHaveTextContent('Mark Season 1 Watched');
+    expect(screen.queryByText('WATCHED')).not.toBeInTheDocument();
+  });
 });
 

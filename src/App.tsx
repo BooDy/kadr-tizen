@@ -23,8 +23,10 @@ import { PlayerScreen } from './screens/PlayerScreen';
 import { WifiOff } from 'lucide-react';
 import {
   applyOptimisticProgress,
+  applyWatchStateMutation,
   PlaybackProgressSnapshot,
 } from './utils/playbackProgress';
+import { setItemWatchState, setBatchWatchState } from './api/playback';
 import { disarmBootErrorTrap } from './utils/bootTrap';
 import { exitTvApp } from './utils/tizenLifecycle';
 
@@ -412,6 +414,62 @@ export default function App() {
     }
   };
 
+  const handleWatchStateChange = async (
+    itemIds: Array<number | string>,
+    watched: boolean
+  ) => {
+    if (itemIds.length === 0) return;
+    const idSet = new Set(itemIds.map(String));
+    for (const id of idSet) {
+      sessionProgressRef.current.delete(id);
+    }
+
+    const previousActiveItem = activeItem;
+    const previousSuspendedItem = suspendedItemDetail?.item ?? null;
+
+    setActiveItem((prev) => (prev ? applyWatchStateMutation(prev, idSet, watched) : prev));
+    if (suspendedItemDetail) {
+      setSuspendedItemDetail((prev) =>
+        prev ? { ...prev, item: applyWatchStateMutation(prev.item, idSet, watched) } : prev
+      );
+    }
+
+    try {
+      if (itemIds.length === 1) {
+        await setItemWatchState(client, itemIds[0], watched);
+      } else {
+        await setBatchWatchState(client, itemIds, watched);
+      }
+      setScreenRefreshKey((k) => k + 1);
+      if (folderBrowserState) {
+        setFolderRefreshKey((k) => k + 1);
+      }
+      if (activePlaylistId) {
+        setPlaylistRefreshKey((k) => k + 1);
+      }
+    } catch (err) {
+      console.warn('[App] Failed to update watch state:', err);
+      if (previousActiveItem) {
+        const prevId = String(previousActiveItem.id ?? previousActiveItem.card?.id ?? '');
+        setActiveItem((prev) => {
+          const curId = String(prev?.id ?? prev?.card?.id ?? '');
+          return prev && curId === prevId ? previousActiveItem : prev;
+        });
+      }
+      if (previousSuspendedItem) {
+        const prevSuspId = String(
+          previousSuspendedItem.id ?? previousSuspendedItem.card?.id ?? ''
+        );
+        setSuspendedItemDetail((prev) => {
+          if (!prev) return prev;
+          const curSuspId = String(prev.item.id ?? prev.item.card?.id ?? '');
+          return curSuspId === prevSuspId ? { ...prev, item: previousSuspendedItem } : prev;
+        });
+      }
+      throw err;
+    }
+  };
+
   const handleUnlockPin = async (pin: string) => {
     if (!unlockLibraryId) return;
     try {
@@ -672,6 +730,7 @@ export default function App() {
               onPlaylistChanged={() => {
                 setPlaylistRefreshKey((k) => k + 1);
               }}
+              onWatchStateChange={handleWatchStateChange}
             />
             {addToPlaylistTarget && (
               <AddToPlaylistModal

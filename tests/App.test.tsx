@@ -10,6 +10,7 @@ import * as librariesApi from '../src/api/libraries';
 import * as eventsApi from '../src/api/events';
 import * as subtitlesApi from '../src/api/subtitles';
 import * as playlistsApi from '../src/api/playlists';
+import * as playbackApi from '../src/api/playback';
 import { MediaItemDetail } from '../src/api/items';
 import { ApiClient } from '../src/api/client';
 import { ScreenLayout } from '../src/types/ast';
@@ -67,6 +68,8 @@ vi.mock('../src/api/playlists', async () => {
 
 vi.mock('../src/api/playback', () => ({
   reportPlaybackProgress: vi.fn(),
+  setItemWatchState: vi.fn(),
+  setBatchWatchState: vi.fn(),
 }));
 
 vi.mock('../src/api/subtitles', () => ({
@@ -274,6 +277,8 @@ describe('App State Machine & Router', () => {
     vi.mocked(librariesApi.fetchLibraries).mockResolvedValue([]);
     vi.mocked(playlistsApi.fetchPlaylists).mockResolvedValue([]);
     vi.mocked(eventsApi.subscribeEvents).mockReturnValue(vi.fn());
+    vi.mocked(playbackApi.setItemWatchState).mockResolvedValue(undefined);
+    vi.mocked(playbackApi.setBatchWatchState).mockResolvedValue({ updated: 2, watched: true });
     vi.spyOn(ApiClient.prototype, 'fetchText').mockResolvedValue('WEBVTT\n\n');
     vi.mocked(subtitlesApi.fetchItemSubtitles).mockResolvedValue([
       {
@@ -2140,6 +2145,192 @@ describe('App State Machine & Router', () => {
       expect(layoutSpy).not.toHaveBeenCalledWith(expect.anything(), 'movies');
       expect(document.activeElement?.id).toBe('hero-play-hero-1');
     } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('toggles movie and Season watch states from ItemDetailModal, calls playback states APIs, updates UI optimistically, and triggers BrowseScreen refresh', async () => {
+    localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
+
+    const actualPlayback = await vi.importActual<typeof import('../src/api/playback')>(
+      '../src/api/playback'
+    );
+
+    let resolveMoviePut: ((res: Response) => void) | null = null;
+    const moviePutDeferred = new Promise<Response>((resolve) => {
+      resolveMoviePut = resolve;
+    });
+
+    let statesPutCallCount = 0;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
+      if (url.includes('/api/v1/playback/states')) {
+        statesPutCallCount++;
+        if (statesPutCallCount === 1) {
+          return moviePutDeferred;
+        }
+        if (statesPutCallCount === 2) {
+          return new Response(JSON.stringify({ updated: 2, watched: true }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ error: 'Server error' }), {
+          status: 500,
+          statusText: 'Internal Server Error',
+        });
+      }
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+
+    vi.mocked(playbackApi.setItemWatchState).mockImplementation(actualPlayback.setItemWatchState);
+    vi.mocked(playbackApi.setBatchWatchState).mockImplementation(actualPlayback.setBatchWatchState);
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      await renderAuthenticatedApp();
+
+      await waitFor(() => {
+        expect(screen.getByText('Trending Dune Part Two')).toBeInTheDocument();
+      });
+
+      // 1. Open Dune: Part Two (in-progress movie with resume_position_ms = 120000)
+      await act(async () => {
+        fireEvent.click(screen.getByText('Trending Dune Part Two'));
+      });
+      await waitFor(() => {
+        expect(screen.getByRole('dialog', { name: 'Dune: Part Two' })).toBeInTheDocument();
+        expect(screen.getByText(/Resume \(2m\)/i)).toBeInTheDocument();
+      });
+
+      vi.mocked(screensApi.fetchScreenLayout).mockClear();
+
+      // Click Mark Watched -> optimistic flip while PUT /api/v1/playback/states/200 is pending
+      act(() => {
+        fireEvent.click(document.getElementById('detail-watch-toggle-btn')!);
+      });
+
+      expect(document.getElementById('detail-watch-toggle-btn')).toHaveTextContent('Mark Unwatched');
+      expect(document.getElementById('detail-play-btn')).toBeInTheDocument();
+      expect(document.getElementById('detail-resume-btn')).not.toBeInTheDocument();
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'http://192.168.1.100:8492/api/v1/playback/states/200',
+        expect.objectContaining({
+          method: 'PUT',
+          body: JSON.stringify({ watched: true }),
+        })
+      );
+
+      // Resolve PUT -> triggers BrowseScreen layout refresh
+      await act(async () => {
+        resolveMoviePut!(
+          new Response(JSON.stringify({ watch_state: 'completed' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        );
+      });
+
+      await waitFor(() => {
+        expect(screensApi.fetchScreenLayout).toHaveBeenCalled();
+      });
+
+      // Close movie detail modal
+      await act(async () => {
+        fireEvent.click(document.getElementById('detail-close-btn')!);
+      });
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      });
+
+      // 2. Open Severance, play Episode 301 partway (populating sessionProgressRef), then exit
+      await act(async () => {
+        fireEvent.click(screen.getByText('Trending Severance Series'));
+      });
+      await waitFor(() => {
+        expect(screen.getByRole('dialog', { name: 'Severance' })).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Good News About Hell'));
+      });
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        expect(screen.getByText('Good News About Hell')).toBeInTheDocument();
+      });
+
+      act(() => {
+        driverTimeCb?.(300000, 1000000);
+      });
+
+      // Exit PlayerScreen back to Severance detail modal
+      await act(async () => {
+        fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+      });
+      await act(async () => {
+        fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole('dialog', { name: 'Severance' })).toBeInTheDocument();
+        expect(document.getElementById('season-watch-toggle-btn')).toHaveTextContent(
+          'Mark Season 1 Watched'
+        );
+      });
+
+      vi.mocked(screensApi.fetchScreenLayout).mockClear();
+
+      // Click Mark Season 1 Watched -> calls PUT /api/v1/playback/states batch, updates UI, and refreshes BrowseScreen
+      await act(async () => {
+        fireEvent.click(document.getElementById('season-watch-toggle-btn')!);
+      });
+
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'http://192.168.1.100:8492/api/v1/playback/states',
+        expect.objectContaining({
+          method: 'PUT',
+          body: JSON.stringify({ item_ids: [301, 302], watched: true }),
+        })
+      );
+
+      await waitFor(() => {
+        expect(document.getElementById('season-watch-toggle-btn')).toHaveTextContent(
+          'Mark Season 1 Unwatched'
+        );
+        expect(screen.getAllByText('WATCHED')).toHaveLength(2);
+        expect(screensApi.fetchScreenLayout).toHaveBeenCalled();
+      });
+
+      // Close Severance and verify rollback on API error for Dune: Part Two
+      await act(async () => {
+        fireEvent.click(document.getElementById('detail-close-btn')!);
+      });
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Trending Dune Part Two'));
+      });
+      await waitFor(() => {
+        expect(screen.getByRole('dialog', { name: 'Dune: Part Two' })).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.click(document.getElementById('detail-watch-toggle-btn')!);
+      });
+
+      // Rolled back cleanly after 500 error
+      await waitFor(() => {
+        expect(screen.getByText(/Resume \(2m\)/i)).toBeInTheDocument();
+        expect(document.getElementById('detail-watch-toggle-btn')).toHaveTextContent('Mark Watched');
+      });
+    } finally {
+      warnSpy.mockRestore();
       fetchSpy.mockRestore();
     }
   });

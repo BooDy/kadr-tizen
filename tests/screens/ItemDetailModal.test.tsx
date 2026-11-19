@@ -353,6 +353,16 @@ describe('ItemDetailModal', () => {
     act(() => {
       fireEvent.keyDown(window, { key: 'ArrowRight' });
     });
+    expect(screen.getByTestId('focused-id').textContent).toBe('detail-watch-toggle-btn');
+
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowRight' });
+    });
+    expect(screen.getByTestId('focused-id').textContent).toBe('detail-clear-progress-btn');
+
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowRight' });
+    });
     expect(screen.getByTestId('focused-id').textContent).toBe('detail-add-playlist-btn');
 
     act(() => {
@@ -414,6 +424,133 @@ describe('ItemDetailModal', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /^Play$/i }));
     expect(onPlay).toHaveBeenCalledWith(42, 0);
+  });
+
+  it('updates movie watch state optimistically via Mark Watched and clears partial progress via Mark Unwatched', () => {
+    const onWatchStateChange = vi.fn().mockResolvedValue(undefined);
+
+    function MovieWatchHost() {
+      const { focusedId } = useFocusContext();
+      return (
+        <div>
+          <div data-testid="focused-id">{focusedId ?? ''}</div>
+          <ItemDetailModal
+            isOpen={true}
+            item={mockMovieWithResume}
+            serverUrl="http://localhost:8492"
+            onPlay={vi.fn()}
+            onClose={vi.fn()}
+            onWatchStateChange={onWatchStateChange}
+          />
+        </div>
+      );
+    }
+
+    const { unmount } = render(
+      <FocusProvider>
+        <MovieWatchHost />
+      </FocusProvider>
+    );
+
+    const watchToggleBtn = document.getElementById('detail-watch-toggle-btn') as HTMLButtonElement;
+    const clearProgressBtn = document.getElementById(
+      'detail-clear-progress-btn'
+    ) as HTMLButtonElement;
+    expect(watchToggleBtn).toBeInTheDocument();
+    expect(watchToggleBtn).toHaveTextContent('Mark Watched');
+    expect(clearProgressBtn).toBeInTheDocument();
+    expect(clearProgressBtn).toHaveTextContent('Mark Unwatched');
+    expect(screen.getByText(/Resume \(60m\)/i)).toBeInTheDocument();
+
+    // Click Mark Watched -> flips optimistically to Mark Unwatched and clears Resume to Play
+    act(() => {
+      fireEvent.click(watchToggleBtn);
+    });
+
+    expect(onWatchStateChange).toHaveBeenCalledWith(['movie-1'], true);
+    expect(document.getElementById('detail-watch-toggle-btn')).toHaveTextContent('Mark Unwatched');
+    expect(screen.getByRole('button', { name: /^Play$/i })).toBeInTheDocument();
+    expect(screen.queryByText(/Resume \(60m\)/i)).not.toBeInTheDocument();
+    expect(document.getElementById('detail-restart-btn')).not.toBeInTheDocument();
+    expect(document.getElementById('detail-clear-progress-btn')).not.toBeInTheDocument();
+
+    unmount();
+
+    // Fresh in-progress movie: activate detail-clear-progress-btn while focused -> resets to unwatched & anchors focus
+    onWatchStateChange.mockClear();
+    render(
+      <FocusProvider>
+        <MovieWatchHost />
+      </FocusProvider>
+    );
+
+    const clearBtn = document.getElementById('detail-clear-progress-btn')!;
+    act(() => {
+      clearBtn.focus();
+    });
+    act(() => {
+      fireEvent.click(clearBtn);
+    });
+
+    expect(onWatchStateChange).toHaveBeenCalledWith(['movie-1'], false);
+    expect(screen.getByRole('button', { name: /^Play$/i })).toBeInTheDocument();
+    expect(document.getElementById('detail-watch-toggle-btn')).toHaveTextContent('Mark Watched');
+    expect(document.getElementById('detail-clear-progress-btn')).not.toBeInTheDocument();
+    expect(['detail-watch-toggle-btn', 'detail-play-btn']).toContain(
+      screen.getByTestId('focused-id').textContent
+    );
+  });
+
+  it('hides watch-state toggles on live channels and rolls back movie watch state on error', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { unmount } = render(
+      <FocusProvider>
+        <ItemDetailModal
+          isOpen={true}
+          item={{
+            id: 777,
+            title: 'Live Channel',
+            media_type: 'live_channel',
+            duration_seconds: 0,
+          }}
+          serverUrl="http://localhost:8492"
+          onPlay={vi.fn()}
+          onClose={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    expect(document.getElementById('detail-watch-toggle-btn')).not.toBeInTheDocument();
+    expect(document.getElementById('detail-clear-progress-btn')).not.toBeInTheDocument();
+    unmount();
+
+    const failingWatchChange = vi.fn().mockRejectedValue(new Error('Network down'));
+    render(
+      <FocusProvider>
+        <ItemDetailModal
+          isOpen={true}
+          item={mockMovieWithResume}
+          serverUrl="http://localhost:8492"
+          onPlay={vi.fn()}
+          onClose={vi.fn()}
+          onWatchStateChange={failingWatchChange}
+        />
+      </FocusProvider>
+    );
+
+    act(() => {
+      fireEvent.click(document.getElementById('detail-watch-toggle-btn')!);
+    });
+    expect(document.getElementById('detail-watch-toggle-btn')).toHaveTextContent('Mark Unwatched');
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(document.getElementById('detail-watch-toggle-btn')).toHaveTextContent('Mark Watched');
+    expect(screen.getByText(/Resume \(60m\)/i)).toBeInTheDocument();
+    warnSpy.mockRestore();
   });
 
   describe('TV Show Multi-Season & Episode Carousel', () => {
@@ -1111,6 +1248,143 @@ describe('ItemDetailModal', () => {
         selectedSeason: 1,
         lastFocusedId: 'detail-resume-btn',
       });
+    });
+
+    it('renders Play from Beginning (detail-restart-btn) on resumable TV show hero and calls onPlay with 0ms', () => {
+      const onPlay = vi.fn();
+
+      render(
+        <FocusProvider>
+          <ItemDetailModal
+            isOpen={true}
+            item={mockShowDetail}
+            serverUrl="http://localhost:8492"
+            onClose={vi.fn()}
+            onPlay={onPlay}
+          />
+        </FocusProvider>
+      );
+
+      expect(screen.getByRole('button', { name: /Resume Next/i })).toBeInTheDocument();
+      const restartBtn = document.getElementById('detail-restart-btn');
+      expect(restartBtn).toBeInTheDocument();
+      expect(restartBtn).toHaveTextContent('Play from Beginning');
+
+      fireEvent.click(restartBtn!);
+      expect(onPlay).toHaveBeenCalledWith(207, 0, 'Half Loop', undefined, expect.any(Array), 1);
+    });
+
+    it('supports episode inline action strip Play from Beginning and watch toggles via D-pad while preserving instant OK playback', () => {
+      const onPlay = vi.fn();
+      const onWatchStateChange = vi.fn().mockResolvedValue(undefined);
+
+      function EpisodeActionHost() {
+        const { focusedId } = useFocusContext();
+        return (
+          <div>
+            <div data-testid="focused-id">{focusedId ?? ''}</div>
+            <ItemDetailModal
+              isOpen={true}
+              item={mockShowDetail}
+              serverUrl="http://localhost:8492"
+              onClose={vi.fn()}
+              onPlay={onPlay}
+              onWatchStateChange={onWatchStateChange}
+            />
+          </div>
+        );
+      }
+
+      render(
+        <FocusProvider>
+          <EpisodeActionHost />
+        </FocusProvider>
+      );
+
+      const ep2Card = document.getElementById('episode-card-207')!;
+      act(() => {
+        ep2Card.focus();
+      });
+
+      // Exact-text query on episode title still matches only the card h3
+      expect(screen.getByText('Half Loop').tagName).toBe('H3');
+
+      const strip = screen.getByTestId('episode-action-strip');
+      expect(strip).toHaveTextContent('S01E02 • "Half Loop"');
+
+      // Pressing OK/Enter on episode card still instant-plays at resume sentinel 30
+      act(() => {
+        fireEvent.keyDown(window, { key: 'Enter', keyCode: TVKeys.ENTER });
+      });
+      expect(onPlay).toHaveBeenCalledWith(207, 30, 'Half Loop', undefined, expect.any(Array), 1);
+      onPlay.mockClear();
+
+      // ArrowDown moves focus to episode-action-restart ("Play from Beginning")
+      act(() => {
+        fireEvent.keyDown(window, { key: 'ArrowDown', keyCode: TVKeys.DOWN });
+      });
+      expect(screen.getByTestId('focused-id').textContent).toBe('episode-action-restart');
+      expect(document.getElementById('episode-action-restart')).toHaveTextContent(
+        'Play from Beginning'
+      );
+
+      act(() => {
+        fireEvent.keyDown(window, { key: 'Enter', keyCode: TVKeys.ENTER });
+      });
+      expect(onPlay).toHaveBeenCalledWith(207, 0, 'Half Loop', undefined, expect.any(Array), 1);
+
+      // ArrowRight moves across episode-action-watch-toggle and episode-action-clear-progress, clamping at right edge
+      act(() => {
+        fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+      });
+      expect(screen.getByTestId('focused-id').textContent).toBe('episode-action-watch-toggle');
+      expect(document.getElementById('episode-action-watch-toggle')).toHaveTextContent(
+        'Mark Watched'
+      );
+
+      act(() => {
+        fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+      });
+      expect(screen.getByTestId('focused-id').textContent).toBe('episode-action-clear-progress');
+      expect(document.getElementById('episode-action-clear-progress')).toHaveTextContent(
+        'Mark Unwatched'
+      );
+
+      act(() => {
+        fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+      });
+      expect(screen.getByTestId('focused-id').textContent).toBe('episode-action-clear-progress');
+
+      // Activating episode-action-clear-progress resets ep 207 to unwatched and anchors focus on episode-action-watch-toggle
+      act(() => {
+        fireEvent.keyDown(window, { key: 'Enter', keyCode: TVKeys.ENTER });
+      });
+      expect(onWatchStateChange).toHaveBeenCalledWith([207], false);
+      expect(screen.getByTestId('focused-id').textContent).toBe('episode-action-watch-toggle');
+      expect(document.getElementById('episode-action-restart')).not.toBeInTheDocument();
+      expect(document.getElementById('episode-action-clear-progress')).not.toBeInTheDocument();
+      expect(ep2Card).not.toHaveTextContent('RESUME');
+
+      // ArrowUp returns focus directly to episode-card-207
+      act(() => {
+        fireEvent.keyDown(window, { key: 'ArrowUp', keyCode: TVKeys.UP });
+      });
+      expect(screen.getByTestId('focused-id').textContent).toBe('episode-card-207');
+      expect(screen.getByTestId('detail-remote-footer')).toHaveTextContent('Episode Options');
+
+      // ArrowDown on now-unwatched ep 207 focuses episode-action-watch-toggle directly; Enter marks watched
+      act(() => {
+        fireEvent.keyDown(window, { key: 'ArrowDown', keyCode: TVKeys.DOWN });
+      });
+      expect(screen.getByTestId('focused-id').textContent).toBe('episode-action-watch-toggle');
+      act(() => {
+        fireEvent.keyDown(window, { key: 'Enter', keyCode: TVKeys.ENTER });
+      });
+      expect(onWatchStateChange).toHaveBeenLastCalledWith([207], true);
+      expect(document.getElementById('episode-action-watch-toggle')).toHaveTextContent(
+        'Mark Unwatched'
+      );
+      expect(ep2Card).toHaveTextContent('WATCHED');
     });
   });
 
