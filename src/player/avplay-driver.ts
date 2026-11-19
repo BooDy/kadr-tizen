@@ -248,7 +248,9 @@ export class TizenAvplayDriver implements PlayerDriver {
   private seekFailCallback?: (targetMs: number) => void;
   private displayRectCallback?: (rect: VideoDisplayRect) => void;
   private mediaHints?: VideoLayoutHints;
+  private currentStreamUrl = '';
   private currentIsHls = false;
+  private isSuspended = false;
   private isReady = false;
   private hasResolvedStreamRotation = false;
   private appliedRotation: TizenDisplayRotation = 'PLAYER_DISPLAY_ROTATION_NONE';
@@ -412,6 +414,7 @@ export class TizenAvplayDriver implements PlayerDriver {
     }
 
     this.isPreparing = false;
+    this.isSuspended = false;
     this.isReady = false;
     this.hasResolvedStreamRotation = false;
     this.appliedRotation = 'PLAYER_DISPLAY_ROTATION_NONE';
@@ -420,6 +423,7 @@ export class TizenAvplayDriver implements PlayerDriver {
     this.hasReceivedPlaytime = false;
     this.awaitingHlsStartSync = false;
 
+    this.currentStreamUrl = '';
     const isHls = streamUrl.includes('.m3u8') || streamUrl.includes('/hls/');
     this.currentIsHls = isHls;
     const initialStartMs = startMs > 0 ? Math.floor(startMs) : 0;
@@ -437,6 +441,7 @@ export class TizenAvplayDriver implements PlayerDriver {
 
     try {
       avplay.open(streamUrl);
+      this.currentStreamUrl = streamUrl;
     } catch (e: any) {
       const errStr = formatAvplayError(e, 'AVPlay Open Failed');
       console.error('[AVPlay] open failed:', e);
@@ -474,12 +479,12 @@ export class TizenAvplayDriver implements PlayerDriver {
 
     avplay.setListener({
       onbufferingstart: () => {
-        if (!this.isDestroyed) {
+        if (!this.isDestroyed && !this.isSuspended) {
           this.stateCallback?.('buffering');
         }
       },
       onbufferingcomplete: () => {
-        if (this.isDestroyed) return;
+        if (this.isDestroyed || this.isSuspended) return;
         if (!this.currentIsHls && !this.hasResolvedStreamRotation) {
           try {
             const lateMeta = extractAvplayVideoMetadata(avplay.getCurrentStreamInfo?.());
@@ -507,7 +512,7 @@ export class TizenAvplayDriver implements PlayerDriver {
         this.stateCallback?.('playing');
       },
       oncurrentplaytime: (ms: number) => {
-        if (this.isDestroyed || this.isSeeking) return;
+        if (this.isDestroyed || this.isSuspended || this.isSeeking) return;
         if (this.awaitingHlsStartSync) {
           this.awaitingHlsStartSync = false;
           if (ms > 3000) {
@@ -528,14 +533,14 @@ export class TizenAvplayDriver implements PlayerDriver {
         }
       },
       onerror: (err: any) => {
-        if (this.isDestroyed) return;
+        if (this.isDestroyed || this.isSuspended) return;
         console.error('[AVPlay] Hardware error:', err);
         const errStr = formatAvplayError(err, 'AVPlay Hardware Error');
         this.stateCallback?.('error');
         this.errorCallback?.(errStr);
       },
       onstreamcompleted: () => {
-        if (!this.isDestroyed) {
+        if (!this.isDestroyed && !this.isSuspended) {
           this.stateCallback?.('ended');
         }
       },
@@ -548,7 +553,7 @@ export class TizenAvplayDriver implements PlayerDriver {
     avplay.prepareAsync(
       () => {
         this.isPreparing = false;
-        if (this.isDestroyed) return;
+        if (this.isDestroyed || this.isSuspended) return;
         this.isReady = true;
         silenceNativeSubtitles();
         this.applyStreamAspectLayout(avplay);
@@ -568,7 +573,7 @@ export class TizenAvplayDriver implements PlayerDriver {
         this.awaitingHlsStartSync = isHls && readySeekTarget === 0;
 
         const beginPlay = () => {
-          if (this.isDestroyed) return;
+          if (this.isDestroyed || this.isSuspended) return;
           try {
             avplay.play();
           } catch (e) {
@@ -586,7 +591,7 @@ export class TizenAvplayDriver implements PlayerDriver {
             avplay.seekTo(
               readySeekTarget,
               () => {
-                if (this.isDestroyed) return;
+                if (this.isDestroyed || this.isSuspended) return;
                 this.clearSeekInFlight();
                 this.currentTimeMs = readySeekTarget;
                 readyOnComplete?.();
@@ -594,7 +599,7 @@ export class TizenAvplayDriver implements PlayerDriver {
                 this.flushQueuedSeek();
               },
               (err: any) => {
-                if (this.isDestroyed) return;
+                if (this.isDestroyed || this.isSuspended) return;
                 this.clearSeekInFlight();
                 console.warn('[AVPlay] seekTo in READY state failed, retrying after play:', err);
                 beginPlay();
@@ -627,7 +632,7 @@ export class TizenAvplayDriver implements PlayerDriver {
       (err: any) => {
         this.isPreparing = false;
         this.queuedSeek = null;
-        if (!this.isDestroyed) {
+        if (!this.isDestroyed && !this.isSuspended) {
           console.error('[AVPlay] prepareAsync failed:', err);
           const errStr = formatAvplayError(err, 'AVPlay Prepare Error');
           this.stateCallback?.('error');
@@ -671,6 +676,64 @@ export class TizenAvplayDriver implements PlayerDriver {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (window as any).webapis?.avplay?.pause();
     this.stateCallback?.('paused');
+  }
+
+  suspend(): void {
+    if (this.isDestroyed || this.isSuspended) return;
+    this.isSuspended = true;
+    this.clearSeekInFlight();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const avplay = (window as any).webapis?.avplay;
+    try {
+      if (typeof avplay?.suspend === 'function') {
+        avplay.suspend();
+      } else {
+        avplay?.pause?.();
+      }
+    } catch (e) {
+      console.warn('[AVPlay] suspend failed:', e);
+    }
+  }
+
+  restore(resumeMs: number, autoPlay: boolean): boolean {
+    if (this.isDestroyed || !this.currentStreamUrl) return false;
+    this.isSuspended = false;
+    if (this.currentIsHls) {
+      // HLS sessions on Kadr may be reaped while backgrounded; let PlayerScreen re-init cleanly
+      return false;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const avplay = (window as any).webapis?.avplay;
+    if (!avplay || typeof avplay.restore !== 'function') {
+      return false;
+    }
+    const targetMs = Math.max(0, Math.floor(resumeMs));
+    try {
+      avplay.restore(this.currentStreamUrl, targetMs, false);
+      this.isPreparing = false;
+      this.isReady = true;
+      this.queuedSeek = null;
+      this.awaitingHlsStartSync = false;
+      this.currentTimeMs = targetMs;
+      try {
+        avplay.setSilentSubtitle?.(true);
+      } catch {
+        // Ignored
+      }
+      this.applyStreamAspectLayout(avplay);
+      if (autoPlay) {
+        avplay.play?.();
+        this.applyLetterboxDisplayMode(avplay);
+        this.stateCallback?.('playing');
+      } else {
+        avplay.pause?.();
+        this.stateCallback?.('paused');
+      }
+      return true;
+    } catch (e) {
+      console.warn('[AVPlay] restore failed, falling back to full reload:', e);
+      return false;
+    }
   }
 
   seekTo(ms: number, onComplete?: () => void): void {
@@ -781,6 +844,8 @@ export class TizenAvplayDriver implements PlayerDriver {
 
   destroy(): void {
     this.isDestroyed = true;
+    this.isSuspended = false;
+    this.currentStreamUrl = '';
     this.isPreparing = false;
     this.isReady = false;
     this.hasResolvedStreamRotation = false;

@@ -8,6 +8,7 @@ import { PlayerDriver, PlayerState, VideoDisplayRect } from '../../src/player/dr
 import { ApiClient } from '../../src/api/client';
 import { FocusProvider } from '../../src/navigation/FocusContext';
 import * as itemsApi from '../../src/api/items';
+import { resetScreenSaverStateForTests } from '../../src/utils/tizenLifecycle';
 
 const SAMPLE_VTT = 'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHi\n';
 
@@ -17,6 +18,8 @@ let mockDriver: {
   play: ReturnType<typeof vi.fn>;
   pause: ReturnType<typeof vi.fn>;
   seekTo: ReturnType<typeof vi.fn>;
+  suspend: ReturnType<typeof vi.fn>;
+  restore: ReturnType<typeof vi.fn>;
   destroy: ReturnType<typeof vi.fn>;
   setSubtitleTrack: ReturnType<typeof vi.fn>;
   setMediaHints: ReturnType<typeof vi.fn>;
@@ -37,6 +40,8 @@ vi.mock('../../src/player/avplay-driver', () => ({
       play: vi.fn(),
       pause: vi.fn(),
       seekTo: vi.fn(),
+      suspend: vi.fn(),
+      restore: vi.fn().mockReturnValue(false),
       destroy: vi.fn(),
       setSubtitleTrack: vi.fn(),
       setMediaHints: vi.fn(),
@@ -63,6 +68,7 @@ describe('PlayerScreen', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
+    resetScreenSaverStateForTests();
     reportPlaybackSpy = vi.spyOn(playbackApi, 'reportPlaybackProgress').mockResolvedValue(undefined);
   });
 
@@ -70,6 +76,11 @@ describe('PlayerScreen', () => {
     vi.clearAllTimers();
     vi.useRealTimers();
     vi.restoreAllMocks();
+    resetScreenSaverStateForTests();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (window as any).webapis;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (document as any).hidden;
   });
 
   it('initializes driver with container and default HLS stream url on mount (even for H.264/AAC MP4)', () => {
@@ -1406,6 +1417,346 @@ describe('PlayerScreen', () => {
         mockDriver.errorCallback?.('Stream stalled');
       });
       expect(screen.queryByTestId('player-buffering-spinner')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('TV Screensaver Lock & Smart Hub visibilitychange Lifecycle', () => {
+    function setupDocumentHidden(initial = false) {
+      let isHidden = initial;
+      Object.defineProperty(document, 'hidden', {
+        configurable: true,
+        get: () => isHidden,
+      });
+      return (nextHidden: boolean) => {
+        isHidden = nextHidden;
+        document.dispatchEvent(new Event('visibilitychange'));
+      };
+    }
+
+    it('locks TV screensaver while playing/buffering and restores screensaver on pause, ended, hide, and unmount', () => {
+      const setScreenSaverSpy = vi.fn((_state, onSuccess) => onSuccess?.());
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).webapis = {
+        appcommon: {
+          AppCommonScreenSaverState: {
+            SCREEN_SAVER_ON: 0,
+            SCREEN_SAVER_OFF: 1,
+          },
+          setScreenSaver: setScreenSaverSpy,
+        },
+      };
+      const setHidden = setupDocumentHidden(false);
+
+      const { unmount } = render(
+        <PlayerScreen
+          itemId="item-123"
+          title="Sample Movie"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          onExit={vi.fn()}
+        />
+      );
+
+      // Initial state is buffering -> screensaver disabled (OFF = 1)
+      expect(setScreenSaverSpy).toHaveBeenCalledTimes(1);
+      expect(setScreenSaverSpy).toHaveBeenLastCalledWith(
+        1,
+        expect.any(Function),
+        expect.any(Function)
+      );
+
+      // Transition to playing -> still disabled (deduped)
+      act(() => {
+        mockDriver.stateCallback?.('playing');
+      });
+      expect(setScreenSaverSpy).toHaveBeenCalledTimes(1);
+
+      // Transition to paused -> screensaver re-enabled (ON = 0)
+      act(() => {
+        mockDriver.stateCallback?.('paused');
+      });
+      expect(setScreenSaverSpy).toHaveBeenLastCalledWith(
+        0,
+        expect.any(Function),
+        expect.any(Function)
+      );
+
+      // Resume playing -> screensaver disabled again (OFF = 1)
+      act(() => {
+        mockDriver.stateCallback?.('playing');
+      });
+      expect(setScreenSaverSpy).toHaveBeenLastCalledWith(
+        1,
+        expect.any(Function),
+        expect.any(Function)
+      );
+
+      // Ended -> screensaver re-enabled (ON = 0)
+      act(() => {
+        mockDriver.stateCallback?.('ended');
+      });
+      expect(setScreenSaverSpy).toHaveBeenLastCalledWith(
+        0,
+        expect.any(Function),
+        expect.any(Function)
+      );
+
+      // Play again then hide document -> screensaver re-enabled (ON = 0)
+      act(() => {
+        mockDriver.stateCallback?.('playing');
+      });
+      expect(setScreenSaverSpy).toHaveBeenLastCalledWith(
+        1,
+        expect.any(Function),
+        expect.any(Function)
+      );
+
+      act(() => {
+        setHidden(true);
+      });
+      expect(setScreenSaverSpy).toHaveBeenLastCalledWith(
+        0,
+        expect.any(Function),
+        expect.any(Function)
+      );
+
+      // Return to foreground and resume playing, then unmount -> screensaver re-enabled (ON = 0)
+      mockDriver.restore.mockReturnValue(true);
+      act(() => {
+        setHidden(false);
+        mockDriver.stateCallback?.('playing');
+      });
+      expect(setScreenSaverSpy).toHaveBeenLastCalledWith(
+        1,
+        expect.any(Function),
+        expect.any(Function)
+      );
+
+      unmount();
+      expect(setScreenSaverSpy).toHaveBeenLastCalledWith(
+        0,
+        expect.any(Function),
+        expect.any(Function)
+      );
+    });
+
+    it('suspends playback & flushes progress when document becomes hidden, then restores VOD paused with OSD visible on foreground return (and auto-resumes live streams)', async () => {
+      const setHidden = setupDocumentHidden(false);
+
+      // 1. Direct Play VOD restore (driver.restore returns true)
+      const { rerender, unmount } = render(
+        <PlayerScreen
+          itemId="vod-direct"
+          title="Direct Movie"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          onExit={vi.fn()}
+        />
+      );
+
+      act(() => {
+        mockDriver.stateCallback?.('playing');
+        mockDriver.timeCallback?.(45000, 120000);
+      });
+      const directOsdRoot = screen.getByText('Direct Movie').closest('[class*="transition-opacity"]');
+      expect(directOsdRoot?.className).toContain('opacity-100');
+      act(() => {
+        vi.advanceTimersByTime(4000); // OSD auto-hides
+      });
+      expect(directOsdRoot?.className).toContain('opacity-0');
+      expect(screen.queryByTestId('player-osd')).not.toBeInTheDocument();
+
+      mockDriver.restore.mockReturnValue(true);
+      reportPlaybackSpy.mockClear();
+
+      act(() => {
+        setHidden(true);
+      });
+
+      expect(mockDriver.suspend).toHaveBeenCalledTimes(1);
+      expect(reportPlaybackSpy).toHaveBeenCalledWith(
+        'http://localhost:8492',
+        'test-token',
+        'vod-direct',
+        45000,
+        true
+      );
+      expect(directOsdRoot?.className).toContain('opacity-100');
+
+      act(() => {
+        setHidden(false);
+      });
+
+      expect(mockDriver.restore).toHaveBeenCalledWith(45000, false);
+      expect(directOsdRoot?.className).toContain('opacity-100');
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
+      expect(directOsdRoot?.className).toContain('opacity-100');
+
+      // 2. HLS VOD restore fallback (driver.restore returns false -> fresh HLS session + pauseAfterRestore)
+      const progressSpy = vi.spyOn(playbackApi, 'reportSessionProgress').mockResolvedValue();
+      const endSpy = vi.spyOn(playbackApi, 'endPlaybackSession').mockResolvedValue();
+      vi.spyOn(playbackApi, 'startPlaybackSession').mockResolvedValue({
+        session_id: 'sess-hls-1',
+        media_item_id: 202,
+        duration_seconds: 180,
+        resume_position_seconds: 0,
+      });
+
+      rerender(
+        <PlayerScreen
+          itemId={202}
+          title="HLS Episode"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          onExit={vi.fn()}
+        />
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      act(() => {
+        mockDriver.stateCallback?.('playing');
+        mockDriver.timeCallback?.(62000, 180000);
+      });
+
+      mockDriver.restore.mockReturnValue(false);
+      mockDriver.init.mockClear();
+      mockDriver.pause.mockClear();
+      progressSpy.mockClear();
+
+      act(() => {
+        setHidden(true);
+      });
+
+      expect(mockDriver.suspend).toHaveBeenCalledTimes(1);
+      expect(progressSpy).toHaveBeenCalledWith(expect.anything(), 'sess-hls-1', 62);
+      expect(endSpy).not.toHaveBeenCalledWith(expect.anything(), 'sess-hls-1');
+
+      const driverBeforeRestore = mockDriver;
+      act(() => {
+        setHidden(false);
+      });
+
+      expect(driverBeforeRestore.restore).toHaveBeenCalledWith(62000, false);
+      expect(driverBeforeRestore.destroy).toHaveBeenCalled();
+      expect(mockDriver).not.toBe(driverBeforeRestore);
+      expect(mockDriver.init).toHaveBeenCalledWith(
+        expect.any(HTMLElement),
+        expect.stringContaining('start_time=62.000'),
+        0
+      );
+
+      // Once fresh HLS stream emits 'playing', pauseAfterRestore pauses it and shows OSD
+      act(() => {
+        mockDriver.stateCallback?.('playing');
+      });
+      expect(mockDriver.pause).toHaveBeenCalledTimes(1);
+      const hlsOsdRoot = screen.getByText('HLS Episode').closest('[class*="transition-opacity"]');
+      expect(hlsOsdRoot?.className).toContain('opacity-100');
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
+      expect(hlsOsdRoot?.className).toContain('opacity-100');
+      unmount();
+
+      // 3. Live stream auto-resumes on foreground return (autoPlay = true, no progress flush)
+      reportPlaybackSpy.mockClear();
+      render(
+        <PlayerScreen
+          itemId="live-9"
+          title="Live Channel"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          isLive={true}
+          onExit={vi.fn()}
+        />
+      );
+
+      act(() => {
+        mockDriver.stateCallback?.('playing');
+        mockDriver.timeCallback?.(15000, 0);
+      });
+      reportPlaybackSpy.mockClear();
+      mockDriver.restore.mockReturnValue(true);
+
+      act(() => {
+        setHidden(true);
+      });
+      expect(mockDriver.suspend).toHaveBeenCalledTimes(1);
+      expect(reportPlaybackSpy).not.toHaveBeenCalled();
+
+      act(() => {
+        setHidden(false);
+      });
+      expect(mockDriver.restore).toHaveBeenCalledWith(15000, true);
+
+      // Live HLS stream fallback (restore returns false -> reloads and auto-plays without pausing)
+      const liveHlsDriverBeforeRestore = mockDriver;
+      liveHlsDriverBeforeRestore.restore.mockReturnValue(false);
+      act(() => {
+        setHidden(true);
+      });
+      act(() => {
+        setHidden(false);
+      });
+      expect(liveHlsDriverBeforeRestore.restore).toHaveBeenCalledWith(15000, true);
+      act(() => {
+        mockDriver.stateCallback?.('playing');
+      });
+      expect(mockDriver.pause).not.toHaveBeenCalled();
+    });
+
+    it('resets pauseAfterRestoreRef when switching episodes and avoids buffering timeout while hidden or restored paused', () => {
+      const setHidden = setupDocumentHidden(false);
+
+      const { rerender } = render(
+        <PlayerScreen
+          itemId="ep-1"
+          title="Episode 1"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          onExit={vi.fn()}
+        />
+      );
+
+      // Background during initial buffering (pos=0, hasStartedPlayback=false) -> no 0-progress flush
+      act(() => {
+        setHidden(true);
+      });
+      expect(reportPlaybackSpy).not.toHaveBeenCalled();
+
+      // Advancing >10s while hidden must NOT trigger buffering timeout error
+      act(() => {
+        vi.advanceTimersByTime(12000);
+      });
+      expect(screen.queryByText('Playback Error')).not.toBeInTheDocument();
+
+      // Foreground return triggers reload with pauseAfterRestoreRef = true
+      mockDriver.restore.mockReturnValue(false);
+      act(() => {
+        setHidden(false);
+      });
+
+      // Switch to Episode 2 before Episode 1 emits 'playing' -> pauseAfterRestoreRef must reset
+      mockDriver.pause.mockClear();
+      rerender(
+        <PlayerScreen
+          itemId="ep-2"
+          title="Episode 2"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          onExit={vi.fn()}
+        />
+      );
+
+      act(() => {
+        mockDriver.stateCallback?.('playing');
+      });
+      expect(mockDriver.pause).not.toHaveBeenCalled();
     });
   });
 });

@@ -220,6 +220,35 @@ describe('Html5PlayerDriver', () => {
 
     createElementSpy.mockRestore();
   });
+
+  it('suspends via pause and restores paused or playing based on autoPlay flag', async () => {
+    await driver.init(container, 'http://test.com/stream.mp4', 0);
+    defaultPlaySpy.mockClear();
+    defaultPauseSpy.mockClear();
+
+    driver.suspend();
+    expect(defaultPauseSpy).toHaveBeenCalledTimes(1);
+
+    expect(driver.restore(45000, false)).toBe(true);
+    expect(defaultPauseSpy).toHaveBeenCalledTimes(2);
+    expect(defaultPlaySpy).not.toHaveBeenCalled();
+
+    expect(driver.restore(45000, true)).toBe(true);
+    expect(defaultPlaySpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns false from restore when video element is missing or has a media error', async () => {
+    expect(driver.restore(0, true)).toBe(false);
+
+    await driver.init(container, 'http://test.com/stream.mp4', 0);
+    const video = container.querySelector('video') as HTMLVideoElement;
+    Object.defineProperty(video, 'error', {
+      value: { code: 2, message: 'network error' },
+      configurable: true,
+    });
+
+    expect(driver.restore(0, true)).toBe(false);
+  });
 });
 
 describe('TizenAvplayDriver', () => {
@@ -805,6 +834,94 @@ describe('TizenAvplayDriver', () => {
           { type: 'VIDEO', extra_info: 'Width=1440,Height=1080,Rotation=0' },
         ])
       ).toEqual({ width: 1440, height: 1080, rotation: 0 });
+    });
+  });
+
+  describe('Smart Hub suspend() and restore()', () => {
+    it('suspends and restores Direct Play URLs via avplay.suspend/restore and returns false for HLS URLs', async () => {
+      mockAvplay.suspend = vi.fn();
+      mockAvplay.restore = vi.fn();
+      mockAvplay.setSilentSubtitle = vi.fn();
+
+      const driver = new TizenAvplayDriver();
+      const stateSpy = vi.fn();
+      driver.onStateChange(stateSpy);
+
+      await driver.init(
+        document.createElement('div'),
+        'http://localhost:8492/api/v1/stream/42',
+        0
+      );
+      stateSpy.mockClear();
+      mockAvplay.pause.mockClear();
+      mockAvplay.play.mockClear();
+
+      driver.suspend();
+      driver.suspend(); // idempotent while suspended
+      expect(mockAvplay.suspend).toHaveBeenCalledTimes(1);
+
+      expect(driver.restore(45000, false)).toBe(true);
+      expect(mockAvplay.restore).toHaveBeenCalledWith(
+        'http://localhost:8492/api/v1/stream/42',
+        45000,
+        false
+      );
+      expect(mockAvplay.pause).toHaveBeenCalledTimes(1);
+      expect(stateSpy).toHaveBeenCalledWith('paused');
+
+      stateSpy.mockClear();
+      expect(driver.restore(0, true)).toBe(true);
+      expect(mockAvplay.restore).toHaveBeenLastCalledWith(
+        'http://localhost:8492/api/v1/stream/42',
+        0,
+        false
+      );
+      expect(mockAvplay.play).toHaveBeenCalledTimes(1);
+      expect(stateSpy).toHaveBeenCalledWith('playing');
+
+      // On HLS streams, restore() returns false so PlayerScreen opens a fresh transcode session
+      const hlsDriver = new TizenAvplayDriver();
+      await hlsDriver.init(
+        document.createElement('div'),
+        'http://localhost:8492/api/v1/media/42/hls/master.m3u8',
+        0
+      );
+      mockAvplay.restore.mockClear();
+
+      hlsDriver.suspend();
+      expect(hlsDriver.restore(45000, false)).toBe(false);
+      expect(mockAvplay.restore).not.toHaveBeenCalled();
+    });
+
+    it('falls back to avplay.pause when suspend is missing, returns false if restore fails/missing, and guards after destroy', async () => {
+      const driver = new TizenAvplayDriver();
+      await driver.init(
+        document.createElement('div'),
+        'http://localhost:8492/api/v1/stream/42',
+        0
+      );
+      mockAvplay.pause.mockClear();
+
+      // Missing avplay.suspend -> falls back to pause
+      driver.suspend();
+      expect(mockAvplay.pause).toHaveBeenCalledTimes(1);
+
+      // Missing avplay.restore -> returns false
+      expect(driver.restore(10000, false)).toBe(false);
+
+      // Throwing avplay.restore -> returns false cleanly
+      mockAvplay.restore = vi.fn(() => {
+        throw new Error('restore failed');
+      });
+      expect(driver.restore(10000, false)).toBe(false);
+
+      // After destroy -> suspend is no-op and restore returns false
+      mockAvplay.suspend = vi.fn();
+      mockAvplay.restore = vi.fn();
+      driver.destroy();
+      driver.suspend();
+      expect(mockAvplay.suspend).not.toHaveBeenCalled();
+      expect(driver.restore(10000, false)).toBe(false);
     });
   });
 });

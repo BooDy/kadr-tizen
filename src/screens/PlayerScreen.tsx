@@ -36,6 +36,7 @@ import {
 import { TVButton } from '../components/tv/TVButton';
 import { AlertTriangle, RotateCcw, MonitorPlay, ArrowLeft, FastForward, Rewind, Layers, Info } from 'lucide-react';
 import { PlaybackProgressSnapshot } from '../utils/playbackProgress';
+import { setTvScreenSaver } from '../utils/tizenLifecycle';
 
 export function formatTime(seconds: number): string {
   const totalSecs = Math.max(0, Math.floor(seconds));
@@ -157,11 +158,21 @@ export function PlayerScreen({
   const osdDismissedByUserRef = useRef(false);
   const finalFlushedItemRef = useRef<string | null>(null);
   const prevPlayerStateRef = useRef<PlayerState>(playerState);
+  const [isDocumentHidden, setIsDocumentHidden] = useState<boolean>(() =>
+    typeof document !== 'undefined' ? Boolean(document.hidden) : false
+  );
+  const isDocumentHiddenRef = useRef(isDocumentHidden);
+  isDocumentHiddenRef.current = isDocumentHidden;
+  const wasHiddenRef = useRef(false);
+  const pauseAfterRestoreRef = useRef(false);
+  const restoreResumeMsRef = useRef<number | null>(null);
 
   useEffect(() => {
     hasStartedPlaybackRef.current = false;
     osdDismissedByUserRef.current = false;
     finalFlushedItemRef.current = null;
+    pauseAfterRestoreRef.current = false;
+    restoreResumeMsRef.current = null;
   }, [itemId]);
   const [subtitles, setSubtitles] = useState<SubtitleTrack[]>([]);
   const [selectedSubtitleId, setSelectedSubtitleId] = useState<number | null>(null);
@@ -328,6 +339,8 @@ export function PlayerScreen({
   }, [itemId, apiClient, forceHtml5]);
 
   const handleRetry = useCallback((retryWithHls?: boolean) => {
+    pauseAfterRestoreRef.current = false;
+    restoreResumeMsRef.current = null;
     if (retryWithHls !== undefined) {
       hlsAutoFallbackDoneRef.current = !retryWithHls || directStreamTriedRef.current;
       if (retryWithHls) {
@@ -350,6 +363,8 @@ export function PlayerScreen({
   }, [technical, forceHtml5, isBrowserEnv]);
 
   const handleSwitchToHtml5 = useCallback(() => {
+    pauseAfterRestoreRef.current = false;
+    restoreResumeMsRef.current = null;
     setForceHtml5(true);
     setPlaybackError(null);
     setShowDetailsModal(false);
@@ -865,6 +880,20 @@ export function PlayerScreen({
   }, []);
 
   useEffect(() => {
+    const shouldPreventSleep =
+      !isDocumentHidden &&
+      !playbackError &&
+      (playerState === 'playing' || playerState === 'buffering');
+    setTvScreenSaver(shouldPreventSleep);
+  }, [isDocumentHidden, playbackError, playerState]);
+
+  useEffect(() => {
+    return () => {
+      setTvScreenSaver(false);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!containerRef.current) return;
     let isMounted = true;
 
@@ -884,6 +913,8 @@ export function PlayerScreen({
     const activeStartMs =
       hlsSeekOffsetMs !== null
         ? hlsSeekOffsetMs
+        : restoreResumeMsRef.current !== null
+        ? restoreResumeMsRef.current
         : sessionResumeMsRef.current > 0
         ? sessionResumeMsRef.current
         : initialResume;
@@ -949,7 +980,11 @@ export function PlayerScreen({
     );
 
     const bufferWatchdog = setTimeout(() => {
-      if (playerStateRef.current !== 'playing') {
+      if (
+        playerStateRef.current !== 'playing' &&
+        !isDocumentHiddenRef.current &&
+        !(playerStateRef.current === 'paused' && !pauseAfterRestoreRef.current)
+      ) {
         console.error('[PlayerScreen] 10s buffering timeout fired');
         driver.destroy();
         setPlayerState('error');
@@ -1007,12 +1042,26 @@ export function PlayerScreen({
         if (state === 'buffering') return; // don't flash a spinner over a playing video
         if (state === 'playing') retiringDriverRef.current.release(); // new stream is ready
       }
+      if (state === 'playing' && pauseAfterRestoreRef.current) {
+        pauseAfterRestoreRef.current = false;
+        restoreResumeMsRef.current = null;
+        hasStartedPlaybackRef.current = true;
+        hasPlayedCurrentStream = true;
+        clearTimeout(bufferWatchdog);
+        driver.pause();
+        playerStateRef.current = 'paused';
+        setPlayerState('paused');
+        osdDismissedByUserRef.current = false;
+        setShowOSD(true);
+        return;
+      }
       setPlayerState(state);
       playerStateRef.current = state;
       if (state === 'playing' || state === 'paused' || state === 'ended') {
         hasStartedPlaybackRef.current = true;
       }
       if (state === 'playing') {
+        restoreResumeMsRef.current = null;
         hasPlayedCurrentStream = true;
         clearTimeout(bufferWatchdog);
       }
@@ -1053,6 +1102,8 @@ export function PlayerScreen({
     driver.onError((err) => {
       if (!isMounted || driverRef.current !== driver) return;
       clearTimeout(bufferWatchdog);
+      pauseAfterRestoreRef.current = false;
+      restoreResumeMsRef.current = null;
       if (isHls && hlsProbeSucceeded && !hasPlayedCurrentStream && canDirectPlayCodecs()) {
         if (activeHlsSessionId) {
           const idToDelete = activeHlsSessionId;
@@ -1093,11 +1144,13 @@ export function PlayerScreen({
 
     let driverInitialized = false;
     const initDriver = () => {
-      if (!isMounted || !containerRef.current) return;
+      if (!isMounted || !containerRef.current || isDocumentHiddenRef.current) return;
       driverInitialized = true;
       const currentStartMs =
         hlsSeekOffsetMsRef.current !== null
           ? hlsSeekOffsetMsRef.current
+          : restoreResumeMsRef.current !== null
+          ? restoreResumeMsRef.current
           : sessionResumeMsRef.current > 0
           ? sessionResumeMsRef.current
           : initialResume;
@@ -1409,6 +1462,80 @@ export function PlayerScreen({
       }
     };
   }, [itemId, serverUrl, token, initialResume, sessionManager]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        setIsDocumentHidden(true);
+        isDocumentHiddenRef.current = true;
+        if (playbackErrorRef.current) {
+          return;
+        }
+        wasHiddenRef.current = true;
+
+        if (seekDebounceTimerRef.current) {
+          clearTimeout(seekDebounceTimerRef.current);
+          seekDebounceTimerRef.current = null;
+          commitPendingSeekRef.current = null;
+        }
+        targetSeekMsRef.current = null;
+        seekDirectionRef.current = null;
+
+        if ((hasStartedPlaybackRef.current || positionMsRef.current > 0) && !isLiveStreamRef.current) {
+          if (hasActiveSessionRef.current) {
+            sessionManager
+              .updateProgress(Math.floor(positionMsRef.current / 1000))
+              .catch(() => {});
+          } else {
+            Promise.resolve(
+              reportPlaybackProgress(serverUrl, token, itemId, positionMsRef.current, true)
+            ).catch(() => {});
+          }
+        }
+
+        driverRef.current?.suspend?.();
+        playerStateRef.current = 'paused';
+        setPlayerState('paused');
+        osdDismissedByUserRef.current = false;
+        setShowOSD(true);
+      } else {
+        setIsDocumentHidden(false);
+        isDocumentHiddenRef.current = false;
+        if (playbackErrorRef.current || !wasHiddenRef.current) {
+          wasHiddenRef.current = false;
+          return;
+        }
+        wasHiddenRef.current = false;
+
+        const autoPlay = isLiveStreamRef.current;
+        const targetPos = positionMsRef.current;
+        const handled = driverRef.current?.restore?.(targetPos, autoPlay) ?? false;
+
+        if (!handled) {
+          pauseAfterRestoreRef.current = !autoPlay;
+          if (!autoPlay && targetPos > 0) {
+            if (isHlsRef.current) {
+              hlsSeekOffsetMsRef.current = targetPos;
+              setHlsSeekOffsetMs(targetPos);
+            } else {
+              restoreResumeMsRef.current = targetPos;
+            }
+          }
+          setReloadKey((k) => k + 1);
+        }
+
+        osdDismissedByUserRef.current = false;
+        setShowOSD(true);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [itemId, serverUrl, token, sessionManager]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

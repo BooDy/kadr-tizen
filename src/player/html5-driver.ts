@@ -183,6 +183,22 @@ export class Html5PlayerDriver implements PlayerDriver {
     }
   }
 
+  suspend(): void {
+    this.pause();
+  }
+
+  restore(_resumeMs: number, autoPlay: boolean): boolean {
+    if (!this.video || this.video.error) {
+      return false;
+    }
+    if (autoPlay) {
+      this.play();
+    } else {
+      this.pause();
+    }
+    return true;
+  }
+
   seekTo(ms: number, onComplete?: () => void): void {
     this.hasUserSeeked = true;
     if (this.video) {

@@ -29,6 +29,8 @@ export interface PlayerDriver {
   ): Promise<void>;
   play(): void;
   pause(): void;
+  suspend?(): void;
+  restore?(resumeMs: number, autoPlay: boolean): boolean;
   seekTo(ms: number, onComplete?: () => void): void;
   destroy(): void;
   setSubtitleTrack(trackUrl: string | null): void;
