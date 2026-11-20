@@ -277,6 +277,7 @@ export function PlayerScreen({
   const [useHls, setUseHls] = useState<boolean>(() => !initialBypassHls);
   const hlsAutoFallbackDoneRef = useRef<boolean>(initialBypassHls);
   const hlsTranscodeFailedRef = useRef<boolean>(false);
+  const hlsUnavailableForItemRef = useRef<boolean>(false);
   const directStreamTriedRef = useRef<boolean>(false);
   const [hlsSeekOffsetMs, setHlsSeekOffsetMs] = useState<number | null>(null);
   const hlsSeekOffsetMsRef = useRef<number | null>(hlsSeekOffsetMs);
@@ -339,31 +340,86 @@ export function PlayerScreen({
     setReloadKey((k) => k + 1);
   }, []);
 
+  const resetToDefaultAudioTrack = useCallback(
+    (activeTech: MediaItemDetail['technical'] | undefined) => {
+      selectedAudioTrackIndexRef.current = 0;
+      setSelectedAudioTrackIndex(0);
+      driverRef.current?.setMediaHints?.(
+        buildMediaHints(activeTech, 0, audioTracksRef.current)
+      );
+    },
+    []
+  );
+
+  const isAudioTrackSupportedForDirectPlay = useCallback(
+    (
+      audioIndex: number,
+      activeTech: MediaItemDetail['technical'] | undefined,
+      useHtml5Override?: boolean
+    ): boolean => {
+      const chosen = audioTracksRef.current.find((t) => t.audio_index === audioIndex);
+      return isSupportedOnSamsungTv(
+        activeTech?.video_codec,
+        chosen?.codec,
+        activeTech?.container,
+        useHtml5Override ?? (forceHtml5Ref.current || isBrowserEnv)
+      );
+    },
+    [isBrowserEnv]
+  );
+
+  const normalizeDirectPlayAudioIndex = useCallback(
+    (
+      isHlsStream: boolean,
+      activeTech: MediaItemDetail['technical'] | undefined,
+      useHtml5Override?: boolean
+    ): number => {
+      const currentIdx = selectedAudioTrackIndexRef.current;
+      if (
+        !isHlsStream &&
+        (hlsUnavailableForItemRef.current || hlsTranscodeFailedRef.current) &&
+        currentIdx > 0 &&
+        !isAudioTrackSupportedForDirectPlay(currentIdx, activeTech, useHtml5Override)
+      ) {
+        resetToDefaultAudioTrack(activeTech);
+        return 0;
+      }
+      return currentIdx;
+    },
+    [isAudioTrackSupportedForDirectPlay, resetToDefaultAudioTrack]
+  );
+
   const syncDirectPlayAudioOrFallback = useCallback(
     (
       audioIndex: number,
       chosen: AudioStreamInfo | undefined,
       activeTech: MediaItemDetail['technical'] | undefined
     ) => {
-      const trackSupported = isSupportedOnSamsungTv(
-        activeTech?.video_codec,
-        chosen?.codec,
-        activeTech?.container,
-        forceHtml5Ref.current || isBrowserEnv
-      );
+      const trackSupported = isAudioTrackSupportedForDirectPlay(audioIndex, activeTech);
       if (!trackSupported) {
+        if (hlsUnavailableForItemRef.current || hlsTranscodeFailedRef.current) {
+          resetToDefaultAudioTrack(activeTech);
+          return;
+        }
         triggerHlsAudioReload(positionMsRef.current);
         return;
       }
+      driverRef.current?.setMediaHints?.(
+        buildMediaHints(activeTech, audioIndex, audioTracksRef.current)
+      );
       if (isDriverReadyRef.current) {
         const switched =
           driverRef.current?.selectAudioTrack?.(audioIndex, chosen?.stream_index) ?? false;
         if (!switched) {
+          if (hlsUnavailableForItemRef.current || hlsTranscodeFailedRef.current) {
+            resetToDefaultAudioTrack(activeTech);
+            return;
+          }
           triggerHlsAudioReload(positionMsRef.current);
         }
       }
     },
-    [isBrowserEnv, triggerHlsAudioReload]
+    [isAudioTrackSupportedForDirectPlay, resetToDefaultAudioTrack, triggerHlsAudioReload]
   );
   const syncDirectPlayAudioOrFallbackRef = useRef(syncDirectPlayAudioOrFallback);
   syncDirectPlayAudioOrFallbackRef.current = syncDirectPlayAudioOrFallback;
@@ -383,9 +439,9 @@ export function PlayerScreen({
 
       const chosen = tracks.find((t) => t.audio_index === initialIdx);
       const activeTech = technicalInfoRef.current ?? technicalPropRef.current;
-      driverRef.current?.setMediaHints?.(buildMediaHints(activeTech, initialIdx, tracks));
 
       if (isDocumentHiddenRef.current) {
+        driverRef.current?.setMediaHints?.(buildMediaHints(activeTech, initialIdx, tracks));
         if (initialIdx !== prevAudioIndex) {
           pendingAudioSyncAfterForegroundRef.current = true;
         }
@@ -393,6 +449,10 @@ export function PlayerScreen({
       }
 
       if (isHlsRef.current) {
+        if (hlsUnavailableForItemRef.current) {
+          return;
+        }
+        driverRef.current?.setMediaHints?.(buildMediaHints(activeTech, initialIdx, tracks));
         if (initialIdx !== prevAudioIndex) {
           triggerHlsAudioReload();
         }
@@ -463,6 +523,7 @@ export function PlayerScreen({
             } else if (
               detail.technical &&
               !hlsAutoFallbackDoneRef.current &&
+              !hlsUnavailableForItemRef.current &&
               !isSupportedOnSamsungTv(
                 detail.technical.video_codec,
                 activeTrackCodec,
@@ -502,6 +563,7 @@ export function PlayerScreen({
       hlsAutoFallbackDoneRef.current = !retryWithHls || directStreamTriedRef.current;
       if (retryWithHls) {
         hlsTranscodeFailedRef.current = false;
+        hlsUnavailableForItemRef.current = false;
       }
       setUseHls(retryWithHls);
     } else {
@@ -632,6 +694,7 @@ export function PlayerScreen({
     const bypass = canBypassHlsForAudioLessVideo(technical, forceHtml5 || isBrowserEnv);
     hlsAutoFallbackDoneRef.current = bypass;
     hlsTranscodeFailedRef.current = false;
+    hlsUnavailableForItemRef.current = false;
     directStreamTriedRef.current = false;
     setUseHls(!bypass);
 
@@ -1191,11 +1254,11 @@ export function PlayerScreen({
     const markDriverReady = () => {
       if (isDriverReadyRef.current) return;
       isDriverReadyRef.current = true;
-      if (
-        !isHls &&
-        selectedAudioTrackIndexRef.current > 0 &&
-        !hlsTranscodeFailedRef.current
-      ) {
+      if (!isHls && selectedAudioTrackIndexRef.current > 0) {
+        if (isDocumentHiddenRef.current) {
+          pendingAudioSyncAfterForegroundRef.current = true;
+          return;
+        }
         const activeIdx = selectedAudioTrackIndexRef.current;
         const chosen = audioTracksRef.current.find((t) => t.audio_index === activeIdx);
         syncDirectPlayAudioOrFallbackRef.current(
@@ -1207,8 +1270,13 @@ export function PlayerScreen({
     };
 
     const activeTech = technicalInfoRef.current ?? technical;
+    const initialMediaHintsAudioIdx = normalizeDirectPlayAudioIndex(
+      isHls,
+      activeTech,
+      forceHtml5 || isBrowserEnv
+    );
     driver.setMediaHints?.(
-      buildMediaHints(activeTech, selectedAudioTrackIndexRef.current, audioTracksRef.current)
+      buildMediaHints(activeTech, initialMediaHintsAudioIdx, audioTracksRef.current)
     );
 
     const bufferWatchdog = setTimeout(() => {
@@ -1388,9 +1456,14 @@ export function PlayerScreen({
         (sessionResumeMsRef.current > 0 ? sessionResumeMsRef.current : initialResume);
       const initialDriverTime = isHls && streamStartOffsetMs > 0 ? 0 : currentStartMs;
       isDriverInitializedRef.current = true;
-      const activeAudioIndex = selectedAudioTrackIndexRef.current;
+      const activeTechForInit = technicalInfoRef.current ?? technical;
+      const activeAudioIndex = normalizeDirectPlayAudioIndex(
+        isHls,
+        activeTechForInit,
+        forceHtml5 || isBrowserEnv
+      );
       const initHints = buildMediaHints(
-        technicalInfoRef.current ?? technical,
+        activeTechForInit,
         activeAudioIndex,
         audioTracksRef.current
       );
@@ -1477,6 +1550,13 @@ export function PlayerScreen({
             hlsAutoFallbackDoneRef.current = true;
             if (isTranscoderCrashStatus) {
               hlsTranscodeFailedRef.current = true;
+            }
+            if (
+              probeRes.status === 409 ||
+              probeRes.status === 503 ||
+              isTranscoderCrashStatus
+            ) {
+              hlsUnavailableForItemRef.current = true;
             }
             setUseHls(false);
             return;
@@ -1635,6 +1715,7 @@ export function PlayerScreen({
     useHls,
     hlsSeekOffsetMs,
     technical,
+    normalizeDirectPlayAudioIndex,
   ]);
 
   useEffect(() => {
@@ -1795,31 +1876,46 @@ export function PlayerScreen({
           (t) => t.audio_index === activeAudioIdx
         );
         const activeTech = technicalInfoRef.current ?? technicalPropRef.current;
+        const isHlsUnavailable = hlsUnavailableForItemRef.current || hlsTranscodeFailedRef.current;
+        const activeAudioSupported = isAudioTrackSupportedForDirectPlay(
+          activeAudioIdx,
+          activeTech
+        );
         const needsHlsForAudio =
           !isHlsRef.current &&
           activeAudioIdx > 0 &&
-          !isSupportedOnSamsungTv(
-            activeTech?.video_codec,
-            activeAudioTrack?.codec,
-            activeTech?.container,
-            forceHtml5Ref.current || isBrowserEnv
-          );
+          !activeAudioSupported &&
+          !isHlsUnavailable;
         const needsHlsAudioReload =
-          needsHlsForAudio || (pendingAudioSync && isHlsRef.current && activeAudioIdx > 0);
+          needsHlsForAudio ||
+          (pendingAudioSync && isHlsRef.current && activeAudioIdx > 0 && !isHlsUnavailable);
 
         if (needsHlsAudioReload) {
           switchToHlsOnForeground();
         } else {
+          if (!isHlsRef.current && activeAudioIdx > 0 && !activeAudioSupported && isHlsUnavailable) {
+            resetToDefaultAudioTrack(activeTech);
+          }
+
           const handled = driverRef.current?.restore?.(targetPos, autoPlay) ?? false;
 
-          if (handled && pendingAudioSync && !isHlsRef.current && activeAudioIdx > 0) {
+          if (
+            handled &&
+            pendingAudioSync &&
+            !isHlsRef.current &&
+            selectedAudioTrackIndexRef.current > 0
+          ) {
             const switched =
               driverRef.current?.selectAudioTrack?.(
-                activeAudioIdx,
+                selectedAudioTrackIndexRef.current,
                 activeAudioTrack?.stream_index
               ) ?? false;
             if (!switched) {
-              switchToHlsOnForeground();
+              if (isHlsUnavailable) {
+                resetToDefaultAudioTrack(activeTech);
+              } else {
+                switchToHlsOnForeground();
+              }
             }
           } else if (!handled) {
             pauseAfterRestoreRef.current = !autoPlay;
@@ -1849,7 +1945,15 @@ export function PlayerScreen({
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [itemId, serverUrl, token, sessionManager, isBrowserEnv]);
+  }, [
+    itemId,
+    serverUrl,
+    token,
+    sessionManager,
+    isBrowserEnv,
+    isAudioTrackSupportedForDirectPlay,
+    resetToDefaultAudioTrack,
+  ]);
 
   useEffect(() => {
     const getOsdControls = (): PlayerOsdFocusItem[] => {
@@ -1931,7 +2035,7 @@ export function PlayerScreen({
 
       resetOsdTimer();
 
-      if (autoAdvanceCountdownRef.current !== null) {
+      if (!isModalOpen && !e.defaultPrevented && autoAdvanceCountdownRef.current !== null) {
         if (code === TVKeys.ENTER || e.key === 'Enter') {
           e.preventDefault();
           autoAdvanceDismissedRef.current = true;

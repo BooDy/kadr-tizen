@@ -965,4 +965,507 @@ describe('PlayerScreen multi-audio discovery, switching & preference persistence
       delete (document as any).hidden;
     }
   });
+
+  it('does not trigger auto-advance onNext when pressing Enter inside AudioTrackModal or SubtitleModal during final 1.5s countdown', async () => {
+    const directPlayTracks: AudioStreamInfo[] = [
+      {
+        audio_index: 0,
+        stream_index: 1,
+        codec: 'aac',
+        channels: 2,
+        language: 'jpn',
+        is_default: true,
+        is_commentary: false,
+      },
+      {
+        audio_index: 1,
+        stream_index: 2,
+        codec: 'ac3',
+        channels: 6,
+        language: 'eng',
+        is_default: false,
+        is_commentary: false,
+      },
+    ];
+    vi.spyOn(audioApi, 'fetchItemAudioTracks').mockResolvedValue(directPlayTracks);
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : String(input);
+      if (url.includes('/hls/master.m3u8')) {
+        return {
+          ok: false,
+          status: 409,
+          json: async () => ({ error: 'PLAYBACK_DIRECT_ONLY' }),
+        } as unknown as Response;
+      }
+      return { ok: true, status: 206, json: async () => ({}) } as unknown as Response;
+    });
+
+    const onNext = vi.fn();
+    const client = new ApiClient('http://localhost:8492');
+    const { unmount } = render(
+      <FocusProvider>
+        <PlayerScreen
+          client={client}
+          itemId={611}
+          title="Episode 1"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          technical={{
+            video_codec: 'h264',
+            audio_codec: 'aac',
+            container: 'mp4',
+            duration_seconds: 120,
+          }}
+          playlist={[
+            { id: 611, title: 'Episode 1' },
+            { id: 612, title: 'Episode 2' },
+          ]}
+          currentIndex={0}
+          onNext={onNext}
+          onExit={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    await flushAsync();
+
+    // Enter final 1.5s window so autoAdvanceCountdown activates
+    act(() => {
+      mockAvplay.emitTime(119000);
+    });
+    expect(screen.getByTestId('auto-advance-overlay')).toBeInTheDocument();
+
+    // Open AudioTrackModal while countdown is active, move focus to Track 1, and press Enter
+    fireEvent.click(screen.getByTestId('audio-button'));
+    expect(screen.getByTestId('audio-track-modal')).toBeInTheDocument();
+
+    act(() => {
+      fireEvent.keyDown(window, { keyCode: TVKeys.DOWN, key: 'ArrowDown' });
+    });
+    act(() => {
+      fireEvent.keyDown(window, { keyCode: TVKeys.ENTER, key: 'Enter' });
+    });
+    await flushAsync();
+
+    expect(onNext).not.toHaveBeenCalled();
+    expect(mockAvplay.setSelectTrack).toHaveBeenCalledWith('AUDIO', 2);
+    expect(screen.queryByTestId('audio-track-modal')).not.toBeInTheDocument();
+    expect(screen.getByTestId('auto-advance-overlay')).toBeInTheDocument();
+
+    // Also open SubtitleModal while countdown is active and press Enter
+    fireEvent.click(screen.getByTestId('subtitles-button'));
+    expect(screen.getByTestId('subtitles-popup')).toBeInTheDocument();
+
+    act(() => {
+      fireEvent.keyDown(window, { keyCode: TVKeys.ENTER, key: 'Enter' });
+    });
+    expect(onNext).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('subtitles-popup')).not.toBeInTheDocument();
+
+    // Also guard non-defaultPrevented Enter when a modal is open (without FocusProvider)
+    unmount();
+    const onNextNoFocus = vi.fn();
+    render(
+      <PlayerScreen
+        client={client}
+        itemId={613}
+        title="Episode 3"
+        serverUrl="http://localhost:8492"
+        token="test-token"
+        technical={{
+          video_codec: 'h264',
+          audio_codec: 'aac',
+          container: 'mp4',
+          duration_seconds: 120,
+        }}
+        playlist={[
+          { id: 613, title: 'Episode 3' },
+          { id: 614, title: 'Episode 4' },
+        ]}
+        currentIndex={0}
+        onNext={onNextNoFocus}
+        onExit={vi.fn()}
+      />
+    );
+    await flushAsync();
+    act(() => {
+      mockAvplay.emitTime(119000);
+    });
+    expect(screen.getByTestId('auto-advance-overlay')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('audio-button'));
+    expect(screen.getByTestId('audio-track-modal')).toBeInTheDocument();
+
+    act(() => {
+      fireEvent.keyDown(window, { keyCode: TVKeys.ENTER, key: 'Enter' });
+    });
+    expect(onNextNoFocus).not.toHaveBeenCalled();
+
+    // Closing the modal and pressing Enter on the countdown advances normally
+    act(() => {
+      fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN });
+    });
+    expect(screen.queryByTestId('audio-track-modal')).not.toBeInTheDocument();
+    act(() => {
+      fireEvent.keyDown(window, { keyCode: TVKeys.ENTER, key: 'Enter' });
+    });
+    expect(onNextNoFocus).toHaveBeenCalledTimes(1);
+  });
+
+  it('defers Direct Play audio sync when async Html5PlayerDriver startup completes while document.hidden is true and applies on foreground return', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (window as any).webapis;
+
+    let resolvePlay!: () => void;
+    const playSpy = vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolvePlay = resolve;
+        })
+    );
+    const pauseSpy = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+
+    let hidden = false;
+    Object.defineProperty(document, 'hidden', {
+      configurable: true,
+      get: () => hidden,
+    });
+
+    try {
+      localStorage.setItem(
+        AUDIO_PREFERENCE_STORAGE_KEY,
+        JSON.stringify({ mode: 'language', language: 'eng', preferCommentary: false })
+      );
+
+      const aacTracks: AudioStreamInfo[] = [
+        {
+          audio_index: 0,
+          stream_index: 1,
+          codec: 'aac',
+          channels: 2,
+          language: 'jpn',
+          is_default: true,
+          is_commentary: false,
+        },
+        {
+          audio_index: 1,
+          stream_index: 2,
+          codec: 'aac',
+          channels: 2,
+          language: 'eng',
+          is_default: false,
+          is_commentary: false,
+        },
+      ];
+      let resolveAudioTracks!: (tracks: AudioStreamInfo[]) => void;
+      vi.spyOn(audioApi, 'fetchItemAudioTracks').mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveAudioTracks = resolve;
+          })
+      );
+
+      let hlsAllowed = false;
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+        const url = typeof input === 'string' ? input : String(input);
+        if (url.includes('/hls/master.m3u8')) {
+          if (!hlsAllowed) {
+            return {
+              ok: false,
+              status: 429,
+              json: async () => ({ error: 'Too many transcodes' }),
+            } as unknown as Response;
+          }
+          return {
+            ok: true,
+            status: 200,
+            text: async () => '#EXTM3U\n',
+          } as unknown as Response;
+        }
+        return { ok: true, status: 206, json: async () => ({}) } as unknown as Response;
+      });
+
+      const client = new ApiClient('http://localhost:8492');
+      const { container, unmount } = render(
+        <FocusProvider>
+          <PlayerScreen
+            client={client}
+            itemId={700}
+            title="Async HTML5 Hidden Startup"
+            serverUrl="http://localhost:8492"
+            token="test-token"
+            technical={{ video_codec: 'h264', audio_codec: 'aac', container: 'mp4' }}
+            onExit={vi.fn()}
+          />
+        </FocusProvider>
+      );
+
+      await flushAsync();
+      const videoEl = container.querySelector('video') as HTMLVideoElement;
+      expect(videoEl).toBeTruthy();
+      expect(videoEl.src).toContain('/api/v1/stream/700');
+
+      // Audio tracks resolve while Html5PlayerDriver.init() is still awaiting play()
+      await act(async () => {
+        resolveAudioTracks(aacTracks);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      // Tab becomes hidden before initPromise resolves
+      act(() => {
+        hidden = true;
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      fetchSpy.mockClear();
+
+      // Now Html5PlayerDriver initPromise resolves while document.hidden is true
+      await act(async () => {
+        resolvePlay();
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      // Must NOT spawn a background HLS probe while hidden
+      expect(
+        fetchSpy.mock.calls.some(([u]) => String(u).includes('/hls/master.m3u8'))
+      ).toBe(false);
+
+      // Foreground return applies the deferred audio sync via HLS reload
+      hlsAllowed = true;
+      await act(async () => {
+        hidden = false;
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await flushAsync();
+
+      const hlsReloadCall = fetchSpy.mock.calls.find(([u]) =>
+        String(u).includes('/hls/master.m3u8')
+      );
+      expect(hlsReloadCall).toBeDefined();
+      expect(String(hlsReloadCall![0])).toContain('audio_track=1');
+
+      unmount();
+    } finally {
+      playSpy.mockRestore();
+      pauseSpy.mockRestore();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete (document as any).hidden;
+    }
+  });
+
+  it('stays playing on Direct Play Track 0 instead of crashing into error screen after 503 or 409 Direct Play fallback with saved secondary audio preference', async () => {
+    localStorage.setItem(
+      AUDIO_PREFERENCE_STORAGE_KEY,
+      JSON.stringify({ mode: 'language', language: 'eng', preferCommentary: false })
+    );
+
+    const dtsSecondaryTracks: AudioStreamInfo[] = [
+      {
+        audio_index: 0,
+        stream_index: 1,
+        codec: 'aac',
+        channels: 2,
+        language: 'jpn',
+        is_default: true,
+        is_commentary: false,
+      },
+      {
+        audio_index: 1,
+        stream_index: 2,
+        codec: 'dts',
+        channels: 6,
+        language: 'eng',
+        is_default: false,
+        is_commentary: false,
+      },
+    ];
+    vi.spyOn(audioApi, 'fetchItemAudioTracks').mockResolvedValue(dtsSecondaryTracks);
+
+    let hlsProbeCount = 0;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : String(input);
+      if (url.includes('/hls/master.m3u8')) {
+        hlsProbeCount += 1;
+        return {
+          ok: false,
+          status: 503,
+          json: async () => ({ error: 'Transcoding is disabled' }),
+        } as unknown as Response;
+      }
+      return { ok: true, status: 206, json: async () => ({}) } as unknown as Response;
+    });
+
+    const client = new ApiClient('http://localhost:8492');
+    const { unmount } = render(
+      <FocusProvider>
+        <PlayerScreen
+          client={client}
+          itemId={701}
+          title="503 Direct Play With Saved Secondary Audio"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          technical={{ video_codec: 'h264', audio_codec: 'aac', container: 'mp4' }}
+          onExit={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    await flushAsync();
+
+    // Must fall back to Direct Play Track 0 cleanly without bouncing back to HLS or crashing
+    expect(hlsProbeCount).toBe(1);
+    expect(mockAvplay.open).toHaveBeenCalledTimes(1);
+    expect(mockAvplay.open).toHaveBeenCalledWith(
+      'http://localhost:8492/api/v1/stream/701?token=test-token'
+    );
+    expect(screen.queryByText('Playback Error')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Transcoding failed/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId('audio-button')).toHaveTextContent('JPN');
+
+    fireEvent.click(screen.getByTestId('audio-button'));
+    expect(screen.getByTestId('audio-track-btn-0')).toHaveTextContent('Active');
+    expect(screen.getByTestId('audio-track-btn-1')).not.toHaveTextContent('Active');
+
+    unmount();
+
+    // Also verify 409 PLAYBACK_DIRECT_ONLY on Html5PlayerDriver (no video.audioTracks) stays on Direct Play Track 0
+    // including across background/foreground visibility transitions, and resets on itemId change.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (window as any).webapis;
+    const playSpy = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    const pauseSpy = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+
+    let hidden = false;
+    Object.defineProperty(document, 'hidden', {
+      configurable: true,
+      get: () => hidden,
+    });
+
+    try {
+      const aacTracks: AudioStreamInfo[] = [
+        {
+          audio_index: 0,
+          stream_index: 1,
+          codec: 'aac',
+          channels: 2,
+          language: 'jpn',
+          is_default: true,
+          is_commentary: false,
+        },
+        {
+          audio_index: 1,
+          stream_index: 2,
+          codec: 'aac',
+          channels: 2,
+          language: 'eng',
+          is_default: false,
+          is_commentary: false,
+        },
+      ];
+      vi.spyOn(audioApi, 'fetchItemAudioTracks').mockResolvedValue(aacTracks);
+
+      let allowHlsForNextItem = false;
+      hlsProbeCount = 0;
+      fetchSpy.mockImplementation(async (input) => {
+        const url = typeof input === 'string' ? input : String(input);
+        if (url.includes('/hls/master.m3u8')) {
+          hlsProbeCount += 1;
+          if (!allowHlsForNextItem) {
+            return {
+              ok: false,
+              status: 409,
+              json: async () => ({ error: 'PLAYBACK_DIRECT_ONLY' }),
+            } as unknown as Response;
+          }
+          return {
+            ok: true,
+            status: 200,
+            text: async () => '#EXTM3U\n',
+          } as unknown as Response;
+        }
+        return { ok: true, status: 206, json: async () => ({}) } as unknown as Response;
+      });
+
+      const { container, rerender, unmount: unmountHtml5 } = render(
+        <FocusProvider>
+          <PlayerScreen
+            client={client}
+            itemId={702}
+            title="409 HTML5 Direct Play With Saved Preference"
+            serverUrl="http://localhost:8492"
+            token="test-token"
+            technical={{
+              video_codec: 'h264',
+              audio_codec: 'aac',
+              container: 'mp4',
+              audio_tracks: aacTracks,
+            }}
+            onExit={vi.fn()}
+          />
+        </FocusProvider>
+      );
+
+      await flushAsync();
+
+      const videoEl = container.querySelector('video') as HTMLVideoElement;
+      expect(videoEl).toBeTruthy();
+      expect(videoEl.src).toContain('/api/v1/stream/702');
+      expect(hlsProbeCount).toBe(1);
+      expect(screen.queryByText('Playback Error')).not.toBeInTheDocument();
+      expect(screen.getByTestId('audio-button')).toHaveTextContent('JPN');
+
+      // Background + foreground cycle must keep Direct Play Track 0 without re-probing 409 HLS
+      act(() => {
+        hidden = true;
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await act(async () => {
+        hidden = false;
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await flushAsync();
+
+      expect(hlsProbeCount).toBe(1);
+      expect(screen.queryByText('Playback Error')).not.toBeInTheDocument();
+
+      // Changing itemId resets hlsUnavailableForItemRef so next item can use HLS with audio_track=1
+      allowHlsForNextItem = true;
+      fetchSpy.mockClear();
+      rerender(
+        <FocusProvider>
+          <PlayerScreen
+            client={client}
+            itemId={703}
+            title="Next Item With HLS Enabled"
+            serverUrl="http://localhost:8492"
+            token="test-token"
+            technical={{
+              video_codec: 'h264',
+              audio_codec: 'dts',
+              container: 'mkv',
+              audio_tracks: dtsSecondaryTracks,
+            }}
+            onExit={vi.fn()}
+          />
+        </FocusProvider>
+      );
+
+      await flushAsync();
+
+      const nextItemHlsCall = fetchSpy.mock.calls.find(([u]) =>
+        String(u).includes('/media/703/hls/master.m3u8')
+      );
+      expect(nextItemHlsCall).toBeDefined();
+      expect(String(nextItemHlsCall![0])).toContain('audio_track=1');
+
+      unmountHtml5();
+    } finally {
+      playSpy.mockRestore();
+      pauseSpy.mockRestore();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete (document as any).hidden;
+    }
+  });
 });
