@@ -86,7 +86,7 @@ export function PlayerOSD({
     onPopupOpenChange?.(isPopupOpen);
   }, [isPopupOpen, onPopupOpenChange]);
 
-  const hasAudio = Boolean(audioTracks && audioTracks.length >= 2);
+  const hasAudio = Boolean(audioTracks && audioTracks.length >= 2 && onOpenAudioModal);
   const activeAudioLanguageTag = useMemo(() => {
     if (!audioTracks || audioTracks.length === 0) return '';
     const activeTrack =

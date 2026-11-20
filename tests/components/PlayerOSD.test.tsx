@@ -800,7 +800,7 @@ describe('PlayerOSD', () => {
       },
     ];
 
-    it('hides audio-button when audioTracks is undefined or has length 1', () => {
+    it('hides audio-button when audioTracks is undefined, has length 1, or onOpenAudioModal is undefined', () => {
       const { queryByTestId, rerender } = render(
         <PlayerOSD
           title="Spirited Away"
@@ -824,6 +824,20 @@ describe('PlayerOSD', () => {
           audioTracks={[twoAudioTracks[0]]}
           selectedAudioTrackIndex={0}
           onOpenAudioModal={vi.fn()}
+        />
+      );
+
+      expect(queryByTestId('audio-button')).not.toBeInTheDocument();
+
+      rerender(
+        <PlayerOSD
+          title="Spirited Away"
+          playerState="playing"
+          positionMs={10000}
+          durationMs={120000}
+          visible={true}
+          audioTracks={twoAudioTracks}
+          selectedAudioTrackIndex={0}
         />
       );
 
