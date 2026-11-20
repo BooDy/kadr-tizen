@@ -249,6 +249,37 @@ describe('Html5PlayerDriver', () => {
 
     expect(driver.restore(0, true)).toBe(false);
   });
+
+  it('selectAudioTrack returns false when video.audioTracks is absent and toggles enabled tracks when present', async () => {
+    expect(driver.selectAudioTrack(0)).toBe(false);
+
+    await driver.init(container, 'http://test.com/stream.mp4', 0);
+    const video = container.querySelector('video') as HTMLVideoElement;
+
+    // Default JSDOM HTMLVideoElement has no audioTracks list
+    expect(driver.selectAudioTrack(1)).toBe(false);
+
+    const mockAudioTracks = [
+      { id: '0', language: 'jpn', enabled: true },
+      { id: '1', language: 'eng', enabled: false },
+    ];
+    Object.defineProperty(video, 'audioTracks', {
+      value: mockAudioTracks,
+      configurable: true,
+    });
+
+    expect(driver.selectAudioTrack(1)).toBe(true);
+    expect(mockAudioTracks[0].enabled).toBe(false);
+    expect(mockAudioTracks[1].enabled).toBe(true);
+
+    expect(driver.selectAudioTrack(0)).toBe(true);
+    expect(mockAudioTracks[0].enabled).toBe(true);
+    expect(mockAudioTracks[1].enabled).toBe(false);
+
+    // Out-of-bounds returns false without changing state
+    expect(driver.selectAudioTrack(5)).toBe(false);
+    expect(driver.selectAudioTrack(-1)).toBe(false);
+  });
 });
 
 describe('TizenAvplayDriver', () => {
@@ -1081,6 +1112,118 @@ describe('TizenAvplayDriver', () => {
           expect.any(Function),
           expect.any(Function)
         );
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+  });
+
+  describe('Multi-audio track selection', () => {
+    beforeEach(() => {
+      mockAvplay.getTotalTrackInfo = vi.fn(() => [
+        { index: 0, type: 'VIDEO', extra_info: '{}' },
+        { index: 1, type: 'AUDIO', extra_info: '{"language":"jpn"}' },
+        { index: 2, type: 'AUDIO', extra_info: '{"language":"eng"}' },
+        { index: 3, type: 'TEXT', extra_info: '{}' },
+      ]);
+      mockAvplay.setSelectTrack = vi.fn();
+    });
+
+    it('applies initialAudioIndex in prepareAsync on Direct Play via getTotalTrackInfo + setSelectTrack', async () => {
+      const driver = new TizenAvplayDriver();
+      await driver.init(
+        document.createElement('div'),
+        'http://localhost:8492/api/v1/stream/42',
+        0,
+        { initialAudioIndex: 1, initialAudioStreamIndex: 2 }
+      );
+
+      expect(mockAvplay.getTotalTrackInfo).toHaveBeenCalledTimes(1);
+      expect(mockAvplay.setSelectTrack).toHaveBeenCalledWith('AUDIO', 2);
+
+      // Should NOT call setSelectTrack on HLS even if initialAudioIndex > 0
+      mockAvplay.getTotalTrackInfo.mockClear();
+      mockAvplay.setSelectTrack.mockClear();
+      const hlsDriver = new TizenAvplayDriver();
+      await hlsDriver.init(
+        document.createElement('div'),
+        'http://localhost:8492/api/v1/media/42/hls/master.m3u8?audio_track=1',
+        0,
+        { initialAudioIndex: 1, initialAudioStreamIndex: 2 }
+      );
+      expect(mockAvplay.getTotalTrackInfo).not.toHaveBeenCalled();
+      expect(mockAvplay.setSelectTrack).not.toHaveBeenCalled();
+    });
+
+    it('switches tracks natively in PLAYING state, re-applies on Direct Play restore(), and guards HLS/error states', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        mockAvplay.suspend = vi.fn();
+        mockAvplay.restore = vi.fn();
+        mockAvplay.setSilentSubtitle = vi.fn();
+
+        const driver = new TizenAvplayDriver();
+        // Not ready yet -> returns false
+        expect(driver.selectAudioTrack(1, 2)).toBe(false);
+
+        await driver.init(
+          document.createElement('div'),
+          'http://localhost:8492/api/v1/stream/42',
+          0
+        );
+        expect(mockAvplay.setSelectTrack).not.toHaveBeenCalled();
+
+        // Switch natively in PLAYING state
+        expect(driver.selectAudioTrack(1, 2)).toBe(true);
+        expect(mockAvplay.setSelectTrack).toHaveBeenCalledWith('AUDIO', 2);
+
+        // Suspend + restore(30000, false) re-applies selected Direct Play audio track
+        mockAvplay.setSelectTrack.mockClear();
+        driver.suspend();
+        expect(driver.selectAudioTrack(0, 1)).toBe(false); // suspended guard
+        expect(driver.restore(30000, false)).toBe(true);
+        expect(mockAvplay.setSelectTrack).toHaveBeenCalledWith('AUDIO', 2);
+
+        // Switch back to Track 0
+        expect(driver.selectAudioTrack(0, 1)).toBe(true);
+        expect(mockAvplay.setSelectTrack).toHaveBeenLastCalledWith('AUDIO', 1);
+
+        // Fallback to streamIndex match when ordinal exceeds audioEntries length
+        expect(driver.selectAudioTrack(5, 2)).toBe(true);
+        expect(mockAvplay.setSelectTrack).toHaveBeenLastCalledWith('AUDIO', 2);
+
+        // Out-of-bounds ordinal and no streamIndex match -> returns false
+        expect(driver.selectAudioTrack(5, 99)).toBe(false);
+
+        // Non-array getTotalTrackInfo or empty index string -> returns false safely
+        const origGetTotalTrackInfo = mockAvplay.getTotalTrackInfo;
+        mockAvplay.getTotalTrackInfo = vi.fn(() => null);
+        expect(driver.selectAudioTrack(0, 0)).toBe(false);
+        mockAvplay.getTotalTrackInfo = vi.fn(() => [{ index: '', type: 'AUDIO' }]);
+        expect(driver.selectAudioTrack(0, 0)).toBe(false);
+        mockAvplay.getTotalTrackInfo = origGetTotalTrackInfo;
+
+        // When setSelectTrack throws -> catches and returns false
+        mockAvplay.setSelectTrack = vi.fn(() => {
+          throw new Error('AVPLAY_ERR_INVALID_OPERATION');
+        });
+        expect(driver.selectAudioTrack(1, 2)).toBe(false);
+        expect(warnSpy).toHaveBeenCalled();
+
+        // After destroy -> returns false
+        driver.destroy();
+        expect(driver.selectAudioTrack(1, 2)).toBe(false);
+
+        // HLS stream -> returns false
+        mockAvplay.setSelectTrack = vi.fn();
+        const hlsDriver = new TizenAvplayDriver();
+        await hlsDriver.init(
+          document.createElement('div'),
+          'http://localhost:8492/api/v1/media/42/hls/master.m3u8',
+          0
+        );
+        expect(hlsDriver.selectAudioTrack(1, 2)).toBe(false);
+        expect(mockAvplay.setSelectTrack).not.toHaveBeenCalled();
       } finally {
         warnSpy.mockRestore();
       }

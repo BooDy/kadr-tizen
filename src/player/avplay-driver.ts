@@ -262,6 +262,78 @@ export class TizenAvplayDriver implements PlayerDriver {
   private seekSafetyTimer: ReturnType<typeof setTimeout> | null = null;
   private queuedSeek: { targetMs: number; onComplete?: () => void } | null = null;
   private awaitingHlsStartSync = false;
+  private selectedAudioIndex = 0;
+  private selectedStreamIndex?: number;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private applyNativeAudioSelection(avplay: any, audioIndex: number, streamIndex?: number): boolean {
+    if (
+      this.isDestroyed ||
+      this.currentIsHls ||
+      !avplay ||
+      typeof avplay.getTotalTrackInfo !== 'function' ||
+      typeof avplay.setSelectTrack !== 'function'
+    ) {
+      return false;
+    }
+
+    if (!Number.isFinite(audioIndex) || audioIndex < 0) {
+      return false;
+    }
+    const targetOrdinal = Math.floor(audioIndex);
+
+    try {
+      const rawTracks = avplay.getTotalTrackInfo();
+      if (!Array.isArray(rawTracks)) {
+        return false;
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const audioEntries = rawTracks.filter((entry: any) => {
+        return entry && typeof entry === 'object' && String(entry.type ?? '').toUpperCase() === 'AUDIO';
+      });
+      if (audioEntries.length === 0) {
+        return false;
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let target: any =
+        targetOrdinal >= 0 && targetOrdinal < audioEntries.length
+          ? audioEntries[targetOrdinal]
+          : undefined;
+
+      if (!target && streamIndex !== undefined && Number.isFinite(streamIndex)) {
+        const targetStreamIdx = Math.floor(streamIndex);
+        target = audioEntries.find(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (entry: any) => this.parseAvplayTrackIndex(entry) === targetStreamIdx
+        );
+      }
+
+      const nativeTrackIndex = this.parseAvplayTrackIndex(target);
+      if (nativeTrackIndex === null) {
+        return false;
+      }
+
+      avplay.setSelectTrack('AUDIO', nativeTrackIndex);
+      return true;
+    } catch (e) {
+      console.warn('[AVPlay] setSelectTrack AUDIO failed:', e);
+      return false;
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private parseAvplayTrackIndex(entry: any): number | null {
+    if (!entry || entry.index === undefined || entry.index === null) {
+      return null;
+    }
+    if (typeof entry.index === 'string' && entry.index.trim() === '') {
+      return null;
+    }
+    const parsed = Number(entry.index);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private applyLetterboxDisplayMode(avplay: any): void {
@@ -421,6 +493,18 @@ export class TizenAvplayDriver implements PlayerDriver {
       this.mediaHints = hints;
     }
 
+    this.selectedAudioIndex =
+      typeof this.mediaHints?.initialAudioIndex === 'number' &&
+      Number.isFinite(this.mediaHints.initialAudioIndex) &&
+      this.mediaHints.initialAudioIndex >= 0
+        ? Math.floor(this.mediaHints.initialAudioIndex)
+        : 0;
+    this.selectedStreamIndex =
+      typeof this.mediaHints?.initialAudioStreamIndex === 'number' &&
+      Number.isFinite(this.mediaHints.initialAudioStreamIndex)
+        ? Math.floor(this.mediaHints.initialAudioStreamIndex)
+        : undefined;
+
     this.isPreparing = false;
     this.isSuspended = false;
     this.isReady = false;
@@ -565,6 +649,13 @@ export class TizenAvplayDriver implements PlayerDriver {
         this.isReady = true;
         silenceNativeSubtitles();
         this.applyStreamAspectLayout(avplay);
+        if (!isHls && this.selectedAudioIndex > 0) {
+          this.applyNativeAudioSelection(
+            avplay,
+            this.selectedAudioIndex,
+            this.selectedStreamIndex
+          );
+        }
 
         const queued = this.queuedSeek;
         this.queuedSeek = null;
@@ -652,6 +743,19 @@ export class TizenAvplayDriver implements PlayerDriver {
 
   setMediaHints(hints: VideoLayoutHints | undefined): void {
     this.mediaHints = hints;
+    if (
+      !this.isReady &&
+      typeof hints?.initialAudioIndex === 'number' &&
+      Number.isFinite(hints.initialAudioIndex) &&
+      hints.initialAudioIndex >= 0
+    ) {
+      this.selectedAudioIndex = Math.floor(hints.initialAudioIndex);
+      this.selectedStreamIndex =
+        typeof hints.initialAudioStreamIndex === 'number' &&
+        Number.isFinite(hints.initialAudioStreamIndex)
+          ? Math.floor(hints.initialAudioStreamIndex)
+          : undefined;
+    }
     if (this.isDestroyed || !this.isReady || this.currentIsHls || this.hasResolvedStreamRotation) {
       return;
     }
@@ -728,6 +832,13 @@ export class TizenAvplayDriver implements PlayerDriver {
         // Ignored
       }
       this.applyStreamAspectLayout(avplay);
+      if (!this.currentIsHls && this.selectedAudioIndex > 0) {
+        this.applyNativeAudioSelection(
+          avplay,
+          this.selectedAudioIndex,
+          this.selectedStreamIndex
+        );
+      }
       if (autoPlay) {
         avplay.play?.();
         this.applyLetterboxDisplayMode(avplay);
@@ -857,6 +968,30 @@ export class TizenAvplayDriver implements PlayerDriver {
     }
   }
 
+  selectAudioTrack(audioIndex: number, streamIndex?: number): boolean {
+    if (this.isDestroyed || this.isSuspended || !this.isReady || this.currentIsHls) {
+      return false;
+    }
+    if (!Number.isFinite(audioIndex) || audioIndex < 0) {
+      return false;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const avplay = (window as any).webapis?.avplay;
+    if (!avplay) {
+      return false;
+    }
+    const switched = this.applyNativeAudioSelection(avplay, audioIndex, streamIndex);
+    if (!switched) {
+      return false;
+    }
+    this.selectedAudioIndex = Math.floor(audioIndex);
+    this.selectedStreamIndex =
+      streamIndex !== undefined && Number.isFinite(streamIndex)
+        ? Math.floor(streamIndex)
+        : undefined;
+    return true;
+  }
+
   setSubtitleTrack(_trackUrl: string | null): void {
     // Handled via AVPlay or WebVTT overlay
   }
@@ -871,6 +1006,8 @@ export class TizenAvplayDriver implements PlayerDriver {
     this.clearSeekInFlight();
     this.queuedSeek = null;
     this.awaitingHlsStartSync = false;
+    this.selectedAudioIndex = 0;
+    this.selectedStreamIndex = undefined;
     this.timeCallback = undefined;
     this.stateCallback = undefined;
     this.errorCallback = undefined;

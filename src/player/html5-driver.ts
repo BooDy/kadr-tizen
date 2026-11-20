@@ -207,6 +207,28 @@ export class Html5PlayerDriver implements PlayerDriver {
     }
   }
 
+  selectAudioTrack(audioIndex: number): boolean {
+    if (!this.video) return false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const audioTracks = (this.video as any).audioTracks;
+    if (!audioTracks || typeof audioTracks.length !== 'number') {
+      return false;
+    }
+    if (!Number.isFinite(audioIndex) || audioIndex < 0) {
+      return false;
+    }
+    const targetIdx = Math.floor(audioIndex);
+    if (targetIdx >= audioTracks.length) {
+      return false;
+    }
+    for (let i = 0; i < audioTracks.length; i++) {
+      if (audioTracks[i]) {
+        audioTracks[i].enabled = i === targetIdx;
+      }
+    }
+    return true;
+  }
+
   setSubtitleTrack(trackUrl: string | null): void {
     if (!this.video) return;
     const existing = this.video.querySelectorAll('track');

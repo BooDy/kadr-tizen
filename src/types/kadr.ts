@@ -80,7 +80,19 @@ export interface MediaItemDetail {
     audio_codec?: string;
     audio_channels?: number;
     container?: string;
+    audio_tracks?: AudioStreamInfo[];
   };
+}
+
+export interface AudioStreamInfo {
+  audio_index: number;
+  stream_index: number;
+  codec: string;
+  channels?: number;
+  language: string;
+  title?: string;
+  is_default?: boolean;
+  is_commentary?: boolean;
 }
 
 export interface PlaybackSession {

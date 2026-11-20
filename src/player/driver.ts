@@ -12,6 +12,8 @@ export interface VideoLayoutHints {
   width?: number;
   height?: number;
   rotation?: number;
+  initialAudioIndex?: number;
+  initialAudioStreamIndex?: number;
 }
 
 export interface PlayerDriver {
@@ -34,6 +36,7 @@ export interface PlayerDriver {
   seekTo(ms: number, onComplete?: () => void): void;
   destroy(): void;
   setSubtitleTrack(trackUrl: string | null): void;
+  selectAudioTrack?(audioIndex: number, streamIndex?: number): boolean;
   setMediaHints?(hints: VideoLayoutHints | undefined): void;
   onDisplayRectChange?(callback: (rect: VideoDisplayRect) => void): void;
   onTimeUpdate(callback: (posMs: number, durationMs: number) => void): void;

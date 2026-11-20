@@ -17,6 +17,7 @@ export interface PlaybackStreamOptions {
   container?: string;
   startSeconds?: number;
   maxHeight?: number;
+  audioTrackIndex?: number;
 }
 
 export interface PlaybackUrlResult {
@@ -135,6 +136,13 @@ export function getPlaybackUrl(options: PlaybackStreamOptions): PlaybackUrlResul
     }
     if (options.startSeconds !== undefined && options.startSeconds > 0) {
       params.set('start_time', options.startSeconds.toFixed(3));
+    }
+    if (
+      options.audioTrackIndex !== undefined &&
+      Number.isFinite(options.audioTrackIndex) &&
+      Math.floor(options.audioTrackIndex) > 0
+    ) {
+      params.set('audio_track', String(Math.floor(options.audioTrackIndex)));
     }
   }
 
