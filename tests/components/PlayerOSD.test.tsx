@@ -777,4 +777,113 @@ describe('PlayerOSD', () => {
       }
     });
   });
+
+  describe('Multi-Audio Track Selector Button', () => {
+    const twoAudioTracks = [
+      {
+        audio_index: 0,
+        stream_index: 1,
+        codec: 'aac',
+        channels: 2,
+        language: 'jpn',
+        is_default: true,
+        is_commentary: false,
+      },
+      {
+        audio_index: 1,
+        stream_index: 2,
+        codec: 'eac3',
+        channels: 6,
+        language: 'eng',
+        is_default: false,
+        is_commentary: false,
+      },
+    ];
+
+    it('hides audio-button when audioTracks is undefined or has length 1', () => {
+      const { queryByTestId, rerender } = render(
+        <PlayerOSD
+          title="Spirited Away"
+          playerState="playing"
+          positionMs={10000}
+          durationMs={120000}
+          visible={true}
+          onOpenAudioModal={vi.fn()}
+        />
+      );
+
+      expect(queryByTestId('audio-button')).not.toBeInTheDocument();
+
+      rerender(
+        <PlayerOSD
+          title="Spirited Away"
+          playerState="playing"
+          positionMs={10000}
+          durationMs={120000}
+          visible={true}
+          audioTracks={[twoAudioTracks[0]]}
+          selectedAudioTrackIndex={0}
+          onOpenAudioModal={vi.fn()}
+        />
+      );
+
+      expect(queryByTestId('audio-button')).not.toBeInTheDocument();
+    });
+
+    it('renders audio-button immediately before subtitles-button with active language tag, focus ring, and zero gap-* classes', () => {
+      const onOpenAudioModal = vi.fn();
+      const { container, getByTestId } = render(
+        <PlayerOSD
+          title="Spirited Away"
+          playerState="paused"
+          positionMs={10000}
+          durationMs={120000}
+          visible={true}
+          audioTracks={twoAudioTracks}
+          selectedAudioTrackIndex={0}
+          onOpenAudioModal={onOpenAudioModal}
+          subtitles={[
+            {
+              id: 1,
+              media_item_id: 1,
+              source: 'external',
+              language: 'eng',
+              title: 'English',
+              format: 'vtt',
+              is_default: true,
+              is_forced: false,
+              stream_url: '/api/v1/subtitles/1/stream.vtt',
+            },
+          ]}
+          focusedItem="audio"
+        />
+      );
+
+      const audioBtn = getByTestId('audio-button');
+      const subtitlesBtn = getByTestId('subtitles-button');
+
+      expect(audioBtn).toBeInTheDocument();
+      expect(audioBtn).toHaveAttribute('id', 'btn-audio');
+      expect(audioBtn).toHaveTextContent('AUDIO');
+      expect(audioBtn).toHaveTextContent('Audio');
+      expect(audioBtn).toHaveTextContent('JPN');
+      expect(audioBtn.className).toContain('tv-focus-ring');
+      expect(
+        audioBtn.compareDocumentPosition(subtitlesBtn) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+
+      fireEvent.click(audioBtn);
+      expect(onOpenAudioModal).toHaveBeenCalledTimes(1);
+
+      fireEvent.keyDown(audioBtn, { key: 'Enter', keyCode: TVKeys.ENTER });
+      expect(onOpenAudioModal).toHaveBeenCalledTimes(2);
+
+      const elements = Array.from(container.querySelectorAll('*'));
+      for (const el of elements) {
+        if (typeof el.className === 'string') {
+          expect(el.className).not.toMatch(/\bgap-/);
+        }
+      }
+    });
+  });
 });

@@ -76,6 +76,9 @@ export function isNodeInTrap(nodeGroupId: string, activeTrap: string | null | un
   if (activeTrap === 'image-viewer-modal') {
     return nodeGroupId.startsWith('image-viewer-');
   }
+  if (activeTrap === 'audio-modal') {
+    return nodeGroupId === 'audio-modal' || nodeGroupId.startsWith('audio-');
+  }
   if (activeTrap === 'pin-pad-modal' || activeTrap === 'pin-modal' || activeTrap === 'tv-modal') {
     return nodeGroupId === 'keypad' || nodeGroupId.startsWith('pin-');
   }

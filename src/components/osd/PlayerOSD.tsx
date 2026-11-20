@@ -2,12 +2,13 @@ import { useState, useEffect, useMemo } from 'react';
 import { SkipBack, SkipForward } from 'lucide-react';
 import { PlayerState } from '../../player/driver';
 import { StoryboardTileCrop } from '../../player/storyboard';
-import { SubtitleTrack } from '../../types/kadr';
+import { AudioStreamInfo, SubtitleTrack } from '../../types/kadr';
+import { formatAudioTrackLabel } from '../../player/audioPreferences';
 import { formatSubtitleTrackLabel } from '../../player/subtitles';
 import { TVKeys } from '../../navigation/keys';
 import { SeekThumbnailPreview } from './SeekThumbnailPreview';
 
-export type PlayerOsdFocusItem = 'progress' | 'prev' | 'next' | 'subtitles';
+export type PlayerOsdFocusItem = 'progress' | 'prev' | 'next' | 'audio' | 'subtitles';
 
 export interface PlayerOSDProps {
   title: string;
@@ -20,6 +21,9 @@ export interface PlayerOSDProps {
   seekPreviewMs?: number;
   spriteCrop?: StoryboardTileCrop | null;
   frameUrl?: string | null;
+  audioTracks?: AudioStreamInfo[];
+  selectedAudioTrackIndex?: number;
+  onOpenAudioModal?: () => void;
   subtitles?: SubtitleTrack[];
   selectedSubtitleId?: number | null;
   onSelectSubtitle?: (id: number | null) => void;
@@ -51,6 +55,9 @@ export function PlayerOSD({
   seekPreviewMs,
   spriteCrop = null,
   frameUrl = null,
+  audioTracks,
+  selectedAudioTrackIndex,
+  onOpenAudioModal,
   subtitles,
   selectedSubtitleId,
   onSelectSubtitle,
@@ -78,6 +85,20 @@ export function PlayerOSD({
   useEffect(() => {
     onPopupOpenChange?.(isPopupOpen);
   }, [isPopupOpen, onPopupOpenChange]);
+
+  const hasAudio = Boolean(audioTracks && audioTracks.length >= 2);
+  const activeAudioLanguageTag = useMemo(() => {
+    if (!audioTracks || audioTracks.length === 0) return '';
+    const activeTrack =
+      (selectedAudioTrackIndex !== undefined
+        ? audioTracks.find((t) => t.audio_index === selectedAudioTrackIndex)
+        : undefined) ??
+      audioTracks.find((t) => t.is_default) ??
+      audioTracks[0];
+    if (!activeTrack) return '';
+    const { languageBadge } = formatAudioTrackLabel(activeTrack);
+    return languageBadge && languageBadge !== 'UND' ? languageBadge : '';
+  }, [audioTracks, selectedAudioTrackIndex]);
 
   const hasSubtitles = Boolean(
     (subtitles && subtitles.length > 0) || onOpenSubtitleModal || onOpenSubtitles
@@ -174,7 +195,7 @@ export function PlayerOSD({
 
   const isPrevDisabled = hasPrevious === false;
   const isNextDisabled = hasNext === false;
-  const hasControlsRow = Boolean(onPrevious || onNext || hasSubtitles);
+  const hasControlsRow = Boolean(onPrevious || onNext || hasAudio || hasSubtitles);
   const showLiveMode = Boolean(isLive || durationMs < 0);
 
   const safeDurationMs = Number.isFinite(durationMs) && durationMs > 0 ? durationMs : 0;
@@ -287,7 +308,7 @@ export function PlayerOSD({
                   }
                 }}
                 className={`pointer-events-auto px-6 py-3 rounded-2xl font-bold text-xl flex items-center transition-all duration-150 outline-none select-none ${
-                  onNext || hasSubtitles ? 'mr-4' : ''
+                  onNext || hasAudio || hasSubtitles ? 'mr-4' : ''
                 } ${
                   focusedItem === 'prev' && !isPrevDisabled
                     ? 'bg-[#4A1616] text-white tv-focus-ring'
@@ -318,7 +339,7 @@ export function PlayerOSD({
                   }
                 }}
                 className={`pointer-events-auto px-6 py-3 rounded-2xl font-bold text-xl flex items-center transition-all duration-150 outline-none select-none ${
-                  hasSubtitles ? 'mr-4' : ''
+                  hasAudio || hasSubtitles ? 'mr-4' : ''
                 } ${
                   focusedItem === 'next' && !isNextDisabled
                     ? 'bg-[#4A1616] text-white tv-focus-ring'
@@ -331,6 +352,39 @@ export function PlayerOSD({
               >
                 <SkipForward className="w-5 h-5 mr-3" />
                 <span>Next</span>
+              </button>
+            )}
+
+            {hasAudio && (
+              <button
+                id="btn-audio"
+                type="button"
+                data-testid="audio-button"
+                aria-label="Audio"
+                onClick={() => onOpenAudioModal?.()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.keyCode === TVKeys.ENTER) {
+                    e.preventDefault();
+                    onOpenAudioModal?.();
+                  }
+                }}
+                className={`pointer-events-auto px-6 py-3 rounded-2xl font-bold text-xl flex items-center cursor-pointer transition-all duration-150 outline-none select-none ${
+                  hasSubtitles ? 'mr-4' : ''
+                } ${
+                  focusedItem === 'audio'
+                    ? 'bg-[#4A1616] text-white tv-focus-ring'
+                    : 'bg-[#3B1111] text-[#F5E5E5] border border-[rgba(245,229,229,0.08)] hover:bg-[#4A1616]'
+                }`}
+              >
+                <span className="font-bold border border-current px-2 py-0.5 rounded text-sm mr-3">
+                  AUDIO
+                </span>
+                <span>Audio</span>
+                {activeAudioLanguageTag && (
+                  <span className="ml-2 text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-white/10 text-[#FFB800]">
+                    {activeAudioLanguageTag}
+                  </span>
+                )}
               </button>
             )}
 

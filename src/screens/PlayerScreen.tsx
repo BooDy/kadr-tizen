@@ -1734,7 +1734,7 @@ export function PlayerScreen({
         }
         if (osdFocusedItemRef.current !== 'progress') {
           e.preventDefault();
-          const controls: Array<'prev' | 'next' | 'subtitles'> = [];
+          const controls: PlayerOsdFocusItem[] = [];
           if (onPreviousRef.current && hasPreviousRef.current) controls.push('prev');
           if (onNextRef.current && hasNextRef.current) controls.push('next');
           controls.push('subtitles');
@@ -1755,7 +1755,7 @@ export function PlayerScreen({
         }
         if (osdFocusedItemRef.current !== 'progress') {
           e.preventDefault();
-          const controls: Array<'prev' | 'next' | 'subtitles'> = [];
+          const controls: PlayerOsdFocusItem[] = [];
           if (onPreviousRef.current && hasPreviousRef.current) controls.push('prev');
           if (onNextRef.current && hasNextRef.current) controls.push('next');
           controls.push('subtitles');
