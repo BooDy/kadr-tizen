@@ -772,4 +772,197 @@ describe('PlayerScreen multi-audio discovery, switching & preference persistence
       delete (document as any).hidden;
     }
   });
+
+  it('stays on Direct Play and calls avplay.setSelectTrack when fetchItemAudioTracks resolves mid-prepareAsync', async () => {
+    localStorage.setItem(
+      AUDIO_PREFERENCE_STORAGE_KEY,
+      JSON.stringify({ mode: 'language', language: 'eng', preferCommentary: false })
+    );
+
+    let triggerPrepareOk: (() => void) | undefined;
+    mockAvplay.prepareAsync = vi.fn((onOk?: () => void) => {
+      triggerPrepareOk = onOk;
+    });
+
+    const directPlayTracks: AudioStreamInfo[] = [
+      {
+        audio_index: 0,
+        stream_index: 1,
+        codec: 'aac',
+        channels: 2,
+        language: 'jpn',
+        is_default: true,
+        is_commentary: false,
+      },
+      {
+        audio_index: 1,
+        stream_index: 2,
+        codec: 'ac3',
+        channels: 6,
+        language: 'eng',
+        is_default: false,
+        is_commentary: false,
+      },
+    ];
+
+    let resolveAudioTracks!: (tracks: AudioStreamInfo[]) => void;
+    vi.spyOn(audioApi, 'fetchItemAudioTracks').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveAudioTracks = resolve;
+        })
+    );
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : String(input);
+      if (url.includes('/hls/master.m3u8')) {
+        return {
+          ok: false,
+          status: 409,
+          json: async () => ({ error: 'PLAYBACK_DIRECT_ONLY' }),
+        } as unknown as Response;
+      }
+      return { ok: true, status: 206, json: async () => ({}) } as unknown as Response;
+    });
+
+    const client = new ApiClient('http://localhost:8492');
+    render(
+      <FocusProvider>
+        <PlayerScreen
+          client={client}
+          itemId={501}
+          title="Async Prepare Direct Play"
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          technical={{ video_codec: 'h264', audio_codec: 'aac', container: 'mp4' }}
+          onExit={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    await flushAsync();
+
+    // Direct stream opened and prepareAsync is still in flight
+    expect(mockAvplay.open).toHaveBeenCalledWith(
+      'http://localhost:8492/api/v1/stream/501?token=test-token'
+    );
+    expect(triggerPrepareOk).toBeDefined();
+    fetchSpy.mockClear();
+    mockAvplay.open.mockClear();
+
+    // Audio tracks resolve while prepareAsync has NOT completed yet
+    await act(async () => {
+      resolveAudioTracks(directPlayTracks);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // Must NOT fall back to HLS while prepareAsync is in flight
+    expect(
+      fetchSpy.mock.calls.some(([u]) => String(u).includes('/hls/master.m3u8'))
+    ).toBe(false);
+    expect(mockAvplay.open).not.toHaveBeenCalled();
+
+    // Now prepareAsync completes -> applies Track 1 (stream_index 2) and stays on Direct Play
+    act(() => {
+      triggerPrepareOk?.();
+    });
+    await flushAsync();
+
+    expect(mockAvplay.setSelectTrack).toHaveBeenCalledWith('AUDIO', 2);
+    expect(
+      fetchSpy.mock.calls.some(([u]) => String(u).includes('/hls/master.m3u8'))
+    ).toBe(false);
+    expect(mockAvplay.open).not.toHaveBeenCalled();
+  });
+
+  it('reloads Html5PlayerDriver HLS stream with audio_track=1 on foreground return when tracks resolved while hidden', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (window as any).webapis;
+    const playSpy = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    const pauseSpy = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+
+    let hidden = false;
+    Object.defineProperty(document, 'hidden', {
+      configurable: true,
+      get: () => hidden,
+    });
+
+    try {
+      localStorage.setItem(
+        AUDIO_PREFERENCE_STORAGE_KEY,
+        JSON.stringify({ mode: 'language', language: 'eng', preferCommentary: false })
+      );
+
+      let resolveAudioTracks!: (tracks: AudioStreamInfo[]) => void;
+      vi.spyOn(audioApi, 'fetchItemAudioTracks').mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveAudioTracks = resolve;
+          })
+      );
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => '#EXTM3U\n',
+      } as unknown as Response);
+
+      const client = new ApiClient('http://localhost:8492');
+      const { unmount } = render(
+        <FocusProvider>
+          <PlayerScreen
+            client={client}
+            itemId={601}
+            title="HTML5 Hidden HLS Sync"
+            serverUrl="http://localhost:8492"
+            token="test-token"
+            technical={{ video_codec: 'h264', audio_codec: 'dts', container: 'mkv' }}
+            onExit={vi.fn()}
+          />
+        </FocusProvider>
+      );
+
+      await flushAsync();
+      expect(
+        fetchSpy.mock.calls.some(([u]) => String(u).includes('/hls/master.m3u8'))
+      ).toBe(true);
+
+      act(() => {
+        hidden = true;
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      fetchSpy.mockClear();
+
+      // Resolve audio tracks while hidden on Html5PlayerDriver HLS
+      await act(async () => {
+        resolveAudioTracks(DUAL_AUDIO_TRACKS);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(
+        fetchSpy.mock.calls.some(([u]) => String(u).includes('/hls/master.m3u8'))
+      ).toBe(false);
+
+      // Foreground return -> even though Html5PlayerDriver.restore() returns true for HLS,
+      // PlayerScreen must reload HLS with audio_track=1
+      await act(async () => {
+        hidden = false;
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await flushAsync();
+
+      const hlsReloadCall = fetchSpy.mock.calls.find(([u]) =>
+        String(u).includes('/hls/master.m3u8')
+      );
+      expect(hlsReloadCall).toBeDefined();
+      expect(String(hlsReloadCall![0])).toContain('audio_track=1');
+
+      unmount();
+    } finally {
+      playSpy.mockRestore();
+      pauseSpy.mockRestore();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete (document as any).hidden;
+    }
+  });
 });

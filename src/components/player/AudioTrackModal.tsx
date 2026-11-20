@@ -67,7 +67,7 @@ function AudioModalButton({
 
 /**
  * Full-screen TV-accessible modal for selecting among embedded audio tracks.
- * Uses physical margins (no flex `gap-*`) and avoids `backdrop-blur-*` for Tizen AVPlay performance.
+ * Uses physical margins instead of CSS flex gaps and avoids `backdrop-blur-*` for Tizen AVPlay performance.
  */
 export function AudioTrackModal({
   isOpen,

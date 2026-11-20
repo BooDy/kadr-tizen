@@ -285,6 +285,7 @@ export function PlayerScreen({
   const isHlsRef = useRef(useHls);
   const sessionResumeMsRef = useRef<number>(0);
   const isDriverInitializedRef = useRef<boolean>(false);
+  const isDriverReadyRef = useRef<boolean>(false);
 
   const streamStartOffsetMsRef = useRef(0);
   const rawStreamDurationRef = useRef(0);
@@ -354,7 +355,7 @@ export function PlayerScreen({
         triggerHlsAudioReload(positionMsRef.current);
         return;
       }
-      if (isDriverInitializedRef.current) {
+      if (isDriverReadyRef.current) {
         const switched =
           driverRef.current?.selectAudioTrack?.(audioIndex, chosen?.stream_index) ?? false;
         if (!switched) {
@@ -364,6 +365,8 @@ export function PlayerScreen({
     },
     [isBrowserEnv, triggerHlsAudioReload]
   );
+  const syncDirectPlayAudioOrFallbackRef = useRef(syncDirectPlayAudioOrFallback);
+  syncDirectPlayAudioOrFallbackRef.current = syncDirectPlayAudioOrFallback;
 
   const applyDiscoveredAudioTracks = useCallback(
     (tracks: AudioStreamInfo[]) => {
@@ -1183,6 +1186,25 @@ export function PlayerScreen({
     const driver = createPlayerDriver(forceHtml5);
     driverRef.current = driver;
     isDriverInitializedRef.current = false;
+    isDriverReadyRef.current = false;
+
+    const markDriverReady = () => {
+      if (isDriverReadyRef.current) return;
+      isDriverReadyRef.current = true;
+      if (
+        !isHls &&
+        selectedAudioTrackIndexRef.current > 0 &&
+        !hlsTranscodeFailedRef.current
+      ) {
+        const activeIdx = selectedAudioTrackIndexRef.current;
+        const chosen = audioTracksRef.current.find((t) => t.audio_index === activeIdx);
+        syncDirectPlayAudioOrFallbackRef.current(
+          activeIdx,
+          chosen,
+          technicalInfoRef.current ?? technicalPropRef.current
+        );
+      }
+    };
 
     const activeTech = technicalInfoRef.current ?? technical;
     driver.setMediaHints?.(
@@ -1263,6 +1285,7 @@ export function PlayerScreen({
         setPlayerState('paused');
         osdDismissedByUserRef.current = false;
         setShowOSD(true);
+        markDriverReady();
         return;
       }
       setPlayerState(state);
@@ -1274,6 +1297,9 @@ export function PlayerScreen({
         restoreResumeMsRef.current = null;
         hasPlayedCurrentStream = true;
         clearTimeout(bufferWatchdog);
+      }
+      if (state === 'playing' || state === 'paused') {
+        markDriverReady();
       }
       if (state === 'ended') {
         if (!isLiveStreamRef.current && durationMsRef.current > 0) {
@@ -1383,21 +1409,11 @@ export function PlayerScreen({
           driverName: driver.name || (forceHtml5 ? 'HTML5 Video' : 'Tizen AVPlay'),
         });
       };
-      if (!isHls && driver.name === 'HTML5 Video' && activeAudioIndex > 0 && !hlsTranscodeFailedRef.current) {
+      if (driver.name === 'HTML5 Video') {
         initPromise
           .then(() => {
             if (!isMounted || driverRef.current !== driver) return;
-            const activeTrack = audioTracksRef.current.find(
-              (t) => t.audio_index === selectedAudioTrackIndexRef.current
-            );
-            const switched =
-              driver.selectAudioTrack?.(
-                selectedAudioTrackIndexRef.current,
-                activeTrack?.stream_index
-              ) ?? false;
-            if (!switched) {
-              triggerHlsAudioReload();
-            }
+            markDriverReady();
           })
           .catch(handleInitError);
       } else {
@@ -1566,6 +1582,7 @@ export function PlayerScreen({
     return () => {
       isMounted = false;
       isDriverInitializedRef.current = false;
+      isDriverReadyRef.current = false;
       probeAbortController.abort();
       clearTimeout(bufferWatchdog);
 
@@ -1787,8 +1804,10 @@ export function PlayerScreen({
             activeTech?.container,
             forceHtml5Ref.current || isBrowserEnv
           );
+        const needsHlsAudioReload =
+          needsHlsForAudio || (pendingAudioSync && isHlsRef.current && activeAudioIdx > 0);
 
-        if (needsHlsForAudio) {
+        if (needsHlsAudioReload) {
           switchToHlsOnForeground();
         } else {
           const handled = driverRef.current?.restore?.(targetPos, autoPlay) ?? false;
