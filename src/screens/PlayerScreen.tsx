@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo, useContext } from 'react';
-import { createPlayerDriver, PlayerDriver, PlayerState } from '../player/driver';
+import { createPlayerDriver, PlayerDriver, PlayerState, VideoLayoutHints } from '../player/driver';
 import { ErrorQRCode, DiagnosticPayload } from '../components/player/ErrorQRCode';
 import {
   KNOWN_COMPATIBILITY_INFO,
@@ -10,18 +10,25 @@ import {
 } from '../player/compatibility';
 import { reportPlaybackProgress } from '../api/playback';
 import { ApiClient } from '../api/client';
+import { fetchItemAudioTracks } from '../api/audio';
 import { fetchItemSubtitles } from '../api/subtitles';
 import { fetchMediaItem, MediaItemDetail } from '../api/items';
-import { SubtitleTrack } from '../types/kadr';
+import { AudioStreamInfo, SubtitleTrack } from '../types/kadr';
 import { PlaybackSessionManager } from '../player/session';
 import { TVKeys } from '../navigation/keys';
 import { FocusContext } from '../navigation/FocusContext';
 import { PlayerOSD, PlayerOsdFocusItem } from '../components/osd/PlayerOSD';
+import { AudioTrackModal } from '../components/player/AudioTrackModal';
 import { SubtitleModal } from '../components/player/SubtitleModal';
 import { SubtitleOverlay } from '../components/player/SubtitleOverlay';
 import { findActiveCueText } from '../player/subtitles';
 import { useStoryboard } from '../player/storyboard';
 import { useSubtitleCues } from '../player/useSubtitleCues';
+import {
+  loadAudioPreference,
+  pickInitialAudioTrackIndex,
+  saveAudioPreference,
+} from '../player/audioPreferences';
 import {
   clampSubtitleDelay,
   loadSubtitleDelays,
@@ -81,6 +88,30 @@ export interface PlayerScreenProps {
   onPrevious?: () => void;
   onExit: (snapshot?: PlaybackProgressSnapshot) => void;
   onEpisodeProgress?: (snapshot: PlaybackProgressSnapshot) => void;
+}
+
+function buildMediaHints(
+  tech: MediaItemDetail['technical'] | undefined,
+  audioTrackIndex: number,
+  audioTracks: AudioStreamInfo[]
+): VideoLayoutHints | undefined {
+  const hints: VideoLayoutHints = tech
+    ? {
+        resolution: tech.resolution,
+        width: tech.width,
+        height: tech.height,
+        rotation: tech.rotation,
+      }
+    : {};
+  if (audioTrackIndex > 0) {
+    const activeTrack = audioTracks.find((t) => t.audio_index === audioTrackIndex);
+    hints.initialAudioIndex = audioTrackIndex;
+    hints.initialAudioStreamIndex = activeTrack?.stream_index;
+  }
+  if (!tech && audioTrackIndex <= 0) {
+    return undefined;
+  }
+  return hints;
 }
 
 function canBypassHlsForAudioLessVideo(
@@ -149,6 +180,8 @@ export function PlayerScreen({
 
   const [playerState, setPlayerState] = useState<PlayerState>('buffering');
   const [positionMs, setPositionMs] = useState(initialResume);
+  const positionMsRef = useRef(positionMs);
+  positionMsRef.current = positionMs;
   const [durationMs, setDurationMs] = useState(initialKnownDurationMs);
   const [showOSD, setShowOSD] = useState(true);
   const showOSDRef = useRef(showOSD);
@@ -190,14 +223,40 @@ export function PlayerScreen({
     !(window as any).tizen &&
     (typeof process === 'undefined' || process.env?.NODE_ENV !== 'test');
   const [forceHtml5, setForceHtml5] = useState(false);
+  const forceHtml5Ref = useRef(forceHtml5);
+  forceHtml5Ref.current = forceHtml5;
   const [reloadKey, setReloadKey] = useState(0);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const showDetailsModalRef = useRef(showDetailsModal);
   showDetailsModalRef.current = showDetailsModal;
 
+  const technicalPropRef = useRef(technical);
+  technicalPropRef.current = technical;
   const [technicalInfo, setTechnicalInfo] = useState<MediaItemDetail['technical'] | undefined>(technical);
   const technicalInfoRef = useRef(technicalInfo);
   technicalInfoRef.current = technicalInfo;
+
+  const [audioTracks, setAudioTracks] = useState<AudioStreamInfo[]>(() =>
+    Array.isArray(technical?.audio_tracks) ? technical.audio_tracks : []
+  );
+  const audioTracksRef = useRef<AudioStreamInfo[]>(audioTracks);
+  audioTracksRef.current = audioTracks;
+
+  const [selectedAudioTrackIndex, setSelectedAudioTrackIndex] = useState<number>(() =>
+    pickInitialAudioTrackIndex(
+      Array.isArray(technical?.audio_tracks) ? technical.audio_tracks : [],
+      loadAudioPreference()
+    )
+  );
+  const selectedAudioTrackIndexRef = useRef<number>(selectedAudioTrackIndex);
+  selectedAudioTrackIndexRef.current = selectedAudioTrackIndex;
+
+  const [isAudioModalOpen, setIsAudioModalOpen] = useState(false);
+  const isAudioModalOpenRef = useRef(isAudioModalOpen);
+  isAudioModalOpenRef.current = isAudioModalOpen;
+
+  const pendingAudioSyncAfterForegroundRef = useRef(false);
+  const prevAudioItemIdRef = useRef(itemId);
 
   const [itemMediaType, setItemMediaType] = useState<string | undefined>(mediaType);
   const [isLiveStream, setIsLiveStream] = useState<boolean>(() =>
@@ -262,6 +321,88 @@ export function PlayerScreen({
   const sessionManager = useMemo(() => new PlaybackSessionManager(apiClient), [apiClient]);
   const hasActiveSessionRef = useRef(false);
 
+  const triggerHlsAudioReload = useCallback((resumePosMs?: number) => {
+    seamlessSwapRef.current = true;
+    if (resumePosMs !== undefined) {
+      hlsSeekOffsetMsRef.current = resumePosMs;
+      setHlsSeekOffsetMs(resumePosMs);
+    } else if (positionMsRef.current > 0) {
+      hlsSeekOffsetMsRef.current = positionMsRef.current;
+      setHlsSeekOffsetMs(positionMsRef.current);
+    }
+    if (!isHlsRef.current) {
+      hlsAutoFallbackDoneRef.current = false;
+      hlsTranscodeFailedRef.current = false;
+      setUseHls(true);
+    }
+    setReloadKey((k) => k + 1);
+  }, []);
+
+  const syncDirectPlayAudioOrFallback = useCallback(
+    (
+      audioIndex: number,
+      chosen: AudioStreamInfo | undefined,
+      activeTech: MediaItemDetail['technical'] | undefined
+    ) => {
+      const trackSupported = isSupportedOnSamsungTv(
+        activeTech?.video_codec,
+        chosen?.codec,
+        activeTech?.container,
+        forceHtml5Ref.current || isBrowserEnv
+      );
+      if (!trackSupported) {
+        triggerHlsAudioReload(positionMsRef.current);
+        return;
+      }
+      if (isDriverInitializedRef.current) {
+        const switched =
+          driverRef.current?.selectAudioTrack?.(audioIndex, chosen?.stream_index) ?? false;
+        if (!switched) {
+          triggerHlsAudioReload(positionMsRef.current);
+        }
+      }
+    },
+    [isBrowserEnv, triggerHlsAudioReload]
+  );
+
+  const applyDiscoveredAudioTracks = useCallback(
+    (tracks: AudioStreamInfo[]) => {
+      const prevAudioIndex = selectedAudioTrackIndexRef.current;
+      const initialIdx = pickInitialAudioTrackIndex(tracks, loadAudioPreference());
+      audioTracksRef.current = tracks;
+      setAudioTracks(tracks);
+      selectedAudioTrackIndexRef.current = initialIdx;
+      setSelectedAudioTrackIndex(initialIdx);
+
+      if (initialIdx <= 0) {
+        return;
+      }
+
+      const chosen = tracks.find((t) => t.audio_index === initialIdx);
+      const activeTech = technicalInfoRef.current ?? technicalPropRef.current;
+      driverRef.current?.setMediaHints?.(buildMediaHints(activeTech, initialIdx, tracks));
+
+      if (isDocumentHiddenRef.current) {
+        if (initialIdx !== prevAudioIndex) {
+          pendingAudioSyncAfterForegroundRef.current = true;
+        }
+        return;
+      }
+
+      if (isHlsRef.current) {
+        if (initialIdx !== prevAudioIndex) {
+          triggerHlsAudioReload();
+        }
+        return;
+      }
+
+      if (initialIdx !== prevAudioIndex) {
+        syncDirectPlayAudioOrFallback(initialIdx, chosen, activeTech);
+      }
+    },
+    [syncDirectPlayAudioOrFallback, triggerHlsAudioReload]
+  );
+
   // Fetch media item details (technical codecs + accurate duration)
   useEffect(() => {
     let isMounted = true;
@@ -289,12 +430,25 @@ export function PlayerScreen({
             };
             setTechnicalInfo(mergedTechnical);
             technicalInfoRef.current = mergedTechnical;
-            driverRef.current?.setMediaHints?.({
-              resolution: mergedTechnical.resolution,
-              width: mergedTechnical.width,
-              height: mergedTechnical.height,
-              rotation: mergedTechnical.rotation,
-            });
+            if (
+              Array.isArray(detail.technical?.audio_tracks) &&
+              detail.technical.audio_tracks.length > 0 &&
+              audioTracksRef.current.length === 0
+            ) {
+              applyDiscoveredAudioTracks(detail.technical.audio_tracks);
+            } else {
+              driverRef.current?.setMediaHints?.(
+                buildMediaHints(
+                  mergedTechnical,
+                  selectedAudioTrackIndexRef.current,
+                  audioTracksRef.current
+                )
+              );
+            }
+            const activeTrackCodec =
+              audioTracksRef.current.find(
+                (t) => t.audio_index === selectedAudioTrackIndexRef.current
+              )?.codec ?? detail.technical?.audio_codec;
             if (
               !hlsAutoFallbackDoneRef.current &&
               !directStreamTriedRef.current &&
@@ -308,7 +462,7 @@ export function PlayerScreen({
               !hlsAutoFallbackDoneRef.current &&
               !isSupportedOnSamsungTv(
                 detail.technical.video_codec,
-                detail.technical.audio_codec,
+                activeTrackCodec,
                 detail.technical.container,
                 forceHtml5 || isBrowserEnv
               )
@@ -336,7 +490,7 @@ export function PlayerScreen({
     return () => {
       isMounted = false;
     };
-  }, [itemId, apiClient, forceHtml5]);
+  }, [itemId, apiClient, forceHtml5, applyDiscoveredAudioTracks]);
 
   const handleRetry = useCallback((retryWithHls?: boolean) => {
     pauseAfterRestoreRef.current = false;
@@ -445,9 +599,6 @@ export function PlayerScreen({
     }
   }, [showDetailsModal]);
 
-  const positionMsRef = useRef(positionMs);
-  positionMsRef.current = positionMs;
-
   const durationMsRef = useRef(durationMs);
   durationMsRef.current = durationMs;
 
@@ -480,19 +631,25 @@ export function PlayerScreen({
     hlsTranscodeFailedRef.current = false;
     directStreamTriedRef.current = false;
     setUseHls(!bypass);
+
+    if (prevAudioItemIdRef.current !== itemId) {
+      prevAudioItemIdRef.current = itemId;
+      const nextTracks = Array.isArray(technical?.audio_tracks) ? technical.audio_tracks : [];
+      const nextAudioIndex = pickInitialAudioTrackIndex(nextTracks, loadAudioPreference());
+      audioTracksRef.current = nextTracks;
+      setAudioTracks(nextTracks);
+      selectedAudioTrackIndexRef.current = nextAudioIndex;
+      setSelectedAudioTrackIndex(nextAudioIndex);
+      isAudioModalOpenRef.current = false;
+      setIsAudioModalOpen(false);
+      pendingAudioSyncAfterForegroundRef.current = false;
+    }
   }, [itemId]);
 
   useEffect(() => {
     const activeTech = technicalInfo ?? technical;
     driverRef.current?.setMediaHints?.(
-      activeTech
-        ? {
-            resolution: activeTech.resolution,
-            width: activeTech.width,
-            height: activeTech.height,
-            rotation: activeTech.rotation,
-          }
-        : undefined
+      buildMediaHints(activeTech, selectedAudioTrackIndexRef.current, audioTracksRef.current)
     );
   }, [technicalInfo, technical]);
 
@@ -657,6 +814,64 @@ export function PlayerScreen({
     };
   }, [itemId, apiClient]);
 
+  // Fetch embedded audio tracks on mount / item change
+  useEffect(() => {
+    let isMounted = true;
+    const numericItemId = typeof itemId === 'number' ? itemId : parseInt(String(itemId), 10);
+    if (!isNaN(numericItemId)) {
+      Promise.resolve(fetchItemAudioTracks(apiClient, numericItemId))
+        .then((tracks) => {
+          if (!isMounted || !Array.isArray(tracks) || tracks.length === 0) return;
+          applyDiscoveredAudioTracks(tracks);
+        })
+        .catch(() => {
+          // Audio track discovery optional/fallback
+        });
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [itemId, apiClient, applyDiscoveredAudioTracks]);
+
+  const handleSelectAudioTrack = useCallback(
+    (audioIndex: number) => {
+      setIsAudioModalOpen(false);
+      const chosen = audioTracksRef.current.find((t) => t.audio_index === audioIndex);
+      const lang = chosen?.language?.trim();
+      if (lang && lang.toLowerCase() !== 'und') {
+        saveAudioPreference({
+          mode: 'language',
+          language: lang,
+          preferCommentary: Boolean(chosen?.is_commentary),
+        });
+      }
+      if (audioIndex === selectedAudioTrackIndexRef.current) {
+        return;
+      }
+      selectedAudioTrackIndexRef.current = audioIndex;
+      setSelectedAudioTrackIndex(audioIndex);
+
+      if (!isHlsRef.current) {
+        const activeTech = technicalInfoRef.current ?? technicalPropRef.current;
+        const supported = isSupportedOnSamsungTv(
+          activeTech?.video_codec,
+          chosen?.codec,
+          activeTech?.container,
+          forceHtml5Ref.current || isBrowserEnv
+        );
+        if (
+          supported &&
+          (driverRef.current?.selectAudioTrack?.(audioIndex, chosen?.stream_index) ?? false)
+        ) {
+          return;
+        }
+      }
+
+      triggerHlsAudioReload(positionMsRef.current);
+    },
+    [isBrowserEnv, triggerHlsAudioReload]
+  );
+
   const activeSubtitleUrl = useMemo(() => {
     if (selectedSubtitleId === null) return null;
     const track = subtitles.find((s) => s.id === selectedSubtitleId);
@@ -730,7 +945,12 @@ export function PlayerScreen({
     osdDismissedByUserRef.current = false;
     setShowOSD(true);
     if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
-    if (playerStateRef.current === 'playing' && !isSubtitlePopupOpenRef.current && !isSubtitleModalOpenRef.current) {
+    if (
+      playerStateRef.current === 'playing' &&
+      !isSubtitlePopupOpenRef.current &&
+      !isSubtitleModalOpenRef.current &&
+      !isAudioModalOpenRef.current
+    ) {
       osdTimerRef.current = setTimeout(() => {
         setShowOSD(false);
         setOsdFocusedItem('progress');
@@ -847,7 +1067,7 @@ export function PlayerScreen({
       osdDismissedByUserRef.current = false;
     }
 
-    if (isSubtitlePopupOpen || isSubtitleModalOpen) {
+    if (isSubtitlePopupOpen || isSubtitleModalOpen || isAudioModalOpen) {
       setShowOSD(true);
       if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
       return;
@@ -865,7 +1085,7 @@ export function PlayerScreen({
       }
       if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
     }
-  }, [playerState, isSubtitlePopupOpen, isSubtitleModalOpen]);
+  }, [playerState, isSubtitlePopupOpen, isSubtitleModalOpen, isAudioModalOpen]);
 
   useEffect(() => {
     // For AVPlay hardware video plane on Samsung Tizen, html and body backgrounds must be transparent
@@ -928,6 +1148,7 @@ export function PlayerScreen({
       container: technicalInfoRef.current?.container || technical?.container,
       startSeconds: activeStartMs > 0 ? activeStartMs / 1000 : 0,
       maxHeight: SAMSUNG_TV_HLS_MAX_HEIGHT,
+      audioTrackIndex: selectedAudioTrackIndexRef.current,
     });
     const streamUrl = playbackResult.url;
     const isHls = playbackResult.isHls;
@@ -965,14 +1186,7 @@ export function PlayerScreen({
 
     const activeTech = technicalInfoRef.current ?? technical;
     driver.setMediaHints?.(
-      activeTech
-        ? {
-            resolution: activeTech.resolution,
-            width: activeTech.width,
-            height: activeTech.height,
-            rotation: activeTech.rotation,
-          }
-        : undefined
+      buildMediaHints(activeTech, selectedAudioTrackIndexRef.current, audioTracksRef.current)
     );
 
     const bufferWatchdog = setTimeout(() => {
@@ -1148,7 +1362,17 @@ export function PlayerScreen({
         (sessionResumeMsRef.current > 0 ? sessionResumeMsRef.current : initialResume);
       const initialDriverTime = isHls && streamStartOffsetMs > 0 ? 0 : currentStartMs;
       isDriverInitializedRef.current = true;
-      driver.init(containerRef.current, streamUrl, initialDriverTime).catch((err) => {
+      const activeAudioIndex = selectedAudioTrackIndexRef.current;
+      const initHints = buildMediaHints(
+        technicalInfoRef.current ?? technical,
+        activeAudioIndex,
+        audioTracksRef.current
+      );
+      const initPromise =
+        initHints && activeAudioIndex > 0
+          ? driver.init(containerRef.current, streamUrl, initialDriverTime, initHints)
+          : driver.init(containerRef.current, streamUrl, initialDriverTime);
+      const handleInitError = (err: any) => {
         clearTimeout(bufferWatchdog);
         console.error('[PlayerScreen] Driver init failed:', err);
         setPlayerState('error');
@@ -1158,7 +1382,27 @@ export function PlayerScreen({
           streamUrl,
           driverName: driver.name || (forceHtml5 ? 'HTML5 Video' : 'Tizen AVPlay'),
         });
-      });
+      };
+      if (!isHls && driver.name === 'HTML5 Video' && activeAudioIndex > 0 && !hlsTranscodeFailedRef.current) {
+        initPromise
+          .then(() => {
+            if (!isMounted || driverRef.current !== driver) return;
+            const activeTrack = audioTracksRef.current.find(
+              (t) => t.audio_index === selectedAudioTrackIndexRef.current
+            );
+            const switched =
+              driver.selectAudioTrack?.(
+                selectedAudioTrackIndexRef.current,
+                activeTrack?.stream_index
+              ) ?? false;
+            if (!switched) {
+              triggerHlsAudioReload();
+            }
+          })
+          .catch(handleInitError);
+      } else {
+        initPromise.catch(handleInitError);
+      }
     };
 
     // Pre-flight stream check to catch missing media files (HTTP 404) gracefully
@@ -1511,24 +1755,70 @@ export function PlayerScreen({
 
         const autoPlay = isLiveStreamRef.current;
         const targetPos = positionMsRef.current;
-        const handled = driverRef.current?.restore?.(targetPos, autoPlay) ?? false;
+        const pendingAudioSync = pendingAudioSyncAfterForegroundRef.current;
+        pendingAudioSyncAfterForegroundRef.current = false;
 
-        if (!handled) {
+        const switchToHlsOnForeground = () => {
           pauseAfterRestoreRef.current = !autoPlay;
           if (autoPlay) {
             playerStateRef.current = 'buffering';
             setPlayerState('buffering');
           } else if (hasStartedPlaybackRef.current || targetPos > 0) {
-            if (isHlsRef.current) {
-              hlsSeekOffsetMsRef.current = targetPos;
-              setHlsSeekOffsetMs(targetPos);
-            } else {
-              hlsSeekOffsetMsRef.current = null;
-              setHlsSeekOffsetMs(null);
-              restoreResumeMsRef.current = targetPos;
-            }
+            hlsSeekOffsetMsRef.current = targetPos;
+            setHlsSeekOffsetMs(targetPos);
           }
+          hlsAutoFallbackDoneRef.current = false;
+          hlsTranscodeFailedRef.current = false;
+          setUseHls(true);
           setReloadKey((k) => k + 1);
+        };
+
+        const activeAudioIdx = selectedAudioTrackIndexRef.current;
+        const activeAudioTrack = audioTracksRef.current.find(
+          (t) => t.audio_index === activeAudioIdx
+        );
+        const activeTech = technicalInfoRef.current ?? technicalPropRef.current;
+        const needsHlsForAudio =
+          !isHlsRef.current &&
+          activeAudioIdx > 0 &&
+          !isSupportedOnSamsungTv(
+            activeTech?.video_codec,
+            activeAudioTrack?.codec,
+            activeTech?.container,
+            forceHtml5Ref.current || isBrowserEnv
+          );
+
+        if (needsHlsForAudio) {
+          switchToHlsOnForeground();
+        } else {
+          const handled = driverRef.current?.restore?.(targetPos, autoPlay) ?? false;
+
+          if (handled && pendingAudioSync && !isHlsRef.current && activeAudioIdx > 0) {
+            const switched =
+              driverRef.current?.selectAudioTrack?.(
+                activeAudioIdx,
+                activeAudioTrack?.stream_index
+              ) ?? false;
+            if (!switched) {
+              switchToHlsOnForeground();
+            }
+          } else if (!handled) {
+            pauseAfterRestoreRef.current = !autoPlay;
+            if (autoPlay) {
+              playerStateRef.current = 'buffering';
+              setPlayerState('buffering');
+            } else if (hasStartedPlaybackRef.current || targetPos > 0) {
+              if (isHlsRef.current) {
+                hlsSeekOffsetMsRef.current = targetPos;
+                setHlsSeekOffsetMs(targetPos);
+              } else {
+                hlsSeekOffsetMsRef.current = null;
+                setHlsSeekOffsetMs(null);
+                restoreResumeMsRef.current = targetPos;
+              }
+            }
+            setReloadKey((k) => k + 1);
+          }
         }
 
         osdDismissedByUserRef.current = false;
@@ -1540,9 +1830,18 @@ export function PlayerScreen({
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [itemId, serverUrl, token, sessionManager]);
+  }, [itemId, serverUrl, token, sessionManager, isBrowserEnv]);
 
   useEffect(() => {
+    const getOsdControls = (): PlayerOsdFocusItem[] => {
+      const controls: PlayerOsdFocusItem[] = [];
+      if (onPreviousRef.current && hasPreviousRef.current) controls.push('prev');
+      if (onNextRef.current && hasNextRef.current) controls.push('next');
+      if (audioTracksRef.current.length >= 2) controls.push('audio');
+      controls.push('subtitles');
+      return controls;
+    };
+
     const handleKeyDown = (e: KeyboardEvent) => {
       const code = e.keyCode || e.which;
 
@@ -1565,9 +1864,12 @@ export function PlayerScreen({
         return;
       }
 
+      const isModalOpen =
+        isSubtitlePopupOpenRef.current ||
+        isSubtitleModalOpenRef.current ||
+        isAudioModalOpenRef.current;
+
       if (isBackKey) {
-        const isModalOpen =
-          isSubtitlePopupOpenRef.current || isSubtitleModalOpenRef.current;
         if (isModalOpen) {
           return;
         }
@@ -1625,9 +1927,6 @@ export function PlayerScreen({
         }
       }
 
-      const isModalOpen =
-        isSubtitlePopupOpenRef.current || isSubtitleModalOpenRef.current;
-
       if (!isModalOpen) {
         if (
           code === TVKeys.MEDIA_TRACK_NEXT ||
@@ -1676,10 +1975,7 @@ export function PlayerScreen({
       } else if (!isModalOpen && (code === TVKeys.DOWN || e.key === 'ArrowDown')) {
         e.preventDefault();
         if (osdFocusedItemRef.current === 'progress') {
-          const controls: Array<'prev' | 'next' | 'subtitles'> = [];
-          if (onPreviousRef.current && hasPreviousRef.current) controls.push('prev');
-          if (onNextRef.current && hasNextRef.current) controls.push('next');
-          controls.push('subtitles');
+          const controls = getOsdControls();
           if (controls.length > 0) {
             const first = controls[0];
             osdFocusedItemRef.current = first;
@@ -1693,11 +1989,7 @@ export function PlayerScreen({
           setOsdFocusedItem('progress');
         }
       } else if (code === TVKeys.ENTER || e.key === 'Enter') {
-        if (
-          e.defaultPrevented ||
-          isSubtitlePopupOpenRef.current ||
-          isSubtitleModalOpenRef.current
-        ) {
+        if (e.defaultPrevented || isModalOpen) {
           return;
         }
         if (osdFocusedItemRef.current !== 'progress') {
@@ -1712,6 +2004,8 @@ export function PlayerScreen({
             setAutoAdvanceCountdown(null);
             buildAndFlushSnapshot(undefined, false);
             onNextRef.current();
+          } else if (osdFocusedItemRef.current === 'audio') {
+            setIsAudioModalOpen(true);
           } else if (osdFocusedItemRef.current === 'subtitles') {
             setIsSubtitleModalOpen(true);
           }
@@ -1729,15 +2023,12 @@ export function PlayerScreen({
           driverRef.current?.play();
         }
       } else if (code === TVKeys.LEFT || e.key === 'ArrowLeft') {
-        if (isSubtitlePopupOpenRef.current || isSubtitleModalOpenRef.current) {
+        if (isModalOpen) {
           return;
         }
         if (osdFocusedItemRef.current !== 'progress') {
           e.preventDefault();
-          const controls: PlayerOsdFocusItem[] = [];
-          if (onPreviousRef.current && hasPreviousRef.current) controls.push('prev');
-          if (onNextRef.current && hasNextRef.current) controls.push('next');
-          controls.push('subtitles');
+          const controls = getOsdControls();
           const idx = controls.indexOf(osdFocusedItemRef.current);
           if (idx > 0) {
             const prev = controls[idx - 1];
@@ -1750,15 +2041,12 @@ export function PlayerScreen({
         consecutiveRewCountRef.current = 0;
         applySeek(-10000, 'backward', '-10s');
       } else if (code === TVKeys.RIGHT || e.key === 'ArrowRight') {
-        if (isSubtitlePopupOpenRef.current || isSubtitleModalOpenRef.current) {
+        if (isModalOpen) {
           return;
         }
         if (osdFocusedItemRef.current !== 'progress') {
           e.preventDefault();
-          const controls: PlayerOsdFocusItem[] = [];
-          if (onPreviousRef.current && hasPreviousRef.current) controls.push('prev');
-          if (onNextRef.current && hasNextRef.current) controls.push('next');
-          controls.push('subtitles');
+          const controls = getOsdControls();
           const idx = controls.indexOf(osdFocusedItemRef.current);
           if (idx >= 0 && idx < controls.length - 1) {
             const next = controls[idx + 1];
@@ -1771,7 +2059,7 @@ export function PlayerScreen({
         consecutiveRewCountRef.current = 0;
         applySeek(10000, 'forward', '+10s');
       } else if (code === TVKeys.FAST_FORWARD) {
-        if (isSubtitlePopupOpenRef.current || isSubtitleModalOpenRef.current) {
+        if (isModalOpen) {
           return;
         }
         const count = consecutiveFfCountRef.current;
@@ -1781,7 +2069,7 @@ export function PlayerScreen({
         consecutiveRewCountRef.current = 0;
         applySeek(stepMs, 'forward', `+${stepSecs}s`);
       } else if (code === TVKeys.REWIND) {
-        if (isSubtitlePopupOpenRef.current || isSubtitleModalOpenRef.current) {
+        if (isModalOpen) {
           return;
         }
         const count = consecutiveRewCountRef.current;
@@ -1874,6 +2162,9 @@ export function PlayerScreen({
           seekPreviewMs={seekPreviewTimeMs}
           spriteCrop={storyboard.spriteCrop}
           frameUrl={storyboard.frameUrl}
+          audioTracks={audioTracks}
+          selectedAudioTrackIndex={selectedAudioTrackIndex}
+          onOpenAudioModal={() => setIsAudioModalOpen(true)}
           subtitles={subtitles}
           selectedSubtitleId={selectedSubtitleId}
           onSelectSubtitle={handleSelectSubtitle}
@@ -1914,6 +2205,16 @@ export function PlayerScreen({
         }}
         onClose={() => setIsSubtitleModalOpen(false)}
       />
+
+      {isAudioModalOpen && (
+        <AudioTrackModal
+          isOpen={isAudioModalOpen}
+          audioTracks={audioTracks}
+          selectedAudioTrackIndex={selectedAudioTrackIndex}
+          onSelectAudioTrack={handleSelectAudioTrack}
+          onClose={() => setIsAudioModalOpen(false)}
+        />
+      )}
 
       {seekHud && (
         <div
