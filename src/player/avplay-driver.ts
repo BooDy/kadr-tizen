@@ -996,6 +996,10 @@ export class TizenAvplayDriver implements PlayerDriver {
     // Handled via AVPlay or WebVTT overlay
   }
 
+  setPlaybackRate(_rate: number): boolean {
+    return false;
+  }
+
   destroy(): void {
     this.isDestroyed = true;
     this.isSuspended = false;

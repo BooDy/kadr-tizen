@@ -155,3 +155,66 @@ export function formatAudioTrackLabel(track: AudioStreamInfo): {
     isCommentary: Boolean(track.is_commentary),
   };
 }
+
+export const AUDIOBOOK_SPEED_STORAGE_KEY = 'kadr_audiobook_speed_v1';
+
+export const AUDIOBOOK_SPEED_OPTIONS = [0.75, 1, 1.25, 1.5, 1.75, 2] as const;
+
+export type AudioRepeatMode = 'off' | 'all' | 'one';
+
+const AUDIOBOOK_MIN_SPEED = 0.5;
+const AUDIOBOOK_MAX_SPEED = 3;
+
+export function loadAudiobookSpeed(): number {
+  try {
+    const raw =
+      typeof localStorage !== 'undefined'
+        ? localStorage.getItem(AUDIOBOOK_SPEED_STORAGE_KEY)
+        : null;
+    if (!raw) return 1;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed < AUDIOBOOK_MIN_SPEED || parsed > AUDIOBOOK_MAX_SPEED) {
+      return 1;
+    }
+    return parsed;
+  } catch {
+    return 1;
+  }
+}
+
+export function saveAudiobookSpeed(rate: number): void {
+  if (!Number.isFinite(rate)) return;
+  const clamped = Math.min(AUDIOBOOK_MAX_SPEED, Math.max(AUDIOBOOK_MIN_SPEED, rate));
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(AUDIOBOOK_SPEED_STORAGE_KEY, String(clamped));
+    }
+  } catch {
+    // Storage unavailable: preference simply won't persist
+  }
+}
+
+export function cycleAudiobookSpeed(current: number): number {
+  if (!Number.isFinite(current)) {
+    return 1;
+  }
+  const exactIndex = AUDIOBOOK_SPEED_OPTIONS.findIndex(
+    (option) => Math.abs(option - current) < 0.001
+  );
+  if (exactIndex !== -1) {
+    return AUDIOBOOK_SPEED_OPTIONS[(exactIndex + 1) % AUDIOBOOK_SPEED_OPTIONS.length];
+  }
+  const nextGreater = AUDIOBOOK_SPEED_OPTIONS.find((option) => option > current);
+  return nextGreater ?? AUDIOBOOK_SPEED_OPTIONS[0];
+}
+
+export function cycleAudioRepeatMode(current: AudioRepeatMode): AudioRepeatMode {
+  switch (current) {
+    case 'off':
+      return 'all';
+    case 'all':
+      return 'one';
+    case 'one':
+      return 'off';
+  }
+}

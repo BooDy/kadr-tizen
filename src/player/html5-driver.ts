@@ -10,6 +10,16 @@ export class Html5PlayerDriver implements PlayerDriver {
   private stateCallback?: (state: PlayerState) => void;
   private errorCallback?: (error: string) => void;
   private hasUserSeeked = false;
+  private playbackRate = 1;
+
+  private applyPlaybackRate(): void {
+    if (!this.video) return;
+    this.video.playbackRate = this.playbackRate;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (this.video as any).preservesPitch = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (this.video as any).webkitPreservesPitch = true;
+  }
 
   async init(container: HTMLElement, streamUrl: string, startMs: number): Promise<void> {
     this.hasUserSeeked = false;
@@ -17,6 +27,7 @@ export class Html5PlayerDriver implements PlayerDriver {
     // Absolutely positioned so a replacement video can load on top of a still-playing one
     this.video.className = 'absolute inset-0 w-full h-full object-contain bg-black';
     this.video.preload = 'auto';
+    this.applyPlaybackRate();
 
     // When another video is still playing in this container (seek swap), stay invisible until the
     // first frame is playing, so the old picture keeps showing instead of a black box.
@@ -112,12 +123,14 @@ export class Html5PlayerDriver implements PlayerDriver {
 
     this.video.addEventListener('timeupdate', emitTimeUpdate);
     this.video.addEventListener('loadedmetadata', emitTimeUpdate);
+    this.video.addEventListener('loadedmetadata', () => this.applyPlaybackRate());
     this.video.addEventListener('durationchange', emitTimeUpdate);
 
     this.video.addEventListener('playing', () => {
       if (this.video && this.video.style.opacity === '0') {
         this.video.style.opacity = '1';
       }
+      this.applyPlaybackRate();
       this.stateCallback?.('playing');
     });
     this.video.addEventListener('pause', () => this.stateCallback?.('paused'));
@@ -205,6 +218,13 @@ export class Html5PlayerDriver implements PlayerDriver {
       this.video.currentTime = Math.max(0, ms / 1000);
       onComplete?.();
     }
+  }
+
+  setPlaybackRate(rate: number): boolean {
+    if (!Number.isFinite(rate)) return false;
+    this.playbackRate = Math.min(3, Math.max(0.5, rate));
+    this.applyPlaybackRate();
+    return true;
   }
 
   selectAudioTrack(audioIndex: number): boolean {

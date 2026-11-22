@@ -18,6 +18,7 @@ export interface PlaybackStreamOptions {
   startSeconds?: number;
   maxHeight?: number;
   audioTrackIndex?: number;
+  isAudioOnly?: boolean;
 }
 
 export interface PlaybackUrlResult {
@@ -114,14 +115,77 @@ export function isSupportedOnSamsungTv(
   return checkMediaCompatibility(videoCodec, audioCodec, container, forceHtml5).isSupported;
 }
 
+export const AUDIO_MEDIA_TYPES = ['music', 'audiobook'] as const;
+
+export const HTML5_DIRECT_AUDIO_CODECS = [
+  'aac',
+  'mp4a',
+  'mp3',
+  'mpeg',
+  'flac',
+  'pcm',
+  'vorbis',
+  'opus',
+];
+
+export const HTML5_DIRECT_AUDIO_CONTAINERS = [
+  'mp3',
+  'flac',
+  'm4a',
+  'm4b',
+  'mp4',
+  'ogg',
+  'oga',
+  'opus',
+  'wav',
+  'webm',
+  'aac',
+];
+
+export function isAudioMediaType(mediaType?: string | null): boolean {
+  if (!mediaType) return false;
+  const normalized = mediaType.trim().toLowerCase();
+  return normalized === 'music' || normalized === 'audiobook';
+}
+
+export function checkAudioCompatibility(
+  audioCodec?: string | null,
+  container?: string | null
+): CompatibilityResult {
+  const a = audioCodec?.toLowerCase().trim() || '';
+  const c = container?.toLowerCase().trim() || '';
+  const reasons: string[] = [];
+  const warnings: string[] = [];
+
+  if (a && !HTML5_DIRECT_AUDIO_CODECS.some((ok) => a.includes(ok))) {
+    reasons.push(`Audio codec "${audioCodec}" requires AAC HLS transcoding on TV.`);
+  }
+  if (
+    c &&
+    !HTML5_DIRECT_AUDIO_CONTAINERS.some(
+      (ok) => c === ok || c.split(',').map((p) => p.trim()).includes(ok)
+    )
+  ) {
+    reasons.push(`Audio container "${container}" requires HLS packaging on TV.`);
+  }
+
+  return {
+    isSupported: reasons.length === 0,
+    reasons,
+    warnings,
+  };
+}
+
 export function getPlaybackUrl(options: PlaybackStreamOptions): PlaybackUrlResult {
   const cleanBase = options.serverUrl.replace(/\/+$/, '');
-  const compat = checkMediaCompatibility(
-    options.videoCodec,
-    options.audioCodec,
-    options.container,
-    options.forceHtml5
-  );
+  const compat = options.isAudioOnly
+    ? checkAudioCompatibility(options.audioCodec, options.container)
+    : checkMediaCompatibility(
+        options.videoCodec,
+        options.audioCodec,
+        options.container,
+        options.forceHtml5
+      );
 
   const isHls = options.forceDirect
     ? false
@@ -129,10 +193,15 @@ export function getPlaybackUrl(options: PlaybackStreamOptions): PlaybackUrlResul
   const params = new URLSearchParams();
 
   if (isHls) {
-    params.set('video_codec', 'h264');
-    params.set('audio_codec', 'aac');
-    if (options.maxHeight) {
-      params.set('max_height', String(options.maxHeight));
+    if (options.isAudioOnly) {
+      params.set('video_codec', 'none');
+      params.set('audio_codec', 'aac');
+    } else {
+      params.set('video_codec', 'h264');
+      params.set('audio_codec', 'aac');
+      if (options.maxHeight) {
+        params.set('max_height', String(options.maxHeight));
+      }
     }
     if (options.startSeconds !== undefined && options.startSeconds > 0) {
       params.set('start_time', options.startSeconds.toFixed(3));

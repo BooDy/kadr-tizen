@@ -37,6 +37,7 @@ export interface PlayerDriver {
   destroy(): void;
   setSubtitleTrack(trackUrl: string | null): void;
   selectAudioTrack?(audioIndex: number, streamIndex?: number): boolean;
+  setPlaybackRate?(rate: number): boolean;
   setMediaHints?(hints: VideoLayoutHints | undefined): void;
   onDisplayRectChange?(callback: (rect: VideoDisplayRect) => void): void;
   onTimeUpdate(callback: (posMs: number, durationMs: number) => void): void;
