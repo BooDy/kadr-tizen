@@ -5,7 +5,7 @@
 **Target Hardware:** Samsung Tizen TV (`Tizen 5.0+`, verified on `UA55TU7000UXEG` Tizen 5.5 / Chromium 69) & Web Dev Harness
 **Repositories:**
 - Client: `/home/boody/work/personal/kadr-tizenos`
-- Server (existing `/api/v1/discover` endpoint, zero backend changes): `/home/boody/work/personal/kadr`
+- Server (existing `/api/v1/discovery` endpoint, zero backend changes): `/home/boody/work/personal/kadr`
 
 ---
 
@@ -90,8 +90,8 @@ Sub-Projects 1–6 delivered hardware lifecycle resilience, watch-state controls
      - `settings-switch-profile-btn`: **Switch Profile** (`onSwitchProfile?.()`).
      - `settings-change-server-btn`: **Change Server** (`onSwitchServer?.()`, rendered when `onSwitchServer` is provided).
    - **Category 4 (`settings-cat-diagnostics` — TV Diagnostics & About):**
-     - Read-only telemetry grid: `App Version` (`v1.0.0`), `TV Hardware Model` (`webapis.productinfo.getModel()` or `'Web Dev Harness'`), `Tizen Platform` (`tizen.systeminfo` `platform.version` or `'Browser'`), `AVPlay Engine` (`window.webapis?.avplay ? 'Hardware Ready' : 'HTML5 Fallback'`), `Viewport` (`${window.innerWidth}×${window.innerHeight}`), and `Server Connection` (fetches `${cleanServerUrl}/api/v1/discover` measuring round-trip `ms`, server `name`, and server `version`).
-     - `settings-ping-server-btn`: **Refresh Server Diagnostics** (re-runs `/api/v1/discover` latency & version probe).
+     - Read-only telemetry grid: `App Version` (`v1.0.0`), `TV Hardware Model` (`webapis.productinfo.getModel()` or `'Web Dev Harness'`), `Tizen Platform` (`tizen.systeminfo` `platform.version` or `'Browser'`), `AVPlay Engine` (`window.webapis?.avplay ? 'Hardware Ready' : 'HTML5 Fallback'`), `Viewport` (`${window.innerWidth}×${window.innerHeight}`), and `Server Connection` (fetches `${cleanServerUrl}/api/v1/discovery` measuring round-trip `ms`, server `name`, and server `version`).
+     - `settings-ping-server-btn`: **Refresh Server Diagnostics** (re-runs `/api/v1/discovery` latency & version probe).
      - `settings-reset-prefs-btn`: **Reset All Playback & Subtitle Preferences** (calls `resetAllPlaybackPreferences()` and refreshes UI state to defaults).
 3. **Deterministic 2-Pane D-Pad Navigation (`capture: true` listener in `SettingsView`):**
    - Inactive when any modal trap is open.
@@ -138,6 +138,6 @@ Sub-Projects 1–6 delivered hardware lifecycle resilience, watch-state controls
 
 1. **`tests/player/playbackSettings.test.ts`:** Persists/loads `hlsMaxHeight` (`0`, `2160`, `1080`, `720`, `480`) and `preferredPlayerEngine` (`'auto'`, `'html5'`), handles malformed storage safely, and verifies `resetAllPlaybackPreferences()` clears all 6 playback/audio/subtitle storage keys.
 2. **`tests/screens/SettingsView.test.tsx` & `tests/screens/PlayerScreen.settings.test.tsx`:**
-   - Zero `gap-*` classes across all 4 categories; deterministic 2-pane D-pad navigation (`Category Rail` ↔ `Control Rows` ↔ `Sidebar`); changing `HLS Max Quality` (`720p`), `Video Player Engine` (`HTML5 Video`), audio/subtitle preferences, and audiobook speed persists to `localStorage` and drives `PlayerScreen`'s stream URL (`max_height=720` or uncapped `Original`) & driver selection; `Re-lock Unlocked Private Libraries` clears tokens; `TV Diagnostics` displays `v1.0.0` and live `/api/v1/discover` ping latency; `Reset All` restores defaults.
+   - Zero `gap-*` classes across all 4 categories; deterministic 2-pane D-pad navigation (`Category Rail` ↔ `Control Rows` ↔ `Sidebar`); changing `HLS Max Quality` (`720p`), `Video Player Engine` (`HTML5 Video`), audio/subtitle preferences, and audiobook speed persists to `localStorage` and drives `PlayerScreen`'s stream URL (`max_height=720` or uncapped `Original`) & driver selection; `Re-lock Unlocked Private Libraries` clears tokens; `TV Diagnostics` displays `v1.0.0` and live `/api/v1/discovery` ping latency; `Reset All` restores defaults.
 3. **`tests/screens/BrowseScreen.test.tsx` & `tests/App.test.tsx`:**
    - `nav-screen-settings` renders below `Playlists` without calling `fetchScreenLayout('settings')`, bridges D-pad focus & 2-layer `Back` (`SettingsView` -> `nav-screen-settings` -> `<ExitConfirmModal>`), re-locks private libraries end-to-end, and verifies repo-wide `(! grep -rn "gap-" src/)`, `1.0.0` version alignment across `package.json` / `config.xml` / `APP_VERSION`, dual `tsconfig` build, and signed `kadr.wgt` + `kadr.wgt.sha256`.

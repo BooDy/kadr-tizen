@@ -14,7 +14,7 @@ jobs:
   build-and-verify:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -99,8 +99,27 @@ jobs:
             kadr.wgt
             kadr.wgt.sha256
 
+      - name: Clean up staged Tizen signing certificates
+        if: always() && startsWith(github.ref, 'refs/tags/v')
+        run: rm -rf "${RUNNER_TEMP}/tizen-certs"
+
+  release:
+    needs: build-and-verify
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download .wgt and SHA-256 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: kadr-tizenos-wgt
+
+      - name: Verify .wgt SHA-256 checksum
+        run: sha256sum -c kadr.wgt.sha256
+
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: |

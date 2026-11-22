@@ -27,6 +27,14 @@ describe('v1.0.0 release alignment & CI guardrails', () => {
     expect(pkg.scripts?.build).toContain('tsconfig.json');
     expect(pkg.scripts?.build).toContain('tsconfig.node.json');
 
+    const lockRaw = fs.readFileSync(path.resolve('package-lock.json'), 'utf8');
+    const lock = JSON.parse(lockRaw) as {
+      version: string;
+      packages?: Record<string, { version?: string }>;
+    };
+    expect(lock.version).toBe('1.0.0');
+    expect(lock.packages?.['']?.version).toBe('1.0.0');
+
     const configXml = fs.readFileSync(path.resolve('config.xml'), 'utf8');
     const versionMatch = configXml.match(/<widget\b[^>]*\bversion="([^"]+)"/);
     expect(versionMatch?.[1]).toBe('1.0.0');
@@ -47,6 +55,10 @@ describe('v1.0.0 release alignment & CI guardrails', () => {
     expect(workflow).toContain('npm run build');
     expect(workflow).toContain('package:wgt');
     expect(workflow).toContain('kadr.wgt.sha256');
+    expect(workflow).toContain('contents: read');
+    expect(workflow).toContain('contents: write');
+    expect(workflow).toContain('actions/download-artifact@v4');
+    expect(workflow).toContain('rm -rf "${RUNNER_TEMP}/tizen-certs"');
     expect(workflow).toContain('softprops/action-gh-release@v2');
   });
 
