@@ -1,4 +1,13 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { ApiClient } from '../api/client';
 import { MediaItemDetail } from '../api/items';
 import { EpisodeCard } from '../types/kadr';
@@ -24,6 +33,45 @@ import {
 import { getAuthenticatedImageUrl } from '../utils/imageUrl';
 import { applyWatchStateMutation, toResumePercentageSentinel } from '../utils/playbackProgress';
 import { setItemWatchState, setBatchWatchState } from '../api/playback';
+import {
+  buildEpisodeRangeGroups,
+  computeVirtualHorizontalWindow,
+  DEFAULT_STRIP_VIEWPORT_WIDTH_PX,
+  EPISODE_RANGE_SIZE,
+  VIRTUAL_EPISODE_THRESHOLD,
+  type EpisodeRangeGroup,
+} from '../utils/virtualWindow';
+
+const EPISODE_CARD_WIDTH_PX = 320;
+const EPISODE_CARD_SPACING_PX = 16;
+const EPISODE_CARD_STRIDE_PX = EPISODE_CARD_WIDTH_PX + EPISODE_CARD_SPACING_PX;
+const EPISODE_FAST_SKIP_COUNT = 10;
+
+function resolveDefaultActiveEpisodeId(
+  seasonEps: EpisodeCard[],
+  initialFocusedId: string | null | undefined,
+  nextEp: EpisodeCard | null | undefined,
+  seasonNum: number
+): number | string | null {
+  if (initialFocusedId?.startsWith('episode-card-')) {
+    const targetId = initialFocusedId.slice('episode-card-'.length);
+    const matched = seasonEps.find((ep) => String(ep.id) === targetId);
+    if (matched) {
+      return matched.id;
+    }
+  }
+  if (
+    seasonEps.length > VIRTUAL_EPISODE_THRESHOLD &&
+    nextEp &&
+    nextEp.season === seasonNum
+  ) {
+    const matchedNext = seasonEps.find((ep) => String(ep.id) === String(nextEp.id));
+    if (matchedNext) {
+      return matchedNext.id;
+    }
+  }
+  return seasonEps[0]?.id ?? null;
+}
 
 export interface ItemDetailModalProps {
   isOpen?: boolean;
@@ -367,12 +415,78 @@ const EpisodeActionPill = memo(function EpisodeActionPill({
   );
 });
 
+interface EpisodeRangePillProps {
+  group: EpisodeRangeGroup;
+  order: number;
+  isActiveRange: boolean;
+  onActivate: (startIndex: number) => void;
+  onFocusPill: (id: string) => void;
+}
+
+const EpisodeRangePill = memo(function EpisodeRangePill({
+  group,
+  order,
+  isActiveRange,
+  onActivate,
+  onFocusPill,
+}: EpisodeRangePillProps) {
+  const id = `episode-range-pill-${group.startIndex}`;
+  const isFocused = useIsFocused(id);
+
+  const handleActivate = useCallback(() => {
+    onActivate(group.startIndex);
+  }, [onActivate, group.startIndex]);
+
+  const handleFocus = useCallback(() => {
+    onFocusPill(id);
+  }, [onFocusPill, id]);
+
+  return (
+    <TVButton
+      id={id}
+      data-focus-id={id}
+      data-active={isActiveRange ? 'true' : 'false'}
+      data-focused={isFocused ? 'true' : 'false'}
+      groupId="item-detail-episode-ranges"
+      order={order}
+      variant={isActiveRange ? 'primary' : 'secondary'}
+      onClick={handleActivate}
+      onEnter={handleActivate}
+      onFocus={handleFocus}
+      className={`!px-3.5 !py-1.5 !text-sm font-mono font-bold !rounded-lg mr-2 last:mr-0 shrink-0 transition-transform duration-75 ${
+        isFocused
+          ? '!bg-[#38393f] !text-white !border-[#ff7a18] scale-[1.03]'
+          : isActiveRange
+          ? '!bg-[#281216] !text-[#ffb871] border border-[#ff7a18]/50'
+          : '!bg-[#1a1b21] !text-[#a8a29e] border border-[rgba(255,122,24,0.12)]'
+      }`}
+      style={{
+        padding: '6px 14px',
+        borderRadius: '8px',
+        backgroundColor: isFocused ? '#38393f' : isActiveRange ? '#281216' : '#1a1b21',
+        color: isFocused ? '#ffffff' : isActiveRange ? '#ffb871' : '#a8a29e',
+        border: isFocused
+          ? '2px solid #ff7a18'
+          : isActiveRange
+          ? '1px solid rgba(255, 122, 24, 0.5)'
+          : '1px solid rgba(255, 122, 24, 0.12)',
+        boxShadow: isFocused ? '0 0 0 2px #FFB800' : 'none',
+        transform: isFocused ? 'scale(1.03)' : 'scale(1)',
+      }}
+    >
+      <span>{group.label}</span>
+    </TVButton>
+  );
+});
+
 interface EpisodeLandscapeCardProps {
   episode: EpisodeCard;
   index: number;
   selectedSeason: number;
   imageUrl?: string;
   isNextUp: boolean;
+  isVirtualized?: boolean;
+  isLastEpisode?: boolean;
   onSelectEpisode: (episode: EpisodeCard) => void;
   onFocusEpisode: (episodeId: number | string, cardFocusId?: string) => void;
 }
@@ -383,6 +497,8 @@ const EpisodeLandscapeCard = memo(function EpisodeLandscapeCard({
   selectedSeason,
   imageUrl,
   isNextUp,
+  isVirtualized = false,
+  isLastEpisode = false,
   onSelectEpisode,
   onFocusEpisode,
 }: EpisodeLandscapeCardProps) {
@@ -422,6 +538,7 @@ const EpisodeLandscapeCard = memo(function EpisodeLandscapeCard({
   const subtitleText = episode.subtitle || epCode;
   const statusBadge =
     episode.badge || (isResumable ? 'RESUME' : isNextUp && !isWatched ? 'NEXT UP' : undefined);
+  const spacingClass = isVirtualized ? (isLastEpisode ? 'mr-0' : 'mr-4') : 'mr-6';
 
   return (
     <div
@@ -429,11 +546,12 @@ const EpisodeLandscapeCard = memo(function EpisodeLandscapeCard({
       id={id}
       data-focus-id={id}
       data-testid={`card-${id}`}
+      data-focused={isFocused ? 'true' : 'false'}
       tabIndex={-1}
       role="button"
       onClick={handleSelect}
       onFocus={handleDomFocus}
-      className={`group relative flex flex-col w-80 shrink-0 mr-6 rounded-2xl overflow-hidden transition-transform duration-75 cursor-pointer outline-none ${
+      className={`group relative flex flex-col w-80 shrink-0 ${spacingClass} rounded-2xl overflow-hidden transition-transform duration-75 cursor-pointer outline-none ${
         isFocused
           ? 'bg-[#292a2f] scale-[1.03] border-2 border-[#ff7a18] z-20 tv-focus-ring'
           : 'bg-[#1a1b21] border border-[rgba(255,122,24,0.12)] opacity-95'
@@ -621,37 +739,34 @@ export function ItemDetailModal({
     return firstUnfinished?.season ?? seasons[0] ?? 1;
   }, [episodes, seasons]);
 
-  const [selectedSeason, setSelectedSeason] = useState<number>(() => {
-    if (
-      initialSelectedSeason !== undefined &&
-      seasons.includes(initialSelectedSeason)
-    ) {
-      return initialSelectedSeason;
-    }
-    return defaultSeason;
-  });
+  const initialFocusedSeason = useMemo(() => {
+    if (!initialFocusedId?.startsWith('episode-card-')) return undefined;
+    const targetId = initialFocusedId.slice('episode-card-'.length);
+    return episodes.find((ep) => String(ep.id) === targetId)?.season;
+  }, [episodes, initialFocusedId]);
+
+  const preferredSeason =
+    initialSelectedSeason !== undefined && seasons.includes(initialSelectedSeason)
+      ? initialSelectedSeason
+      : initialFocusedSeason !== undefined && seasons.includes(initialFocusedSeason)
+      ? initialFocusedSeason
+      : defaultSeason;
+
+  const [selectedSeason, setSelectedSeason] = useState<number>(() => preferredSeason);
 
   const [prevResolvedId, setPrevResolvedId] = useState(resolvedId);
   if (prevResolvedId !== resolvedId) {
     setPrevResolvedId(resolvedId);
-    const targetSeason =
-      initialSelectedSeason !== undefined && seasons.includes(initialSelectedSeason)
-        ? initialSelectedSeason
-        : defaultSeason;
-    if (selectedSeason !== targetSeason) {
-      setSelectedSeason(targetSeason);
+    if (selectedSeason !== preferredSeason) {
+      setSelectedSeason(preferredSeason);
     }
   }
 
   useEffect(() => {
     if (seasons.length > 0 && !seasons.includes(selectedSeason)) {
-      const targetSeason =
-        initialSelectedSeason !== undefined && seasons.includes(initialSelectedSeason)
-          ? initialSelectedSeason
-          : defaultSeason;
-      setSelectedSeason(targetSeason);
+      setSelectedSeason(preferredSeason);
     }
-  }, [defaultSeason, initialSelectedSeason, seasons, selectedSeason]);
+  }, [preferredSeason, seasons, selectedSeason]);
 
   const { setFocusedId, pushTrap, popTrap, getFocusedId, getActiveTrap } = useFocusStore();
 
@@ -767,15 +882,36 @@ export function ItemDetailModal({
     [episodes, selectedSeason]
   );
 
-  const seasonScopeKey = `${resolvedId ?? ''}:${selectedSeason}`;
+  const seasonScopeKey = `${effectiveOpen ? 1 : 0}:${resolvedId ?? ''}:${selectedSeason}`;
   const [prevSeasonScopeKey, setPrevSeasonScopeKey] = useState(seasonScopeKey);
-  const [activeEpisodeId, setActiveEpisodeId] = useState<number | string | null>(
-    () => visibleSeasonEpisodes[0]?.id ?? null
+  const [activeEpisodeId, setActiveEpisodeId] = useState<number | string | null>(() =>
+    resolveDefaultActiveEpisodeId(
+      visibleSeasonEpisodes,
+      initialFocusedId,
+      nextEpisode,
+      selectedSeason
+    )
   );
+  const [stripScrollLeft, setStripScrollLeft] = useState(0);
+  const [stripViewportWidth, setStripViewportWidth] = useState(0);
+  const [pendingEpisodeCommitTick, setPendingEpisodeCommitTick] = useState(0);
+
   if (prevSeasonScopeKey !== seasonScopeKey) {
     setPrevSeasonScopeKey(seasonScopeKey);
-    setActiveEpisodeId(visibleSeasonEpisodes[0]?.id ?? null);
+    setActiveEpisodeId(
+      resolveDefaultActiveEpisodeId(
+        visibleSeasonEpisodes,
+        initialFocusedId,
+        nextEpisode,
+        selectedSeason
+      )
+    );
+    setStripScrollLeft(0);
   }
+
+  const episodeStripRef = useRef<HTMLDivElement | null>(null);
+  const pendingEpisodeFocusRef = useRef<{ scopeKey: string; cardId: string } | null>(null);
+  const hasScrolledInitialEpisodeRef = useRef<string | null>(null);
 
   const activeEpisode = useMemo(() => {
     if (visibleSeasonEpisodes.length === 0) return null;
@@ -787,6 +923,42 @@ export function ItemDetailModal({
     }
     return visibleSeasonEpisodes[0] ?? null;
   }, [visibleSeasonEpisodes, activeEpisodeId]);
+
+  const activeEpisodeIndex = useMemo(() => {
+    if (visibleSeasonEpisodes.length === 0 || !activeEpisode) return 0;
+    const idx = visibleSeasonEpisodes.findIndex(
+      (ep) => String(ep.id) === String(activeEpisode.id)
+    );
+    return idx >= 0 ? idx : 0;
+  }, [visibleSeasonEpisodes, activeEpisode]);
+
+  const episodeRangeGroups = useMemo(
+    () =>
+      buildEpisodeRangeGroups(
+        visibleSeasonEpisodes.length,
+        EPISODE_RANGE_SIZE,
+        VIRTUAL_EPISODE_THRESHOLD
+      ),
+    [visibleSeasonEpisodes.length]
+  );
+
+  const epWindow = useMemo(
+    () =>
+      computeVirtualHorizontalWindow({
+        totalItems: visibleSeasonEpisodes.length,
+        itemWidthPx: EPISODE_CARD_WIDTH_PX,
+        itemSpacingPx: EPISODE_CARD_SPACING_PX,
+        viewportWidthPx: stripViewportWidth,
+        scrollLeftPx: stripScrollLeft,
+        anchorIndex: activeEpisodeIndex,
+        overscanItems: 8,
+        thresholdItems: VIRTUAL_EPISODE_THRESHOLD,
+      }),
+    [visibleSeasonEpisodes.length, stripViewportWidth, stripScrollLeft, activeEpisodeIndex]
+  );
+
+  const isStripVirtualizedRef = useRef(epWindow.isVirtualized);
+  isStripVirtualizedRef.current = epWindow.isVirtualized;
 
   const activeEpProgress = activeEpisode?.playback_progress ?? 0;
   const activeEpWatched = activeEpProgress >= 0.9;
@@ -826,6 +998,112 @@ export function ItemDetailModal({
     },
     [setFocusedId]
   );
+
+  const scrollEpisodeIndexIntoView = useCallback((idx: number) => {
+    const strip = episodeStripRef.current;
+    if (!strip) return;
+    const viewportW = strip.clientWidth || DEFAULT_STRIP_VIEWPORT_WIDTH_PX;
+    const targetLeft = idx * EPISODE_CARD_STRIDE_PX;
+    const nextScrollLeft = Math.max(
+      0,
+      targetLeft - Math.max(0, Math.floor((viewportW - EPISODE_CARD_WIDTH_PX) / 2))
+    );
+    strip.scrollLeft = nextScrollLeft;
+    setStripScrollLeft((prev) => (prev === nextScrollLeft ? prev : nextScrollLeft));
+  }, []);
+
+  const jumpToEpisodeIndex = useCallback(
+    (targetIdx: number) => {
+      if (visibleSeasonEpisodes.length === 0) return;
+      const clampedIdx = Math.max(0, Math.min(visibleSeasonEpisodes.length - 1, targetIdx));
+      const targetEp = visibleSeasonEpisodes[clampedIdx];
+      if (!targetEp) return;
+      const cardId = `episode-card-${targetEp.id}`;
+
+      setActiveEpisodeId(targetEp.id);
+      scrollEpisodeIndexIntoView(clampedIdx);
+
+      const mountedEl =
+        typeof document !== 'undefined'
+          ? document.querySelector<HTMLElement>(`[data-focus-id="${cardId}"]`) ||
+            document.getElementById(cardId)
+          : null;
+
+      if (mountedEl) {
+        pendingEpisodeFocusRef.current = null;
+        focusTargetById(cardId);
+      } else {
+        pendingEpisodeFocusRef.current = { scopeKey: seasonScopeKey, cardId };
+        setPendingEpisodeCommitTick((tick) => tick + 1);
+      }
+    },
+    [visibleSeasonEpisodes, scrollEpisodeIndexIntoView, focusTargetById, seasonScopeKey]
+  );
+
+  useLayoutEffect(() => {
+    if (!effectiveOpen) {
+      pendingEpisodeFocusRef.current = null;
+      hasScrolledInitialEpisodeRef.current = null;
+      return;
+    }
+    if (pendingEpisodeFocusRef.current && pendingEpisodeFocusRef.current.scopeKey !== seasonScopeKey) {
+      pendingEpisodeFocusRef.current = null;
+    }
+    const strip = episodeStripRef.current;
+    if (!strip) return;
+    const measureViewport = () => {
+      const nextWidth = strip.clientWidth || 0;
+      setStripViewportWidth((prev) => (prev === nextWidth ? prev : nextWidth));
+    };
+    measureViewport();
+    window.addEventListener('resize', measureViewport);
+    return () => window.removeEventListener('resize', measureViewport);
+  }, [effectiveOpen, seasonScopeKey, seasons.length]);
+
+  useLayoutEffect(() => {
+    if (!effectiveOpen) return;
+    const strip = episodeStripRef.current;
+    if (!strip) return;
+    const scrollKey = `${seasonScopeKey}:${initialFocusedId ?? ''}`;
+    if (hasScrolledInitialEpisodeRef.current === scrollKey) return;
+    hasScrolledInitialEpisodeRef.current = scrollKey;
+    if (epWindow.isVirtualized && activeEpisodeIndex > 0) {
+      scrollEpisodeIndexIntoView(activeEpisodeIndex);
+    } else {
+      strip.scrollLeft = 0;
+    }
+  }, [
+    effectiveOpen,
+    seasonScopeKey,
+    initialFocusedId,
+    epWindow.isVirtualized,
+    activeEpisodeIndex,
+    scrollEpisodeIndexIntoView,
+  ]);
+
+  useLayoutEffect(() => {
+    const pending = pendingEpisodeFocusRef.current;
+    if (!pending || !effectiveOpen) return;
+    if (pending.scopeKey !== seasonScopeKey) {
+      pendingEpisodeFocusRef.current = null;
+      return;
+    }
+    const el =
+      typeof document !== 'undefined'
+        ? document.querySelector<HTMLElement>(`[data-focus-id="${pending.cardId}"]`) ||
+          document.getElementById(pending.cardId)
+        : null;
+    if (!el) return;
+    pendingEpisodeFocusRef.current = null;
+    focusTargetById(pending.cardId);
+  }, [
+    effectiveOpen,
+    seasonScopeKey,
+    activeEpisodeId,
+    stripScrollLeft,
+    pendingEpisodeCommitTick,
+    focusTargetById,
+  ]);
 
   useEffect(() => {
     if (!effectiveOpen) return;
@@ -875,6 +1153,13 @@ export function ItemDetailModal({
         const activeDomId =
           typeof document !== 'undefined' ? document.activeElement?.id || '' : '';
         const current = getFocusedId() || activeDomId;
+        const extractPrefixedId = (prefix: string) =>
+          current.startsWith(prefix)
+            ? current
+            : activeDomId.startsWith(prefix)
+            ? activeDomId
+            : '';
+
         const isDetailAction =
           current.startsWith('detail-') ||
           activeDomId.startsWith('detail-') ||
@@ -885,10 +1170,52 @@ export function ItemDetailModal({
           current === 'season-watch-toggle-btn' ||
           activeDomId === 'season-watch-toggle-btn';
         const isSeasonRow = isSeasonTab || isSeasonWatchToggle;
+        const isEpisodeRangePill =
+          current.startsWith('episode-range-pill-') ||
+          activeDomId.startsWith('episode-range-pill-');
         const isEpisodeCard =
           current.startsWith('episode-card-') || activeDomId.startsWith('episode-card-');
         const isEpisodeAction =
           current.startsWith('episode-action-') || activeDomId.startsWith('episode-action-');
+
+        const pendingCardId =
+          pendingEpisodeFocusRef.current?.scopeKey === seasonScopeKey
+            ? pendingEpisodeFocusRef.current.cardId
+            : null;
+
+        const resolveCurrentEpisodeIndex = () => {
+          const cardId = pendingCardId || extractPrefixedId('episode-card-');
+          if (cardId) {
+            const epIdStr = cardId.slice('episode-card-'.length);
+            const idx = visibleSeasonEpisodes.findIndex((ep) => String(ep.id) === epIdStr);
+            if (idx >= 0) return idx;
+          }
+          return activeEpisodeIndex;
+        };
+
+        const activeRangeGroup =
+          episodeRangeGroups.find(
+            (g) => activeEpisodeIndex >= g.startIndex && activeEpisodeIndex <= g.endIndex
+          ) ?? episodeRangeGroups[0];
+
+        const isFastForward = code === TVKeys.FAST_FORWARD || e.key === 'MediaFastForward';
+        const isRewind = code === TVKeys.REWIND || e.key === 'MediaRewind';
+        if (
+          (isFastForward || isRewind) &&
+          (isEpisodeCard || isEpisodeRangePill || Boolean(pendingCardId))
+        ) {
+          if (visibleSeasonEpisodes.length > 0) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            const baseIdx =
+              isEpisodeRangePill && !pendingCardId
+                ? activeEpisodeIndex
+                : resolveCurrentEpisodeIndex();
+            const delta = isFastForward ? EPISODE_FAST_SKIP_COUNT : -EPISODE_FAST_SKIP_COUNT;
+            jumpToEpisodeIndex(baseIdx + delta);
+          }
+          return;
+        }
 
         // Down Navigation
         if (code === TVKeys.DOWN || e.key === 'ArrowDown') {
@@ -897,17 +1224,23 @@ export function ItemDetailModal({
             e.stopImmediatePropagation();
             focusTargetById(`season-tab-${selectedSeason}`);
           } else if (isSeasonRow) {
-            if (visibleSeasonEpisodes.length > 0) {
+            if (episodeRangeGroups.length > 0 && activeRangeGroup) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              focusTargetById(`episode-range-pill-${activeRangeGroup.startIndex}`);
+            } else if (visibleSeasonEpisodes.length > 0) {
               e.preventDefault();
               e.stopImmediatePropagation();
               focusTargetById(`episode-card-${visibleSeasonEpisodes[0].id}`);
             }
+          } else if (isEpisodeRangePill) {
+            if (visibleSeasonEpisodes.length > 0) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              jumpToEpisodeIndex(activeEpisodeIndex);
+            }
           } else if (isEpisodeCard) {
-            const epCardId = current.startsWith('episode-card-')
-              ? current
-              : activeDomId.startsWith('episode-card-')
-              ? activeDomId
-              : '';
+            const epCardId = extractPrefixedId('episode-card-');
             const epIdStr = epCardId.replace('episode-card-', '');
             const targetEp =
               visibleSeasonEpisodes.find((ep) => String(ep.id) === epIdStr) ??
@@ -942,6 +1275,21 @@ export function ItemDetailModal({
           } else if (isEpisodeCard) {
             e.preventDefault();
             e.stopImmediatePropagation();
+            if (episodeRangeGroups.length > 0) {
+              const epIdx = resolveCurrentEpisodeIndex();
+              const pillGroup =
+                episodeRangeGroups.find(
+                  (g) => epIdx >= g.startIndex && epIdx <= g.endIndex
+                ) ?? activeRangeGroup;
+              if (pillGroup) {
+                focusTargetById(`episode-range-pill-${pillGroup.startIndex}`);
+              }
+            } else {
+              focusTargetById(`season-tab-${selectedSeason}`);
+            }
+          } else if (isEpisodeRangePill) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
             focusTargetById(`season-tab-${selectedSeason}`);
           } else if (isSeasonRow) {
             e.preventDefault();
@@ -949,7 +1297,7 @@ export function ItemDetailModal({
             focusTargetById(primaryBtnId);
           }
         }
-        // Left Navigation on Season Tabs / Season Watch Toggle / Episode Actions
+        // Left Navigation on Season Tabs / Range Pills / Episode Cards / Episode Actions
         else if (code === TVKeys.LEFT || e.key === 'ArrowLeft') {
           if (isSeasonWatchToggle) {
             e.preventDefault();
@@ -958,11 +1306,7 @@ export function ItemDetailModal({
               focusTargetById(`season-tab-${seasons[seasons.length - 1]}`);
             }
           } else if (isSeasonTab) {
-            const tabId = current.startsWith('season-tab-')
-              ? current
-              : activeDomId.startsWith('season-tab-')
-              ? activeDomId
-              : '';
+            const tabId = extractPrefixedId('season-tab-');
             if (tabId) {
               e.preventDefault();
               e.stopImmediatePropagation();
@@ -973,31 +1317,37 @@ export function ItemDetailModal({
                 focusTargetById(`season-tab-${prevSeason}`);
               }
             }
+          } else if (isEpisodeRangePill) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            const pillId = extractPrefixedId('episode-range-pill-');
+            const pillIdx = episodeRangeGroups.findIndex(
+              (g) => `episode-range-pill-${g.startIndex}` === pillId
+            );
+            if (pillIdx > 0) {
+              focusTargetById(`episode-range-pill-${episodeRangeGroups[pillIdx - 1].startIndex}`);
+            }
+          } else if (isEpisodeCard) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            jumpToEpisodeIndex(resolveCurrentEpisodeIndex() - 1);
           } else if (isEpisodeAction) {
             e.preventDefault();
             e.stopImmediatePropagation();
-            const actionId = current.startsWith('episode-action-')
-              ? current
-              : activeDomId.startsWith('episode-action-')
-              ? activeDomId
-              : '';
+            const actionId = extractPrefixedId('episode-action-');
             const currentIdx = episodeActionIds.indexOf(actionId);
             if (currentIdx > 0) {
               focusTargetById(episodeActionIds[currentIdx - 1]);
             }
           }
         }
-        // Right Navigation on Season Tabs / Season Watch Toggle / Episode Actions
+        // Right Navigation on Season Tabs / Range Pills / Episode Cards / Episode Actions
         else if (code === TVKeys.RIGHT || e.key === 'ArrowRight') {
           if (isSeasonWatchToggle) {
             e.preventDefault();
             e.stopImmediatePropagation();
           } else if (isSeasonTab) {
-            const tabId = current.startsWith('season-tab-')
-              ? current
-              : activeDomId.startsWith('season-tab-')
-              ? activeDomId
-              : '';
+            const tabId = extractPrefixedId('season-tab-');
             if (tabId) {
               e.preventDefault();
               e.stopImmediatePropagation();
@@ -1010,33 +1360,51 @@ export function ItemDetailModal({
                 focusTargetById('season-watch-toggle-btn');
               }
             }
+          } else if (isEpisodeRangePill) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            const pillId = extractPrefixedId('episode-range-pill-');
+            const pillIdx = episodeRangeGroups.findIndex(
+              (g) => `episode-range-pill-${g.startIndex}` === pillId
+            );
+            if (pillIdx >= 0 && pillIdx < episodeRangeGroups.length - 1) {
+              focusTargetById(`episode-range-pill-${episodeRangeGroups[pillIdx + 1].startIndex}`);
+            }
+          } else if (isEpisodeCard) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            jumpToEpisodeIndex(resolveCurrentEpisodeIndex() + 1);
           } else if (isEpisodeAction) {
             e.preventDefault();
             e.stopImmediatePropagation();
-            const actionId = current.startsWith('episode-action-')
-              ? current
-              : activeDomId.startsWith('episode-action-')
-              ? activeDomId
-              : '';
+            const actionId = extractPrefixedId('episode-action-');
             const currentIdx = episodeActionIds.indexOf(actionId);
             if (currentIdx >= 0 && currentIdx < episodeActionIds.length - 1) {
               focusTargetById(episodeActionIds[currentIdx + 1]);
             }
           }
         }
-        // Enter Navigation on Season Tabs: Commit Season Switch
+        // Enter Navigation on Season Tabs & Range Pills
         else if (code === TVKeys.ENTER || e.key === 'Enter') {
-          const tabId = current.startsWith('season-tab-')
-            ? current
-            : activeDomId.startsWith('season-tab-')
-            ? activeDomId
-            : '';
+          const tabId = extractPrefixedId('season-tab-');
           if (tabId) {
             e.preventDefault();
             e.stopImmediatePropagation();
             const seasonNum = parseInt(tabId.replace('season-tab-', ''), 10);
             if (!isNaN(seasonNum) && seasonNum !== selectedSeason) {
               setSelectedSeason(seasonNum);
+            }
+            return;
+          }
+          const pillId = extractPrefixedId('episode-range-pill-');
+          if (pillId) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            const targetGroup = episodeRangeGroups.find(
+              (g) => `episode-range-pill-${g.startIndex}` === pillId
+            );
+            if (targetGroup) {
+              jumpToEpisodeIndex(targetGroup.startIndex);
             }
           }
         }
@@ -1050,15 +1418,27 @@ export function ItemDetailModal({
     onClose,
     seasons,
     selectedSeason,
+    seasonScopeKey,
     visibleSeasonEpisodes,
     activeEpisode,
     activeEpisodeId,
+    activeEpisodeIndex,
+    episodeRangeGroups,
     episodeActionIds,
     getFocusedId,
     getActiveTrap,
     focusTargetById,
+    jumpToEpisodeIndex,
     primaryBtnId,
   ]);
+
+  const handleEpisodeStripScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    if (!isStripVirtualizedRef.current) return;
+    const nextLeft = e.currentTarget.scrollLeft;
+    const nextWidth = e.currentTarget.clientWidth;
+    setStripScrollLeft((prev) => (prev === nextLeft ? prev : nextLeft));
+    setStripViewportWidth((prev) => (prev === nextWidth ? prev : nextWidth));
+  }, []);
 
   const handlePlayShowResume = useCallback(() => {
     if (!nextEpisode) return;
@@ -1672,20 +2052,61 @@ export function ItemDetailModal({
             )}
           </div>
 
+          {/* Episode Range Jump Pills (for large seasons > 30 episodes) */}
+          {episodeRangeGroups.length > 0 && (
+            <div
+              data-testid="episode-range-pills"
+              className="flex items-center overflow-x-auto pb-2 mb-1 scrollbar-none"
+            >
+              {episodeRangeGroups.map((group, idx) => (
+                <EpisodeRangePill
+                  key={group.startIndex}
+                  group={group}
+                  order={idx + 1}
+                  isActiveRange={
+                    activeEpisodeIndex >= group.startIndex &&
+                    activeEpisodeIndex <= group.endIndex
+                  }
+                  onActivate={jumpToEpisodeIndex}
+                  onFocusPill={setFocusedId}
+                />
+              ))}
+            </div>
+          )}
+
           {/* Horizontal Episode Carousel Cards (16:9 Landscape Aspect) */}
-          <div className="flex overflow-x-auto pb-3 pt-2 scrollbar-none">
-            {visibleSeasonEpisodes.map((ep, idx) => (
-              <EpisodeLandscapeCard
-                key={ep.id}
-                episode={ep}
-                index={idx}
-                selectedSeason={selectedSeason}
-                imageUrl={formatImageUrl(ep.poster_url) || backdrop || poster}
-                isNextUp={Boolean(nextEpisode && String(nextEpisode.id) === String(ep.id))}
-                onSelectEpisode={handleSelectEpisode}
-                onFocusEpisode={handleFocusEpisodeCard}
-              />
-            ))}
+          <div
+            ref={episodeStripRef}
+            onScroll={handleEpisodeStripScroll}
+            className="flex overflow-x-auto pb-3 pt-2 scrollbar-none"
+            style={
+              epWindow.isVirtualized
+                ? {
+                    paddingLeft: `${epWindow.leftSpacerPx}px`,
+                    paddingRight: `${epWindow.rightSpacerPx}px`,
+                  }
+                : undefined
+            }
+          >
+            {visibleSeasonEpisodes
+              .slice(epWindow.startIndex, epWindow.endIndex)
+              .map((ep, offset) => {
+                const epIndex = epWindow.startIndex + offset;
+                return (
+                  <EpisodeLandscapeCard
+                    key={ep.id}
+                    episode={ep}
+                    index={epIndex}
+                    selectedSeason={selectedSeason}
+                    imageUrl={formatImageUrl(ep.poster_url) || backdrop || poster}
+                    isNextUp={Boolean(nextEpisode && String(nextEpisode.id) === String(ep.id))}
+                    isVirtualized={epWindow.isVirtualized}
+                    isLastEpisode={epIndex === visibleSeasonEpisodes.length - 1}
+                    onSelectEpisode={handleSelectEpisode}
+                    onFocusEpisode={handleFocusEpisodeCard}
+                  />
+                );
+              })}
           </div>
 
           {/* Active-Episode Inline Action Strip */}
@@ -1780,6 +2201,14 @@ export function ItemDetailModal({
                   [CH ▲/▼]
                 </strong>
                 Switch Seasons
+              </span>
+            )}
+            {episodeRangeGroups.length > 0 && (
+              <span className="mr-8">
+                <strong className="text-white bg-[#292a2f] border border-[rgba(255,122,24,0.18)] px-2 py-0.5 rounded font-mono font-bold mr-1.5">
+                  [FF/REW]
+                </strong>
+                ±10 Eps
               </span>
             )}
           </div>
