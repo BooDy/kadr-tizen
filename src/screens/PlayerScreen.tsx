@@ -11,7 +11,6 @@ import { createPlayerDriver, PlayerDriver, PlayerState, VideoLayoutHints } from 
 import { ErrorQRCode, DiagnosticPayload } from '../components/player/ErrorQRCode';
 import {
   KNOWN_COMPATIBILITY_INFO,
-  SAMSUNG_TV_HLS_MAX_HEIGHT,
   checkAudioCompatibility,
   hasMissingAudioStream,
   isAudioMediaType,
@@ -56,6 +55,7 @@ import {
   saveSubtitleSettings,
   SubtitleSettings,
 } from '../player/subtitleSettings';
+import { loadPlaybackSettings } from '../player/playbackSettings';
 import { TVButton } from '../components/tv/TVButton';
 import { AlertTriangle, RotateCcw, MonitorPlay, ArrowLeft, FastForward, Rewind, Layers, Info } from 'lucide-react';
 import { getAuthenticatedImageUrl } from '../utils/imageUrl';
@@ -310,9 +310,16 @@ export function PlayerScreen({
     !(window as any).webapis?.avplay &&
     !(window as any).tizen &&
     (typeof process === 'undefined' || process.env?.NODE_ENV !== 'test');
-  const [forceHtml5, setForceHtml5] = useState(false);
-  const forceHtml5Ref = useRef(forceHtml5);
-  forceHtml5Ref.current = forceHtml5;
+  const playbackSettings = useMemo(() => loadPlaybackSettings(), [itemId]);
+  const preferHtml5Engine = playbackSettings.preferredPlayerEngine === 'html5';
+  const hlsMaxHeight =
+    playbackSettings.hlsMaxHeight > 0 ? playbackSettings.hlsMaxHeight : undefined;
+  const [forceHtml5, setForceHtml5] = useState(
+    () => playbackSettings.preferredPlayerEngine === 'html5'
+  );
+  const effectiveForceHtml5 = forceHtml5 || preferHtml5Engine;
+  const forceHtml5Ref = useRef(effectiveForceHtml5);
+  forceHtml5Ref.current = effectiveForceHtml5;
   const [reloadKey, setReloadKey] = useState(0);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const showDetailsModalRef = useRef(showDetailsModal);
@@ -405,7 +412,7 @@ export function PlayerScreen({
   const initialCompat = computeInitialPlaybackMode(
     mediaType ?? currentQueueEntry?.mediaType,
     technical,
-    forceHtml5 || isBrowserEnv
+    effectiveForceHtml5 || isBrowserEnv
   );
   const [useHls, setUseHls] = useState<boolean>(() => initialCompat.useHls);
   const hlsAutoFallbackDoneRef = useRef<boolean>(initialCompat.autoFallbackDone);
@@ -700,7 +707,7 @@ export function PlayerScreen({
             } else if (
               !hlsAutoFallbackDoneRef.current &&
               !directStreamTriedRef.current &&
-              canBypassHlsForAudioLessVideo(mergedTechnical, forceHtml5 || isBrowserEnv)
+              canBypassHlsForAudioLessVideo(mergedTechnical, effectiveForceHtml5 || isBrowserEnv)
             ) {
               hlsAutoFallbackDoneRef.current = true;
               hlsTranscodeFailedRef.current = true;
@@ -713,7 +720,7 @@ export function PlayerScreen({
                 detail.technical.video_codec,
                 activeTrackCodec,
                 detail.technical.container,
-                forceHtml5 || isBrowserEnv
+                effectiveForceHtml5 || isBrowserEnv
               )
             ) {
               switchHlsMode(true);
@@ -748,11 +755,17 @@ export function PlayerScreen({
     return () => {
       isMounted = false;
     };
-  }, [itemId, apiClient, forceHtml5, applyDiscoveredAudioTracks, clearPlaybackErrorState]);
+  }, [itemId, apiClient, effectiveForceHtml5, applyDiscoveredAudioTracks, clearPlaybackErrorState]);
 
   const handleRetry = useCallback((retryWithHls?: boolean) => {
     pauseAfterRestoreRef.current = false;
     restoreResumeMsRef.current = null;
+    const html5Preferred =
+      preferHtml5Engine || loadPlaybackSettings().preferredPlayerEngine === 'html5';
+    if (html5Preferred) {
+      setForceHtml5(true);
+      forceHtml5Ref.current = true;
+    }
     if (retryWithHls !== undefined) {
       hlsAutoFallbackDoneRef.current = !retryWithHls || directStreamTriedRef.current;
       if (retryWithHls) {
@@ -763,7 +776,7 @@ export function PlayerScreen({
     } else {
       const bypass = canBypassHlsForAudioLessVideo(
         technicalInfoRef.current ?? technical,
-        forceHtml5 || isBrowserEnv
+        effectiveForceHtml5 || html5Preferred || isBrowserEnv
       );
       hlsAutoFallbackDoneRef.current = bypass;
       hlsTranscodeFailedRef.current = false;
@@ -771,7 +784,7 @@ export function PlayerScreen({
     }
     clearPlaybackErrorState();
     setReloadKey((k) => k + 1);
-  }, [technical, forceHtml5, isBrowserEnv, clearPlaybackErrorState]);
+  }, [technical, preferHtml5Engine, effectiveForceHtml5, isBrowserEnv, clearPlaybackErrorState]);
 
   const handleSwitchToHtml5 = useCallback(() => {
     pauseAfterRestoreRef.current = false;
@@ -883,10 +896,13 @@ export function PlayerScreen({
   const [prevStreamItemId, setPrevStreamItemId] = useState(itemId);
   if (prevStreamItemId !== itemId) {
     setPrevStreamItemId(itemId);
+    const nextPreferHtml5 = playbackSettings.preferredPlayerEngine === 'html5';
+    setForceHtml5(nextPreferHtml5);
+    forceHtml5Ref.current = nextPreferHtml5;
     const nextCompat = computeInitialPlaybackMode(
       mediaType ?? currentQueueEntry?.mediaType,
       technical,
-      forceHtml5 || isBrowserEnv
+      nextPreferHtml5 || isBrowserEnv
     );
     setPlayerState('buffering');
     setTechnicalInfo(technical);
@@ -1658,7 +1674,7 @@ export function PlayerScreen({
       setPlaybackError({
         message: 'Invalid or missing media item ID for playback stream',
         streamUrl: `${cleanServerUrl}/api/v1/stream/${itemId}`,
-        driverName: forceHtml5 ? 'HTML5 Video' : 'Tizen AVPlay',
+        driverName: effectiveForceHtml5 ? 'HTML5 Video' : 'Tizen AVPlay',
       });
       return;
     }
@@ -1675,12 +1691,12 @@ export function PlayerScreen({
       unlockTokens: apiClient.getUnlockTokens ? apiClient.getUnlockTokens() : [],
       forceHls: useHls,
       forceDirect: !useHls,
-      forceHtml5: forceHtml5 || isBrowserEnv || isAudioMode,
+      forceHtml5: effectiveForceHtml5 || isBrowserEnv || isAudioMode,
       videoCodec: technicalInfoRef.current?.video_codec || technical?.video_codec,
       audioCodec: technicalInfoRef.current?.audio_codec || technical?.audio_codec,
       container: technicalInfoRef.current?.container || technical?.container,
       startSeconds: activeStartMs > 0 ? activeStartMs / 1000 : 0,
-      maxHeight: isAudioMode ? undefined : SAMSUNG_TV_HLS_MAX_HEIGHT,
+      maxHeight: isAudioMode ? undefined : hlsMaxHeight,
       audioTrackIndex: selectedAudioTrackIndexRef.current,
       isAudioOnly: isAudioMode,
     });
@@ -1708,7 +1724,7 @@ export function PlayerScreen({
       if (isAudioModeRef.current) {
         return checkAudioCompatibility(fallbackTech.audio_codec, fallbackTech.container).isSupported;
       }
-      const useHtml5Mode = forceHtml5 || isBrowserEnv;
+      const useHtml5Mode = effectiveForceHtml5 || isBrowserEnv;
       return isSupportedOnSamsungTv(
         fallbackTech.video_codec,
         fallbackTech.audio_codec,
@@ -1717,7 +1733,7 @@ export function PlayerScreen({
       );
     };
 
-    const driver = createPlayerDriver(forceHtml5 || isAudioMode);
+    const driver = createPlayerDriver(effectiveForceHtml5 || isAudioMode);
     driverRef.current = driver;
     if (isAudioMode) {
       driver.setPlaybackRate?.(effectivePlaybackRateRef.current);
@@ -1750,7 +1766,7 @@ export function PlayerScreen({
     const initialMediaHintsAudioIdx = normalizeDirectPlayAudioIndex(
       isHls,
       activeTech,
-      forceHtml5 || isBrowserEnv
+      effectiveForceHtml5 || isBrowserEnv
     );
     driver.setMediaHints?.(
       buildMediaHints(activeTech, initialMediaHintsAudioIdx, audioTracksRef.current)
@@ -1769,7 +1785,7 @@ export function PlayerScreen({
         setPlaybackError({
           message: 'Buffering timeout after 10s. The stream may contain an unsupported codec (e.g. DTS audio or AV1 video) or network stalls.',
           streamUrl,
-          driverName: driver.name || (forceHtml5 ? 'HTML5 Video' : 'Tizen AVPlay'),
+          driverName: driver.name || (effectiveForceHtml5 ? 'HTML5 Video' : 'Tizen AVPlay'),
         });
       }
     }, 10000);
@@ -1902,7 +1918,7 @@ export function PlayerScreen({
       setPlaybackError({
         message: err || 'Playback failed',
         streamUrl,
-        driverName: driver.name || (forceHtml5 ? 'HTML5 Video' : 'Tizen AVPlay'),
+        driverName: driver.name || (effectiveForceHtml5 ? 'HTML5 Video' : 'Tizen AVPlay'),
       });
     });
 
@@ -1913,7 +1929,7 @@ export function PlayerScreen({
         !hlsTranscodeFailedRef.current &&
         !canBypassHlsForAudioLessVideo(
           technicalInfoRef.current ?? technical,
-          forceHtml5 || isBrowserEnv
+          effectiveForceHtml5 || isBrowserEnv
         )
       ) {
         hlsSeekOffsetMsRef.current = failedTargetMs;
@@ -1937,7 +1953,7 @@ export function PlayerScreen({
       const activeAudioIndex = normalizeDirectPlayAudioIndex(
         isHls,
         activeTechForInit,
-        forceHtml5 || isBrowserEnv
+        effectiveForceHtml5 || isBrowserEnv
       );
       const initHints = buildMediaHints(
         activeTechForInit,
@@ -1956,7 +1972,7 @@ export function PlayerScreen({
         setPlaybackError({
           message: err?.message || String(err),
           streamUrl,
-          driverName: driver.name || (forceHtml5 ? 'HTML5 Video' : 'Tizen AVPlay'),
+          driverName: driver.name || (effectiveForceHtml5 ? 'HTML5 Video' : 'Tizen AVPlay'),
         });
       };
       if (driver.name === 'HTML5 Video') {
@@ -2010,7 +2026,7 @@ export function PlayerScreen({
                   fallbackTech.video_codec,
                   fallbackTech.audio_codec,
                   fallbackTech.container,
-                  forceHtml5 || isBrowserEnv
+                  effectiveForceHtml5 || isBrowserEnv
                 ));
           const isTranscoderCrashStatus =
             probeRes.status === 500 || probeRes.status === 502 || probeRes.status === 504;
@@ -2061,7 +2077,7 @@ export function PlayerScreen({
           setPlaybackError({
             message: `Media File Missing: ${serverErr} (HTTP 404)`,
             streamUrl,
-            driverName: driver.name || (forceHtml5 ? 'HTML5 Video' : 'Tizen AVPlay'),
+            driverName: driver.name || (effectiveForceHtml5 ? 'HTML5 Video' : 'Tizen AVPlay'),
             statusCode: 404,
           });
           return;
@@ -2091,7 +2107,7 @@ export function PlayerScreen({
           setPlaybackError({
             message: formattedErr,
             streamUrl,
-            driverName: driver.name || (forceHtml5 ? 'HTML5 Video' : 'Tizen AVPlay'),
+            driverName: driver.name || (effectiveForceHtml5 ? 'HTML5 Video' : 'Tizen AVPlay'),
             statusCode: probeRes.status,
           });
           return;
@@ -2190,7 +2206,8 @@ export function PlayerScreen({
     initialResume,
     apiClient,
     reloadKey,
-    forceHtml5,
+    effectiveForceHtml5,
+    hlsMaxHeight,
     isAudioMode,
     useHls,
     hlsSeekOffsetMs,
