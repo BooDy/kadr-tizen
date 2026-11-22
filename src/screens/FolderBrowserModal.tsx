@@ -1,4 +1,12 @@
-import { useEffect, useState, useRef, useCallback, useMemo, memo } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useState,
+  useRef,
+  useCallback,
+  useMemo,
+  memo,
+} from 'react';
 import { ApiClient } from '../api/client';
 import { fetchLibraryFolders } from '../api/folders';
 import { FolderImage, LibraryFolderResponse } from '../types/kadr';
@@ -10,6 +18,12 @@ import { TVKeys } from '../navigation/keys';
 import { Folder, Play, Loader2, Lock, ImageIcon, ArrowLeft, X, ListPlus, Film } from 'lucide-react';
 import { getAuthenticatedImageUrl } from '../utils/imageUrl';
 import { toResumePercentageSentinel } from '../utils/playbackProgress';
+import {
+  computeVirtualRowWindow,
+  DEFAULT_GRID_VIEWPORT_HEIGHT_PX,
+  VIRTUAL_GRID_ITEM_THRESHOLD,
+  VirtualRowWindow,
+} from '../utils/virtualWindow';
 import {
   AddToPlaylistModal,
   AddToPlaylistTarget,
@@ -38,6 +52,27 @@ export interface FolderBrowserModalProps {
 
 const GRID_COLS = 6;
 const PAGE_JUMP_ROWS = 5;
+const GRID_ROW_SPACING_PX = 24;
+const SECTION_ROW_METRICS = {
+  dir: { rowHeightPx: 96, rowSpacingPx: GRID_ROW_SPACING_PX },
+  item: { rowHeightPx: 364, rowSpacingPx: GRID_ROW_SPACING_PX },
+  image: { rowHeightPx: 216, rowSpacingPx: GRID_ROW_SPACING_PX },
+} as const;
+type GridSectionKey = keyof typeof SECTION_ROW_METRICS;
+
+function buildGridStyle(win: VirtualRowWindow): React.CSSProperties {
+  return {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(6, minmax(0, 1fr))',
+    gridGap: '24px',
+    ...(win.isVirtualized
+      ? {
+          paddingTop: `${win.topSpacerPx}px`,
+          paddingBottom: `${win.bottomSpacerPx}px`,
+        }
+      : {}),
+  };
+}
 
 function formatBytes(bytes?: number): string {
   if (!bytes || bytes <= 0) return '0 B';
@@ -376,8 +411,11 @@ interface FolderFocusBridgeProps {
   exitedChildPathRef: React.MutableRefObject<string | null>;
   autoFocusedFolderKeyRef: React.MutableRefObject<string | null>;
   lastFocusedItemIdRef: React.MutableRefObject<string | null>;
+  pendingWindowFocusIdRef: React.MutableRefObject<string | null>;
   setFocusedIdRef: React.MutableRefObject<((id: string | null) => void) | null>;
   goBackRef: React.MutableRefObject<() => void>;
+  requestNodeFocus: (nextId: string) => void;
+  syncTargetFocusId: (nextId: string) => void;
 }
 
 const FolderFocusBridge = memo(function FolderFocusBridge({
@@ -396,8 +434,11 @@ const FolderFocusBridge = memo(function FolderFocusBridge({
   exitedChildPathRef,
   autoFocusedFolderKeyRef,
   lastFocusedItemIdRef,
+  pendingWindowFocusIdRef,
   setFocusedIdRef,
   goBackRef,
+  requestNodeFocus,
+  syncTargetFocusId,
 }: FolderFocusBridgeProps) {
   const { focusedId, setFocusedId, pushTrap, popTrap, activeTrap } = useFocusContext();
   setFocusedIdRef.current = setFocusedId;
@@ -526,6 +567,7 @@ const FolderFocusBridge = memo(function FolderFocusBridge({
     if (!isOpen || loading) return;
     if (activeTrap && activeTrap !== 'folder-browser-modal') return;
     if (hasOtherStackedModal()) return;
+    if (pendingWindowFocusIdRef.current) return;
 
     const statusTag = isLocked ? 'locked' : error ? 'error' : 'loaded';
     const folderKey = `${libraryId}:${currentPath}:${statusTag}`;
@@ -533,13 +575,13 @@ const FolderFocusBridge = memo(function FolderFocusBridge({
     if (autoFocusedFolderKeyRef.current !== folderKey) {
       autoFocusedFolderKeyRef.current = folderKey;
       const targetId = computePreferredFocusId();
-      lastFocusedItemIdRef.current = targetId;
-      setFocusedId(targetId);
+      requestNodeFocus(targetId);
       return;
     }
 
     if (focusedId && validNodeIds.has(focusedId)) {
       lastFocusedItemIdRef.current = focusedId;
+      syncTargetFocusId(focusedId);
       return;
     }
 
@@ -549,8 +591,7 @@ const FolderFocusBridge = memo(function FolderFocusBridge({
       lastFocusedItemIdRef.current && validNodeIds.has(lastFocusedItemIdRef.current)
         ? lastFocusedItemIdRef.current
         : computePreferredFocusId();
-    lastFocusedItemIdRef.current = healId;
-    setFocusedId(healId);
+    requestNodeFocus(healId);
   }, [
     isOpen,
     loading,
@@ -566,7 +607,9 @@ const FolderFocusBridge = memo(function FolderFocusBridge({
     computePreferredFocusId,
     autoFocusedFolderKeyRef,
     lastFocusedItemIdRef,
-    setFocusedId,
+    pendingWindowFocusIdRef,
+    requestNodeFocus,
+    syncTargetFocusId,
   ]);
 
   // Capture keydown: Back navigation + Fast Page-Up / Page-Down (~5 rows/items)
@@ -623,7 +666,7 @@ const FolderFocusBridge = memo(function FolderFocusBridge({
       e.preventDefault();
       e.stopImmediatePropagation();
 
-      const curId = focusedIdRef.current;
+      const curId = pendingWindowFocusIdRef.current ?? focusedIdRef.current;
       let foundRow = -1;
       let foundCol = 0;
 
@@ -661,17 +704,13 @@ const FolderFocusBridge = memo(function FolderFocusBridge({
       }
 
       if (nextId) {
-        lastFocusedItemIdRef.current = nextId;
-        setFocusedId(nextId);
-        if (typeof document !== 'undefined') {
-          scrollElementIntoViewIfClipped(document.getElementById(nextId));
-        }
+        requestNodeFocus(nextId);
       }
     };
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [isOpen, hasOtherStackedModal, goBackRef, lastFocusedItemIdRef, setFocusedId]);
+  }, [isOpen, hasOtherStackedModal, goBackRef, pendingWindowFocusIdRef, requestNodeFocus]);
 
   return null;
 });
@@ -705,6 +744,10 @@ export function FolderBrowserModal({
   const [internalAddTarget, setInternalAddTarget] = useState<AddToPlaylistTarget | null>(null);
 
   const dialogRef = useRef<HTMLDivElement | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const dirGridRef = useRef<HTMLDivElement | null>(null);
+  const itemGridRef = useRef<HTMLDivElement | null>(null);
+  const imageGridRef = useRef<HTMLDivElement | null>(null);
   const setFocusedIdRef = useRef<((id: string | null) => void) | null>(null);
   const onLockedLibraryRef = useRef(onLockedLibrary);
   onLockedLibraryRef.current = onLockedLibrary;
@@ -719,9 +762,18 @@ export function FolderBrowserModal({
 
   const exitedChildPathRef = useRef<string | null>(null);
   const autoFocusedFolderKeyRef = useRef<string | null>(null);
+  const pendingWindowFocusIdRef = useRef<string | null>(null);
   const lastFocusedItemIdRef = useRef<string | null>(
     initialFocusItemId !== undefined ? `folder-item-${initialFocusItemId}` : null
   );
+  const [targetFocusId, setTargetFocusId] = useState<string | null>(() =>
+    initialFocusItemId !== undefined ? `folder-item-${initialFocusItemId}` : null
+  );
+  const [scrollState, setScrollState] = useState<{ scrollTop: number; viewportHeight: number }>({
+    scrollTop: 0,
+    viewportHeight: 0,
+  });
+  const [pendingCommitTick, setPendingCommitTick] = useState(0);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -761,20 +813,57 @@ export function FolderBrowserModal({
   }, [client, libraryId, currentPath, isOpen, refreshKey]);
 
   const prevLibraryIdRef = useRef(libraryId);
+  const prevIsOpenRef = useRef(isOpen);
   useEffect(() => {
     const isNewLibrary = libraryId !== prevLibraryIdRef.current;
+    const justOpened = isOpen && !prevIsOpenRef.current;
     prevLibraryIdRef.current = libraryId;
+    prevIsOpenRef.current = isOpen;
+    if (!isOpen) {
+      pendingWindowFocusIdRef.current = null;
+      return;
+    }
     const targetPath = initialPath || '';
-    if (isNewLibrary || targetPath !== currentPathRef.current) {
+    if (isNewLibrary || justOpened || targetPath !== currentPathRef.current) {
       exitedChildPathRef.current = null;
       autoFocusedFolderKeyRef.current = null;
-      lastFocusedItemIdRef.current =
+      const nextInitialFocus =
         initialFocusItemId !== undefined ? `folder-item-${initialFocusItemId}` : null;
+      lastFocusedItemIdRef.current = nextInitialFocus;
+      setTargetFocusId(nextInitialFocus);
       setCurrentPath(targetPath);
     } else if (initialFocusItemId !== undefined) {
-      lastFocusedItemIdRef.current = `folder-item-${initialFocusItemId}`;
+      const nextInitialFocus = `folder-item-${initialFocusItemId}`;
+      lastFocusedItemIdRef.current = nextInitialFocus;
+      setTargetFocusId(nextInitialFocus);
     }
-  }, [libraryId, initialPath, initialFocusItemId]);
+  }, [isOpen, libraryId, initialPath, initialFocusItemId]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    pendingWindowFocusIdRef.current = null;
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = 0;
+    }
+    setScrollState((prev) =>
+      prev.scrollTop === 0 ? prev : { scrollTop: 0, viewportHeight: prev.viewportHeight }
+    );
+  }, [isOpen, libraryId, currentPath]);
+
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const measureViewport = () => {
+      const nextHeight = container.clientHeight || 0;
+      setScrollState((prev) =>
+        prev.viewportHeight === nextHeight ? prev : { ...prev, viewportHeight: nextHeight }
+      );
+    };
+    measureViewport();
+    window.addEventListener('resize', measureViewport);
+    return () => window.removeEventListener('resize', measureViewport);
+  }, [isOpen]);
 
   const isAtRoot = currentPath === '';
 
@@ -787,6 +876,8 @@ export function FolderBrowserModal({
       if (nextPath !== currentPath) {
         lastFocusedItemIdRef.current = null;
         autoFocusedFolderKeyRef.current = null;
+        pendingWindowFocusIdRef.current = null;
+        setTargetFocusId(null);
         setLoading(true);
       }
       setCurrentPath(nextPath);
@@ -801,6 +892,8 @@ export function FolderBrowserModal({
       exitedChildPathRef.current = currentPath;
       lastFocusedItemIdRef.current = null;
       autoFocusedFolderKeyRef.current = null;
+      pendingWindowFocusIdRef.current = null;
+      setTargetFocusId(null);
       const fData = folderDataRef.current;
       const parent =
         fData?.parent_path !== undefined
@@ -844,8 +937,9 @@ export function FolderBrowserModal({
   const showAddFolderBtn =
     !loading && !isLocked && !error && !libraryId.startsWith('plugin://');
 
-  const { validNodeIds, contentRows } = useMemo(() => {
+  const { validNodeIds, contentRows, nodeSectionRowMap } = useMemo(() => {
     const ids = new Set<string>();
+    const posMap = new Map<string, { section: GridSectionKey; row: number }>();
     ids.add('folder-browser-close-btn');
     (folderData?.breadcrumbs || []).forEach((_, idx) => {
       ids.add(`folder-breadcrumb-${idx}`);
@@ -865,11 +959,13 @@ export function FolderBrowserModal({
       const dirIds = (folderData.directories || []).map((_, idx) => {
         const id = `folder-dir-${idx}`;
         ids.add(id);
+        posMap.set(id, { section: 'dir', row: Math.floor(idx / GRID_COLS) });
         return id;
       });
-      const itemIds = (folderData.items || []).map((item) => {
+      const itemIds = (folderData.items || []).map((item, idx) => {
         const id = `folder-item-${item.id}`;
         ids.add(id);
+        posMap.set(id, { section: 'item', row: Math.floor(idx / GRID_COLS) });
         return id;
       });
       if (folderData.images && folderData.images.length > 0) {
@@ -878,6 +974,7 @@ export function FolderBrowserModal({
       const imageIds = (folderData.images || []).map((_, idx) => {
         const id = `folder-image-${idx}`;
         ids.add(id);
+        posMap.set(id, { section: 'image', row: Math.floor(idx / GRID_COLS) });
         return id;
       });
 
@@ -886,8 +983,134 @@ export function FolderBrowserModal({
       rows.push(...chunkIntoRows(imageIds, GRID_COLS));
     }
 
-    return { validNodeIds: ids, contentRows: rows };
+    return { validNodeIds: ids, contentRows: rows, nodeSectionRowMap: posMap };
   }, [folderData, loading, isLocked, showPlayAllBtn, showAddFolderBtn]);
+
+  const nodeSectionRowMapRef = useRef(nodeSectionRowMap);
+  nodeSectionRowMapRef.current = nodeSectionRowMap;
+
+  const dirList = (!loading && !isLocked && folderData?.directories) || [];
+  const itemList = (!loading && !isLocked && folderData?.items) || [];
+  const imageList = (!loading && !isLocked && folderData?.images) || [];
+  const targetPos = targetFocusId ? nodeSectionRowMap.get(targetFocusId) : undefined;
+
+  const computeSectionWindow = (
+    totalItems: number,
+    section: GridSectionKey,
+    gridEl: HTMLDivElement | null
+  ): VirtualRowWindow => {
+    const { rowHeightPx, rowSpacingPx } = SECTION_ROW_METRICS[section];
+    const offsetTop = gridEl?.offsetTop ?? 0;
+    return computeVirtualRowWindow({
+      totalItems,
+      columns: GRID_COLS,
+      rowHeightPx,
+      rowSpacingPx,
+      viewportHeightPx: scrollState.viewportHeight,
+      scrollTopPx: Math.max(0, scrollState.scrollTop - offsetTop),
+      anchorRow: targetPos?.section === section ? targetPos.row : null,
+      thresholdItems: VIRTUAL_GRID_ITEM_THRESHOLD,
+    });
+  };
+
+  const dirWindow = computeSectionWindow(dirList.length, 'dir', dirGridRef.current);
+  const itemWindow = computeSectionWindow(itemList.length, 'item', itemGridRef.current);
+  const imageWindow = computeSectionWindow(imageList.length, 'image', imageGridRef.current);
+
+  const hasVirtualizedSection =
+    dirWindow.isVirtualized || itemWindow.isVirtualized || imageWindow.isVirtualized;
+  const hasVirtualizedSectionRef = useRef(hasVirtualizedSection);
+  hasVirtualizedSectionRef.current = hasVirtualizedSection;
+
+  const syncTargetFocusId = useCallback((nextId: string) => {
+    if (!hasVirtualizedSectionRef.current) return;
+    setTargetFocusId((prev) => (prev === nextId ? prev : nextId));
+  }, []);
+
+  const scrollTargetRowIntoView = useCallback((nextId: string) => {
+    const container = scrollContainerRef.current;
+    const pos = nodeSectionRowMapRef.current.get(nextId);
+    if (!container || !pos) return;
+    const gridRefs: Record<GridSectionKey, HTMLDivElement | null> = {
+      dir: dirGridRef.current,
+      item: itemGridRef.current,
+      image: imageGridRef.current,
+    };
+    const { rowHeightPx, rowSpacingPx } = SECTION_ROW_METRICS[pos.section];
+    const rowStride = rowHeightPx + rowSpacingPx;
+    const gridOffsetTop = gridRefs[pos.section]?.offsetTop ?? 0;
+    const viewportH = container.clientHeight || DEFAULT_GRID_VIEWPORT_HEIGHT_PX;
+    const targetRowTop = gridOffsetTop + pos.row * rowStride;
+    const nextScrollTop = Math.max(
+      0,
+      targetRowTop - Math.max(0, Math.floor((viewportH - rowHeightPx) / 2))
+    );
+    container.scrollTop = nextScrollTop;
+    setScrollState((prev) =>
+      prev.scrollTop === nextScrollTop && prev.viewportHeight === container.clientHeight
+        ? prev
+        : { scrollTop: nextScrollTop, viewportHeight: container.clientHeight }
+    );
+  }, []);
+
+  const requestNodeFocus = useCallback(
+    (nextId: string) => {
+      lastFocusedItemIdRef.current = nextId;
+      const mountedEl = typeof document !== 'undefined' ? document.getElementById(nextId) : null;
+      if (mountedEl) {
+        pendingWindowFocusIdRef.current = null;
+        if (hasVirtualizedSectionRef.current) {
+          setTargetFocusId((prev) => (prev === nextId ? prev : nextId));
+        }
+        setFocusedIdRef.current?.(nextId);
+        scrollElementIntoViewIfClipped(mountedEl);
+        return;
+      }
+
+      if (!hasVirtualizedSectionRef.current || !nodeSectionRowMapRef.current.has(nextId)) {
+        pendingWindowFocusIdRef.current = null;
+        setFocusedIdRef.current?.(nextId);
+        return;
+      }
+
+      // Target card is outside the mounted overscan slice: shift the window first,
+      // then commit FocusContext selection in useLayoutEffect once its ref registers.
+      pendingWindowFocusIdRef.current = nextId;
+      scrollTargetRowIntoView(nextId);
+      setTargetFocusId((prev) => (prev === nextId ? prev : nextId));
+      setPendingCommitTick((tick) => tick + 1);
+    },
+    [scrollTargetRowIntoView]
+  );
+
+  useLayoutEffect(() => {
+    const pendingId = pendingWindowFocusIdRef.current;
+    if (!pendingId || !isOpen || loading) return;
+    const el = typeof document !== 'undefined' ? document.getElementById(pendingId) : null;
+    if (!el) return;
+    pendingWindowFocusIdRef.current = null;
+    setFocusedIdRef.current?.(pendingId);
+    if (typeof el.focus === 'function') {
+      try {
+        el.focus({ preventScroll: true });
+      } catch {
+        el.focus();
+      }
+    }
+    scrollElementIntoViewIfClipped(el);
+  }, [isOpen, loading, targetFocusId, pendingCommitTick, folderData]);
+
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    if (!hasVirtualizedSectionRef.current) return;
+    const el = e.currentTarget;
+    const nextTop = el.scrollTop;
+    const nextHeight = el.clientHeight;
+    setScrollState((prev) =>
+      prev.scrollTop === nextTop && prev.viewportHeight === nextHeight
+        ? prev
+        : { scrollTop: nextTop, viewportHeight: nextHeight }
+    );
+  }, []);
 
   if (!isOpen) return null;
 
@@ -1070,8 +1293,10 @@ export function FolderBrowserModal({
 
       {/* Content Area */}
       <div
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
         data-folder-scroll-container="true"
-        className="flex-1 overflow-y-auto mt-6 pr-4 scrollbar-thin"
+        className="flex-1 overflow-y-auto mt-6 pr-4 scrollbar-thin relative"
       >
         {loading && (
           <div className="flex flex-col items-center justify-center h-64 text-[#5C3C3C]">
@@ -1135,82 +1360,84 @@ export function FolderBrowserModal({
         {!loading && !isLocked && folderData && (
           <>
             {/* Subdirectories Section */}
-            {folderData.directories && folderData.directories.length > 0 && (
+            {dirList.length > 0 && (
               <div style={{ marginBottom: '32px' }}>
                 <h3 className="text-2xl font-bold text-[#F5E5E5]" style={{ marginBottom: '16px' }}>
                   Folders
                 </h3>
                 <div
+                  ref={dirGridRef}
                   className="grid grid-cols-6"
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(6, minmax(0, 1fr))',
-                    gridGap: '24px',
-                  }}
+                  style={buildGridStyle(dirWindow)}
                 >
-                  {folderData.directories.map((dir, idx) => (
-                    <FolderDirItem
-                      key={dir.path || idx}
-                      id={`folder-dir-${idx}`}
-                      order={dirOrders[idx]}
-                      name={dir.name}
-                      path={dir.path}
-                      itemCount={dir.item_count}
-                      onNavigate={navigateToPath}
-                    />
-                  ))}
+                  {dirList.slice(dirWindow.startIndex, dirWindow.endIndex).map((dir, sliceIdx) => {
+                    const idx = dirWindow.startIndex + sliceIdx;
+                    return (
+                      <FolderDirItem
+                        key={dir.path || idx}
+                        id={`folder-dir-${idx}`}
+                        order={dirOrders[idx]}
+                        name={dir.name}
+                        path={dir.path}
+                        itemCount={dir.item_count}
+                        onNavigate={navigateToPath}
+                      />
+                    );
+                  })}
                 </div>
               </div>
             )}
 
             {/* Media Items Section */}
-            {folderData.items && folderData.items.length > 0 && (
+            {itemList.length > 0 && (
               <div style={{ marginBottom: '32px' }}>
                 <h3 className="text-2xl font-bold text-[#F5E5E5]" style={{ marginBottom: '16px' }}>
                   Media Items
                 </h3>
                 <div
+                  ref={itemGridRef}
                   className="grid grid-cols-6"
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(6, minmax(0, 1fr))',
-                    gridGap: '24px',
-                  }}
+                  style={buildGridStyle(itemWindow)}
                 >
-                  {folderData.items.map((item, idx) => (
-                    <FolderMediaCard
-                      key={item.id}
-                      id={`folder-item-${item.id}`}
-                      order={itemOrders[idx]}
-                      itemId={item.id}
-                      title={item.title}
-                      subtitle={
-                        item.subtitle ||
-                        (item.release_year ? String(item.release_year) : undefined)
-                      }
-                      imageUrl={formatImageUrl(serverUrl, item.poster_url)}
-                      badge={item.badge}
-                      progressPercent={
-                        item.playback_progress !== undefined
-                          ? Math.round(item.playback_progress * 100)
-                          : undefined
-                      }
-                      onSelectItemId={handleSelectItemCard}
-                    />
-                  ))}
+                  {itemList
+                    .slice(itemWindow.startIndex, itemWindow.endIndex)
+                    .map((item, sliceIdx) => {
+                      const idx = itemWindow.startIndex + sliceIdx;
+                      return (
+                        <FolderMediaCard
+                          key={item.id}
+                          id={`folder-item-${item.id}`}
+                          order={itemOrders[idx]}
+                          itemId={item.id}
+                          title={item.title}
+                          subtitle={
+                            item.subtitle ||
+                            (item.release_year ? String(item.release_year) : undefined)
+                          }
+                          imageUrl={formatImageUrl(serverUrl, item.poster_url)}
+                          badge={item.badge}
+                          progressPercent={
+                            item.playback_progress !== undefined
+                              ? Math.round(item.playback_progress * 100)
+                              : undefined
+                          }
+                          onSelectItemId={handleSelectItemCard}
+                        />
+                      );
+                    })}
                 </div>
               </div>
             )}
 
             {/* Photos & Images Section */}
-            {folderData.images && folderData.images.length > 0 && (
+            {imageList.length > 0 && (
               <div style={{ marginBottom: '32px' }}>
                 <div
                   className="flex items-center justify-between"
                   style={{ marginBottom: '16px' }}
                 >
                   <h3 className="text-2xl font-bold text-[#F5E5E5]">
-                    Photos ({folderData.images.length})
+                    Photos ({imageList.length})
                   </h3>
                   <PillButton
                     id="start-slideshow-btn"
@@ -1222,36 +1449,38 @@ export function FolderBrowserModal({
                     onSelect={() => {
                       lastFocusedItemIdRef.current = 'start-slideshow-btn';
                       setFocusedIdRef.current?.('start-slideshow-btn');
-                      onStartSlideshow(folderData.images);
+                      onStartSlideshow(imageList);
                     }}
                   >
                     Start Slideshow
                   </PillButton>
                 </div>
                 <div
+                  ref={imageGridRef}
                   className="grid grid-cols-6"
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(6, minmax(0, 1fr))',
-                    gridGap: '24px',
-                  }}
+                  style={buildGridStyle(imageWindow)}
                 >
-                  {folderData.images.map((img, idx) => (
-                    <FolderPhotoCard
-                      key={img.path || idx}
-                      id={`folder-image-${idx}`}
-                      order={imageOrders[idx]}
-                      image={img}
-                      index={idx}
-                      imageUrl={getAuthenticatedImageUrl(
-                        serverUrl,
-                        img.url || img.path,
-                        token,
-                        unlockTokens
-                      )}
-                      onSelectPhoto={handleSelectPhotoCard}
-                    />
-                  ))}
+                  {imageList
+                    .slice(imageWindow.startIndex, imageWindow.endIndex)
+                    .map((img, sliceIdx) => {
+                      const idx = imageWindow.startIndex + sliceIdx;
+                      return (
+                        <FolderPhotoCard
+                          key={img.path || idx}
+                          id={`folder-image-${idx}`}
+                          order={imageOrders[idx]}
+                          image={img}
+                          index={idx}
+                          imageUrl={getAuthenticatedImageUrl(
+                            serverUrl,
+                            img.url || img.path,
+                            token,
+                            unlockTokens
+                          )}
+                          onSelectPhoto={handleSelectPhotoCard}
+                        />
+                      );
+                    })}
                 </div>
               </div>
             )}
@@ -1293,8 +1522,11 @@ export function FolderBrowserModal({
         exitedChildPathRef={exitedChildPathRef}
         autoFocusedFolderKeyRef={autoFocusedFolderKeyRef}
         lastFocusedItemIdRef={lastFocusedItemIdRef}
+        pendingWindowFocusIdRef={pendingWindowFocusIdRef}
         setFocusedIdRef={setFocusedIdRef}
         goBackRef={goBackRef}
+        requestNodeFocus={requestNodeFocus}
+        syncTargetFocusId={syncTargetFocusId}
       />
     </div>
   );
