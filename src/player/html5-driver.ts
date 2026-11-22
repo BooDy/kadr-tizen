@@ -11,6 +11,7 @@ export class Html5PlayerDriver implements PlayerDriver {
   private errorCallback?: (error: string) => void;
   private hasUserSeeked = false;
   private playbackRate = 1;
+  private currentIsHls = false;
 
   private applyPlaybackRate(): void {
     if (!this.video) return;
@@ -23,6 +24,8 @@ export class Html5PlayerDriver implements PlayerDriver {
 
   async init(container: HTMLElement, streamUrl: string, startMs: number): Promise<void> {
     this.hasUserSeeked = false;
+    const isHls = streamUrl.includes('.m3u8') || streamUrl.includes('/hls/');
+    this.currentIsHls = isHls;
     this.video = document.createElement('video');
     // Absolutely positioned so a replacement video can load on top of a still-playing one
     this.video.className = 'absolute inset-0 w-full h-full object-contain bg-black';
@@ -36,7 +39,6 @@ export class Html5PlayerDriver implements PlayerDriver {
       this.video.style.opacity = '0';
     }
 
-    const isHls = streamUrl.includes('.m3u8') || streamUrl.includes('/hls/');
     const targetStartSec = startMs > 0 ? startMs / 1000 : 0;
     if (isHls && Hls.isSupported()) {
       const hls = new Hls({
@@ -201,9 +203,10 @@ export class Html5PlayerDriver implements PlayerDriver {
   }
 
   restore(_resumeMs: number, autoPlay: boolean): boolean {
-    if (!this.video || this.video.error) {
+    if (!this.video || this.video.error || this.currentIsHls || this.hls !== null) {
       return false;
     }
+    this.applyPlaybackRate();
     if (autoPlay) {
       this.play();
     } else {
@@ -302,6 +305,7 @@ export class Html5PlayerDriver implements PlayerDriver {
       this.video.remove();
       this.video = null;
     }
+    this.currentIsHls = false;
     this.timeCallback = undefined;
     this.stateCallback = undefined;
     this.errorCallback = undefined;

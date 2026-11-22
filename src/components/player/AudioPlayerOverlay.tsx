@@ -447,12 +447,15 @@ function AudioScrubber({
           style={{ width: `${progressPercent}%` }}
         />
         <div
-          className={`absolute top-1/2 -translate-y-1/2 bg-[#FFB800] rounded-full shadow-md transition-all duration-150 ${
+          className={`absolute top-1/2 bg-[#FFB800] rounded-full shadow-md transition-all duration-150 ${
             isFocused
-              ? 'w-6 h-6 -ml-3 ring-4 ring-[#FFB800]/40 scale-110'
+              ? 'w-6 h-6 -ml-3 ring-4 ring-[#FFB800]/40'
               : 'w-5 h-5 -ml-2.5'
           }`}
-          style={{ left: `${progressPercent}%` }}
+          style={{
+            left: `${progressPercent}%`,
+            transform: isFocused ? 'translateY(-50%) scale(1.1)' : 'translateY(-50%)',
+          }}
         />
       </div>
       <div className="flex items-center justify-between font-mono text-lg text-[#F5E5E5]/85">

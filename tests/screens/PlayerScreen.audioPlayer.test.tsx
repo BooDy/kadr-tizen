@@ -744,4 +744,274 @@ describe('PlayerScreen Audio Mode, 60s Ambient Auto-Dim & Queue Completion', () 
     });
     expect(onNext).toHaveBeenCalledTimes(2);
   });
+
+  it('clears early Direct Play playbackError when fetchMediaItem resolves incompatible audio and switches to audio-only HLS', async () => {
+    const client = new ApiClient(serverUrl);
+    let resolveDetail!: (detail: itemsApi.MediaItemDetail) => void;
+    vi.spyOn(itemsApi, 'fetchMediaItem').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveDetail = resolve;
+        })
+    );
+
+    const { container, unmount } = render(
+      <FocusProvider>
+        <PlayerScreen
+          client={client}
+          itemId={601}
+          title="Unprobed WMA Track"
+          mediaType="music"
+          serverUrl={serverUrl}
+          token={token}
+          onExit={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    await flushMicrotasks();
+    const initialVideo = container.querySelector('video') as HTMLVideoElement;
+    expect(initialVideo).not.toBeNull();
+
+    // Direct Play fails with MEDIA_ERR_SRC_NOT_SUPPORTED before fetchMediaItem finishes
+    Object.defineProperty(initialVideo, 'error', {
+      value: { code: 4, message: 'MEDIA_ERR_SRC_NOT_SUPPORTED' },
+      configurable: true,
+    });
+    act(() => {
+      initialVideo.dispatchEvent(new Event('error'));
+    });
+    expect(screen.getByRole('dialog', { name: 'Playback Error' })).toBeInTheDocument();
+
+    fetchSpy.mockClear();
+    act(() => {
+      resolveDetail({
+        id: 601,
+        title: 'Unprobed WMA Track',
+        media_type: 'music',
+        technical: { audio_codec: 'wma', container: 'asf', duration_seconds: 215 },
+      });
+    });
+
+    await flushMicrotasks();
+
+    expect(screen.queryByRole('dialog', { name: 'Playback Error' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('audio-player-overlay')).toBeInTheDocument();
+    expect(screen.getAllByText('HLS • AAC').length).toBeGreaterThan(0);
+    const hlsUrl = fetchSpy.mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .find((u: string) => u.includes('/api/v1/media/601/hls/master.m3u8'));
+    expect(hlsUrl).toBeDefined();
+    const parsed = new URL(hlsUrl!);
+    expect(parsed.searchParams.get('video_codec')).toBe('none');
+    expect(parsed.searchParams.get('audio_codec')).toBe('aac');
+    expect(parsed.searchParams.has('max_height')).toBe(false);
+    unmount();
+
+    // Late AVPlay -> HTML5 audio switch when both mediaType and technical are omitted
+    let resolveLateAudio!: (detail: itemsApi.MediaItemDetail) => void;
+    vi.mocked(itemsApi.fetchMediaItem).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveLateAudio = resolve;
+        })
+    );
+    mockAvplay.setListener.mockClear();
+
+    render(
+      <FocusProvider>
+        <PlayerScreen
+          client={client}
+          itemId={602}
+          title="Late Discovered FLAC"
+          serverUrl={serverUrl}
+          token={token}
+          onExit={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    await flushMicrotasks();
+    const hlsAvListener = mockAvplay.setListener.mock.calls[0]?.[0];
+    expect(hlsAvListener).toBeDefined();
+    // First HLS error auto-falls back to AVPlay Direct Stream; Direct Stream error opens Playback Error
+    act(() => {
+      hlsAvListener.onerror?.();
+    });
+    await flushMicrotasks();
+    const directAvListener = mockAvplay.setListener.mock.calls[1]?.[0];
+    expect(directAvListener).toBeDefined();
+    act(() => {
+      directAvListener.onerror?.();
+    });
+    expect(screen.getByRole('dialog', { name: 'Playback Error' })).toBeInTheDocument();
+
+    fetchSpy.mockClear();
+    act(() => {
+      resolveLateAudio({
+        id: 602,
+        title: 'Late Discovered FLAC',
+        media_type: 'music',
+        technical: { audio_codec: 'flac', container: 'flac', duration_seconds: 180 },
+      });
+    });
+
+    await flushMicrotasks();
+
+    expect(screen.queryByRole('dialog', { name: 'Playback Error' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('audio-player-overlay')).toBeInTheDocument();
+    expect(screen.getAllByText('DIRECT • FLAC').length).toBeGreaterThan(0);
+  });
+
+  it('restarts resumed and scrubbed HLS audio from 0:00 on handleRestartTrack and Repeat: One while clearing pending seek timers', async () => {
+    const client = new ApiClient(serverUrl);
+    const wmaTech = { audio_codec: 'wmav2', container: 'wma', duration_seconds: 240 };
+    vi.spyOn(itemsApi, 'fetchMediaItem').mockResolvedValue({
+      id: 701,
+      title: 'Resumed HLS Track',
+      media_type: 'music',
+      technical: wmaTech,
+    });
+
+    const { container } = render(
+      <FocusProvider>
+        <PlayerScreen
+          client={client}
+          itemId={701}
+          title="Resumed HLS Track"
+          mediaType="music"
+          technical={wmaTech}
+          initialResumeMs={90_000}
+          serverUrl={serverUrl}
+          token={token}
+          onExit={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    await flushMicrotasks();
+
+    const initialHlsUrl = fetchSpy.mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .find((u: string) => u.includes('/api/v1/media/701/hls/master.m3u8'));
+    expect(initialHlsUrl).toBeDefined();
+    expect(new URL(initialHlsUrl!).searchParams.get('start_time')).toBe('90.000');
+
+    const v1 = container.querySelector('video') as HTMLVideoElement;
+    v1.currentTime = 15;
+    act(() => {
+      v1.dispatchEvent(new Event('timeupdate'));
+    });
+    expect(screen.getByTestId('audio-time-elapsed')).toHaveTextContent('1:45');
+
+    // Start a pending seek (debounced 1000ms) and immediately trigger Restart Track via audio-btn-prev
+    fetchSpy.mockClear();
+    fireEvent.click(screen.getByTestId('audio-btn-forward'));
+    fireEvent.click(screen.getByTestId('audio-btn-prev'));
+
+    await flushMicrotasks();
+
+    const restartUrls = fetchSpy.mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .filter((u: string) => u.includes('/api/v1/media/701/hls/master.m3u8'));
+    expect(restartUrls.length).toBe(1);
+    expect(new URL(restartUrls[0]).searchParams.has('start_time')).toBe(false);
+    expect(screen.getByTestId('audio-time-elapsed')).toHaveTextContent('0:00');
+
+    // Advancing past HLS_SEEK_COMMIT_DELAY_MS must NOT fire the cancelled seek timer
+    fetchSpy.mockClear();
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    await flushMicrotasks();
+    expect(
+      fetchSpy.mock.calls.some((c: unknown[]) => String(c[0]).includes('/hls/master.m3u8'))
+    ).toBe(false);
+
+    // Cycle Repeat: Off -> All -> One, then scrub forward +30s so streamStartOffsetMs > 0
+    fireEvent.click(screen.getByTestId('audio-btn-repeat'));
+    fireEvent.click(screen.getByTestId('audio-btn-repeat'));
+    expect(screen.getByTestId('audio-btn-repeat')).toHaveTextContent('Repeat: One');
+
+    fireEvent.click(screen.getByTestId('audio-btn-forward'));
+    fireEvent.click(screen.getByTestId('audio-btn-forward'));
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    await flushMicrotasks();
+
+    const scrubbedUrls = fetchSpy.mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .filter((u: string) => u.includes('/api/v1/media/701/hls/master.m3u8'));
+    expect(scrubbedUrls.length).toBe(1);
+    expect(new URL(scrubbedUrls[0]).searchParams.get('start_time')).toBe('30.000');
+
+    // Repeat: One at track end reloads HLS from 0:00 (no start_time) rather than 30.000
+    fetchSpy.mockClear();
+    const videosAfterScrub = container.querySelectorAll('video');
+    const activeScrubbedVideo = videosAfterScrub[videosAfterScrub.length - 1] as HTMLVideoElement;
+    act(() => {
+      activeScrubbedVideo.dispatchEvent(new Event('playing'));
+      activeScrubbedVideo.dispatchEvent(new Event('ended'));
+    });
+    await flushMicrotasks();
+
+    const repeatOneUrls = fetchSpy.mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .filter((u: string) => u.includes('/api/v1/media/701/hls/master.m3u8'));
+    expect(repeatOneUrls.length).toBe(1);
+    expect(new URL(repeatOneUrls[0]).searchParams.has('start_time')).toBe(false);
+    expect(screen.getByTestId('audio-time-elapsed')).toHaveTextContent('0:00');
+  });
+
+  it('calls preventDefault on Spacebar play/pause while AudioPlayerOverlay holds DOM button focus', async () => {
+    const client = new ApiClient(serverUrl);
+    const flacTech = { audio_codec: 'flac', container: 'flac', duration_seconds: 210 };
+    vi.spyOn(itemsApi, 'fetchMediaItem').mockResolvedValue({
+      id: 801,
+      title: 'Spacebar Test Track',
+      media_type: 'music',
+      technical: flacTech,
+    });
+
+    render(
+      <FocusProvider>
+        <PlayerScreen
+          client={client}
+          itemId={801}
+          title="Spacebar Test Track"
+          mediaType="music"
+          technical={flacTech}
+          serverUrl={serverUrl}
+          token={token}
+          onExit={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    await flushMicrotasks();
+
+    expect(document.activeElement?.id).toBe('audio-btn-play-pause');
+    // Move DOM focus to another transport button so native Spacebar keyup would click it if not prevented
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+    });
+    expect(document.activeElement?.id).toBe('audio-btn-forward');
+
+    pauseSpy.mockClear();
+    let keyDownResult = true;
+    act(() => {
+      keyDownResult = fireEvent.keyDown(window, { key: ' ' });
+    });
+    expect(keyDownResult).toBe(false);
+    expect(pauseSpy).toHaveBeenCalledTimes(1);
+
+    playSpy.mockClear();
+    let resumeResult = true;
+    act(() => {
+      resumeResult = fireEvent.keyDown(window, { key: ' ' });
+    });
+    expect(resumeResult).toBe(false);
+    expect(playSpy).toHaveBeenCalledTimes(1);
+  });
 });

@@ -250,6 +250,47 @@ describe('Html5PlayerDriver', () => {
     expect(driver.restore(0, true)).toBe(false);
   });
 
+  it('returns false from restore for HLS streams and resets HLS state on destroy', async () => {
+    await driver.init(container, 'http://test.com/master.m3u8', 0);
+    expect(driver.restore(15000, true)).toBe(false);
+    expect(driver.restore(15000, false)).toBe(false);
+    driver.destroy();
+
+    await driver.init(container, 'http://test.com/api/v1/media/42/hls/master', 0);
+    expect(driver.restore(15000, true)).toBe(false);
+    driver.destroy();
+
+    await driver.init(container, 'http://test.com/stream.mp4', 0);
+    expect(driver.restore(15000, true)).toBe(true);
+  });
+
+  it('re-applies playbackRate and preservesPitch on Direct Play restore', async () => {
+    await driver.init(container, 'http://test.com/stream.mp4', 0);
+    const video = container.querySelector('video') as HTMLVideoElement & {
+      preservesPitch?: boolean;
+      webkitPreservesPitch?: boolean;
+    };
+
+    expect(driver.setPlaybackRate(1.5)).toBe(true);
+    video.playbackRate = 1;
+    video.preservesPitch = false;
+    video.webkitPreservesPitch = false;
+
+    expect(driver.restore(20000, false)).toBe(true);
+    expect(video.playbackRate).toBe(1.5);
+    expect(video.preservesPitch).toBe(true);
+    expect(video.webkitPreservesPitch).toBe(true);
+
+    video.playbackRate = 1;
+    video.preservesPitch = false;
+    video.webkitPreservesPitch = false;
+
+    expect(driver.restore(20000, true)).toBe(true);
+    expect(video.playbackRate).toBe(1.5);
+    expect(video.preservesPitch).toBe(true);
+    expect(video.webkitPreservesPitch).toBe(true);
+  });
+
   it('selectAudioTrack returns false when video.audioTracks is absent and toggles enabled tracks when present', async () => {
     expect(driver.selectAudioTrack(0)).toBe(false);
 

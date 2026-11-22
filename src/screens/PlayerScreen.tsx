@@ -605,6 +605,15 @@ export function PlayerScreen({
     [syncDirectPlayAudioOrFallback, triggerHlsAudioReload]
   );
 
+  const clearPlaybackErrorState = useCallback(() => {
+    setPlaybackError(null);
+    playbackErrorRef.current = null;
+    setShowDetailsModal(false);
+    showDetailsModalRef.current = false;
+    setPlayerState('buffering');
+    playerStateRef.current = 'buffering';
+  }, []);
+
   // Fetch media item details (technical codecs + accurate duration)
   useEffect(() => {
     let isMounted = true;
@@ -613,6 +622,7 @@ export function PlayerScreen({
       fetchMediaItem(apiClient, numericItemId)
         .then((detail) => {
           if (!isMounted) return;
+          const wasAudioMode = isAudioModeRef.current;
           setItemDetailMeta({
             itemId,
             title: detail.title,
@@ -625,6 +635,14 @@ export function PlayerScreen({
           const resolvedType =
             detail.media_type ?? mediaTypeRef.current ?? currentQueueEntryRef.current?.mediaType;
           const resolvedIsAudio = isAudioMediaType(resolvedType);
+
+          let modeSwitched = resolvedIsAudio && !wasAudioMode;
+          const switchHlsMode = (nextUseHls: boolean) => {
+            if (nextUseHls !== isHlsRef.current) {
+              modeSwitched = true;
+            }
+            setUseHls(nextUseHls);
+          };
 
           const detailDurationSec =
             detail.duration_seconds ?? detail.technical?.duration_seconds;
@@ -671,13 +689,13 @@ export function PlayerScreen({
                 !hlsAutoFallbackDoneRef.current &&
                 !hlsUnavailableForItemRef.current
               ) {
-                setUseHls(true);
+                switchHlsMode(true);
               } else if (
                 audioCompat &&
                 !hlsAutoFallbackDoneRef.current &&
                 !directStreamTriedRef.current
               ) {
-                setUseHls(false);
+                switchHlsMode(false);
               }
             } else if (
               !hlsAutoFallbackDoneRef.current &&
@@ -686,7 +704,7 @@ export function PlayerScreen({
             ) {
               hlsAutoFallbackDoneRef.current = true;
               hlsTranscodeFailedRef.current = true;
-              setUseHls(false);
+              switchHlsMode(false);
             } else if (
               detail.technical &&
               !hlsAutoFallbackDoneRef.current &&
@@ -698,14 +716,17 @@ export function PlayerScreen({
                 forceHtml5 || isBrowserEnv
               )
             ) {
-              setUseHls(true);
+              switchHlsMode(true);
             }
           } else if (
             resolvedIsAudio &&
             !hlsAutoFallbackDoneRef.current &&
             !directStreamTriedRef.current
           ) {
-            setUseHls(false);
+            switchHlsMode(false);
+          }
+          if (modeSwitched) {
+            clearPlaybackErrorState();
           }
           const probedDurationMs =
             detail.duration_ms && detail.duration_ms > 0
@@ -727,7 +748,7 @@ export function PlayerScreen({
     return () => {
       isMounted = false;
     };
-  }, [itemId, apiClient, forceHtml5, applyDiscoveredAudioTracks]);
+  }, [itemId, apiClient, forceHtml5, applyDiscoveredAudioTracks, clearPlaybackErrorState]);
 
   const handleRetry = useCallback((retryWithHls?: boolean) => {
     pauseAfterRestoreRef.current = false;
@@ -748,21 +769,17 @@ export function PlayerScreen({
       hlsTranscodeFailedRef.current = false;
       directStreamTriedRef.current = false;
     }
-    setPlaybackError(null);
-    setShowDetailsModal(false);
-    setPlayerState('buffering');
+    clearPlaybackErrorState();
     setReloadKey((k) => k + 1);
-  }, [technical, forceHtml5, isBrowserEnv]);
+  }, [technical, forceHtml5, isBrowserEnv, clearPlaybackErrorState]);
 
   const handleSwitchToHtml5 = useCallback(() => {
     pauseAfterRestoreRef.current = false;
     restoreResumeMsRef.current = null;
     setForceHtml5(true);
-    setPlaybackError(null);
-    setShowDetailsModal(false);
-    setPlayerState('buffering');
+    clearPlaybackErrorState();
     setReloadKey((k) => k + 1);
-  }, []);
+  }, [clearPlaybackErrorState]);
 
   const diagnosticPayload = useMemo<DiagnosticPayload | null>(() => {
     if (!playbackError) return null;
@@ -1052,11 +1069,32 @@ export function PlayerScreen({
     }
   }, []);
 
-  const handleRestartTrack = useCallback(() => {
+  const restartCurrentTrackFromZero = useCallback(() => {
+    if (seekDebounceTimerRef.current) {
+      clearTimeout(seekDebounceTimerRef.current);
+      seekDebounceTimerRef.current = null;
+    }
+    commitPendingSeekRef.current = null;
+    targetSeekMsRef.current = null;
+    seekDirectionRef.current = null;
+    seekLockUntilMsRef.current = 0;
+    consecutiveFfCountRef.current = 0;
+    consecutiveRewCountRef.current = 0;
+    setSeekHud(null);
     setPositionMs(0);
     positionMsRef.current = 0;
-    driverRef.current?.seekTo(0);
+    if (isHlsRef.current && streamStartOffsetMsRef.current > 0) {
+      seamlessSwapRef.current = true;
+      hlsSeekOffsetMsRef.current = 0;
+      setHlsSeekOffsetMs(0);
+      setReloadKey((k) => k + 1);
+    } else {
+      driverRef.current?.seekTo(0);
+      driverRef.current?.play();
+    }
   }, []);
+
+  const handleRestartTrack = restartCurrentTrackFromZero;
 
   const handleCycleSpeed = useCallback(() => {
     const next = cycleAudiobookSpeed(audiobookSpeedRef.current);
@@ -1095,12 +1133,6 @@ export function PlayerScreen({
       }
       audioEndedHandledItemIdRef.current = itemKey;
 
-      const restartFromBeginning = () => {
-        setPositionMs(0);
-        positionMsRef.current = 0;
-        driverRef.current?.seekTo(0);
-        driverRef.current?.play();
-      };
       const flushCompletedTrack = () => {
         const overridePosMs =
           durationMsRef.current > 0
@@ -1110,7 +1142,7 @@ export function PlayerScreen({
       };
 
       if (effectiveRepeatMode === 'one') {
-        restartFromBeginning();
+        restartCurrentTrackFromZero();
         return;
       }
 
@@ -1125,7 +1157,7 @@ export function PlayerScreen({
           flushCompletedTrack();
           onSelectQueueIndexRef.current(0);
         } else {
-          restartFromBeginning();
+          restartCurrentTrackFromZero();
         }
       }
       return;
@@ -1154,6 +1186,7 @@ export function PlayerScreen({
     onNext,
     autoAdvanceCountdown,
     buildAndFlushSnapshot,
+    restartCurrentTrackFromZero,
   ]);
 
   // Countdown timer for auto-advance (pure state decrement)
@@ -2547,28 +2580,33 @@ export function PlayerScreen({
         }
       }
 
-      if (code === TVKeys.PLAY || e.key === 'MediaPlay') {
+      if (!isModalOpen && (code === TVKeys.PLAY || e.key === 'MediaPlay')) {
+        e.preventDefault();
         if (isAudioModeRef.current) {
           driverRef.current?.play();
         } else {
           handleTogglePlayPause();
         }
-      } else if (code === TVKeys.PAUSE || e.key === 'MediaPause') {
+      } else if (!isModalOpen && (code === TVKeys.PAUSE || e.key === 'MediaPause')) {
+        e.preventDefault();
         if (isAudioModeRef.current) {
           driverRef.current?.pause();
         } else {
           handleTogglePlayPause();
         }
-      } else if (code === TVKeys.STOP || e.key === 'MediaStop') {
+      } else if (!isModalOpen && (code === TVKeys.STOP || e.key === 'MediaStop')) {
+        e.preventDefault();
         if (isAudioModeRef.current) {
           driverRef.current?.pause();
         }
       } else if (
-        code === TVKeys.PLAY_PAUSE ||
-        e.key === 'MediaPlayPause' ||
-        e.key === ' ' ||
-        e.key === 'k'
+        !isModalOpen &&
+        (code === TVKeys.PLAY_PAUSE ||
+          e.key === 'MediaPlayPause' ||
+          e.key === ' ' ||
+          e.key === 'k')
       ) {
+        e.preventDefault();
         handleTogglePlayPause();
       } else if (!isModalOpen && (code === TVKeys.DOWN || e.key === 'ArrowDown')) {
         if (isAudioModeRef.current) return;

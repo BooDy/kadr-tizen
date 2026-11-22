@@ -509,4 +509,21 @@ describe('AudioPlayerOverlay', () => {
     expect(screen.getByTestId('debug-focused-id')).toHaveTextContent('audio-btn-tracks');
     expect(document.activeElement?.id).toBe('audio-btn-tracks');
   });
+
+  it('positions the scrubber thumb with inline transform instead of conflicting Tailwind transform classes', () => {
+    render(<AudioPlayerOverlay {...createProps()} />);
+    const scrubber = screen.getByTestId('audio-progress-bar');
+    const track = scrubber.firstElementChild as HTMLElement;
+    const thumb = track.children[1] as HTMLElement;
+
+    expect(thumb.getAttribute('class') ?? '').not.toContain('-translate-y-1/2');
+    expect(thumb.getAttribute('class') ?? '').not.toContain('scale-110');
+    expect(thumb.style.transform).toBe('translateY(-50%)');
+
+    fireEvent.keyDown(window, { key: 'ArrowUp', keyCode: TVKeys.UP });
+    expect(scrubber).toHaveAttribute('data-focused', 'true');
+    expect(thumb.getAttribute('class') ?? '').not.toContain('-translate-y-1/2');
+    expect(thumb.getAttribute('class') ?? '').not.toContain('scale-110');
+    expect(thumb.style.transform).toBe('translateY(-50%) scale(1.1)');
+  });
 });
