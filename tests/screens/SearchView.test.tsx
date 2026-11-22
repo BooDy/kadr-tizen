@@ -981,4 +981,92 @@ describe('SearchView', () => {
       expect(screen.getByTestId('search-card-101')).toBeInTheDocument();
     });
   });
+
+  it('restores initialFocusId onto search-card-* after async initial search resolves, and handles immediate & missing targets', async () => {
+    searchApi.setSavedSearchState({ query: 'dune', filter: 'movie' });
+    let resolveSearch!: (val: SearchResponse) => void;
+    vi.spyOn(searchApi, 'fetchSearchResults').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSearch = resolve;
+        })
+    );
+
+    const onInitialFocusConsumed = vi.fn();
+    const { unmount } = render(
+      <FocusProvider>
+        <FocusProbe />
+        <SearchView
+          client={client}
+          serverUrl="http://localhost:8492"
+          initialFocusId="search-card-103"
+          onInitialFocusConsumed={onInitialFocusConsumed}
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    // Starts in loading state immediately (no empty-state flash) with interim focus on active filter pill
+    expect(screen.getByTestId('search-loading')).toBeInTheDocument();
+    expect(screen.queryByTestId('search-empty-state')).not.toBeInTheDocument();
+    expect(screen.getByTestId('probe-focus').textContent).toBe('search-filter-movie');
+
+    await act(async () => {
+      resolveSearch({
+        query: 'dune',
+        total: 2,
+        items: [sampleResults[0], sampleResults[2]],
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('search-card-103')).toBeInTheDocument();
+      expect(screen.getByTestId('probe-focus').textContent).toBe('search-card-103');
+    });
+    expect(document.getElementById('search-card-103')?.className).toContain('tv-focus-ring');
+    expect(onInitialFocusConsumed).toHaveBeenCalledTimes(1);
+    unmount();
+
+    // Missing search-card-* falls back to firstResultId once results arrive
+    vi.spyOn(searchApi, 'fetchSearchResults').mockResolvedValueOnce({
+      query: 'dune',
+      total: 1,
+      items: [sampleResults[0]],
+    });
+    const firstFallback = render(
+      <FocusProvider>
+        <FocusProbe />
+        <SearchView
+          client={client}
+          serverUrl="http://localhost:8492"
+          initialFocusId="search-card-999"
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+        />
+      </FocusProvider>
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('probe-focus').textContent).toBe('search-card-101');
+    });
+    firstFallback.unmount();
+
+    // Already-mounted initialFocusId (e.g. search-key-f) is focused immediately on mount
+    searchApi.resetSavedSearchState();
+    render(
+      <FocusProvider>
+        <FocusProbe />
+        <SearchView
+          client={client}
+          serverUrl="http://localhost:8492"
+          initialFocusId="search-key-f"
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+        />
+      </FocusProvider>
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('probe-focus').textContent).toBe('search-key-f');
+    });
+  });
 });

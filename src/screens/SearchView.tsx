@@ -36,6 +36,8 @@ export interface SearchViewProps {
   serverUrl: string;
   token?: string;
   refreshKey?: number;
+  initialFocusId?: string | null;
+  onInitialFocusConsumed?: () => void;
   onSelectItem: (itemId: number | string) => void;
   onPlayItem: (
     itemId: number | string,
@@ -405,18 +407,93 @@ interface SearchFocusBridgeProps {
   loading: boolean;
   firstResultId: number | null;
   activeFilter: SearchFilterType;
+  initialFocusId?: string | null;
+  hasInitialQuery: boolean;
+  onInitialFocusConsumed?: () => void;
 }
 
 function SearchFocusBridge({
   loading,
   firstResultId,
   activeFilter,
+  initialFocusId,
+  hasInitialQuery,
+  onInitialFocusConsumed,
 }: SearchFocusBridgeProps) {
   const { focusedId, setFocusedId, activeTrap } = useFocusContext();
   const lastValidSearchFocusRef = useRef<string | null>(null);
+  const pendingInitialFocusIdRef = useRef<string | null>(
+    initialFocusId &&
+      isSearchContentNodeId(initialFocusId) &&
+      (!initialFocusId.startsWith('search-card-') || hasInitialQuery)
+      ? initialFocusId
+      : null
+  );
+  const wasModalActiveRef = useRef<boolean>(false);
+  const onInitialFocusConsumedRef = useRef(onInitialFocusConsumed);
+  onInitialFocusConsumedRef.current = onInitialFocusConsumed;
 
   useEffect(() => {
-    if (isAnyModalActive(activeTrap)) return;
+    const modalActive = isAnyModalActive(activeTrap);
+    if (modalActive) {
+      wasModalActiveRef.current = true;
+      return;
+    }
+    const modalJustClosed = wasModalActiveRef.current;
+    wasModalActiveRef.current = false;
+
+    const pendingInitialId = pendingInitialFocusIdRef.current;
+    if (pendingInitialId) {
+      // Allow restoring pendingInitialId when closing a modal that remounted with BrowseScreen
+      // caused FocusContext.popTrap to fall back to the first sidebar item ('nav-screen-home').
+      if (
+        focusedId &&
+        focusedId.startsWith('nav-') &&
+        !(modalJustClosed && focusedId === 'nav-screen-home')
+      ) {
+        lastValidSearchFocusRef.current = null;
+        pendingInitialFocusIdRef.current = null;
+        onInitialFocusConsumedRef.current?.();
+        return;
+      }
+
+      if (typeof document !== 'undefined' && document.getElementById(pendingInitialId)) {
+        pendingInitialFocusIdRef.current = null;
+        onInitialFocusConsumedRef.current?.();
+        lastValidSearchFocusRef.current = pendingInitialId;
+        setFocusedId(pendingInitialId);
+        focusDomNode(pendingInitialId);
+        return;
+      }
+
+      if (pendingInitialId.startsWith('search-card-') && loading) {
+        const interimId = `search-filter-${activeFilter}`;
+        const hasValidCurrent = Boolean(
+          focusedId &&
+            isSearchContentNodeId(focusedId) &&
+            typeof document !== 'undefined' &&
+            document.getElementById(focusedId)
+        );
+        if (!hasValidCurrent) {
+          lastValidSearchFocusRef.current = interimId;
+          setFocusedId(interimId);
+          focusDomNode(interimId);
+        }
+        return;
+      }
+
+      pendingInitialFocusIdRef.current = null;
+      onInitialFocusConsumedRef.current?.();
+      const fallbackId = pendingInitialId.startsWith('search-card-')
+        ? firstResultId !== null
+          ? `search-card-${firstResultId}`
+          : `search-filter-${activeFilter}`
+        : getFirstSearchFocusableId();
+      lastValidSearchFocusRef.current = fallbackId;
+      setFocusedId(fallbackId);
+      focusDomNode(fallbackId);
+      return;
+    }
 
     if (focusedId && focusedId.startsWith('nav-')) {
       lastValidSearchFocusRef.current = null;
@@ -773,6 +850,8 @@ export function SearchView({
   serverUrl,
   token,
   refreshKey,
+  initialFocusId,
+  onInitialFocusConsumed,
   onSelectItem,
   onPlayItem,
   onNavigateToSidebar,
@@ -785,7 +864,7 @@ export function SearchView({
   const [activeFilter, setActiveFilter] = useState<SearchFilterType>(initialSaved.filter);
   const [results, setResults] = useState<SearchResultItem[]>([]);
   const [total, setTotal] = useState<number>(0);
-  const [loading, setLoading] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(() => Boolean(initialSaved.query.trim()));
   const [error, setError] = useState<string | null>(null);
   const [retryNonce, setRetryNonce] = useState<number>(0);
   const [isEditingInput, setIsEditingInput] = useState<boolean>(false);
@@ -1154,6 +1233,9 @@ export function SearchView({
         loading={loading}
         firstResultId={firstResultId}
         activeFilter={activeFilter}
+        initialFocusId={initialFocusId}
+        hasInitialQuery={Boolean(initialSaved.query.trim())}
+        onInitialFocusConsumed={onInitialFocusConsumed}
       />
 
       {/* Left Pane: IME Input Bar + Utility Actions + 6x6 Alphanumeric Keyboard */}

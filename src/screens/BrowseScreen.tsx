@@ -567,9 +567,11 @@ interface BrowseMainContentProps {
   currentUserId?: string;
   playlistsRefreshToken: number;
   searchRefreshKey?: number;
+  searchInitialFocusId?: string | null;
   hasSwitchServer: boolean;
   onOpenPlaylist: (playlistId: string) => void;
   onNavigateToSearchSidebar: () => void;
+  onSearchInitialFocusConsumed?: () => void;
   onLockedLibrary?: (libraryId: string) => void;
   onBrowseFolder?: (libraryId: string, folderPath?: string) => void;
   onSelectItem: (itemId: number | string) => void;
@@ -595,9 +597,11 @@ const BrowseMainContent = memo(function BrowseMainContent({
   currentUserId,
   playlistsRefreshToken,
   searchRefreshKey,
+  searchInitialFocusId,
   hasSwitchServer,
   onOpenPlaylist,
   onNavigateToSearchSidebar,
+  onSearchInitialFocusConsumed,
   onLockedLibrary,
   onBrowseFolder,
   onSelectItem,
@@ -614,6 +618,8 @@ const BrowseMainContent = memo(function BrowseMainContent({
           serverUrl={serverUrl}
           token={token}
           refreshKey={searchRefreshKey}
+          initialFocusId={searchInitialFocusId}
+          onInitialFocusConsumed={onSearchInitialFocusConsumed}
           onSelectItem={onSelectItem}
           onPlayItem={onPlayItem}
           onNavigateToSidebar={onNavigateToSearchSidebar}
@@ -785,6 +791,11 @@ export function BrowseScreen({
   const [retryCount, setRetryCount] = useState<number>(0);
   const [internalPlaylistId, setInternalPlaylistId] = useState<string | null>(null);
   const [internalPlaylistRefresh, setInternalPlaylistRefresh] = useState<number>(0);
+  const [searchInitialFocusId, setSearchInitialFocusId] = useState<string | null>(() =>
+    (initialTab || 'home') === 'search' ? initialFocusId ?? null : null
+  );
+  const searchInitialFocusIdRef = useRef(searchInitialFocusId);
+  searchInitialFocusIdRef.current = searchInitialFocusId;
 
   const onTabChangeRef = useRef(onTabChange);
   onTabChangeRef.current = onTabChange;
@@ -896,6 +907,9 @@ export function BrowseScreen({
 
   useEffect(() => {
     lastContentFocusedIdRef.current = null;
+    if (activeTab !== 'search') {
+      setSearchInitialFocusId(null);
+    }
     onTabChangeRef.current?.(activeTab);
   }, [activeTab]);
 
@@ -912,19 +926,34 @@ export function BrowseScreen({
   }, [focusedId, activeTrap, layout, activeTab]);
 
   useEffect(() => {
-    if (activeTab === 'playlists' || activeTab === 'search') {
+    if (activeTab === 'playlists') {
       setLayout(null);
       setLayoutError(null);
       setLoading(false);
       if (focusedIdRef.current === null && !isModalActive(activeTrapRef.current)) {
         const targetId =
-          initialFocusId && isValidContentNode(initialFocusId, null, activeTab)
+          initialFocusId && isValidContentNode(initialFocusId, null, 'playlists')
             ? initialFocusId
-            : activeTab === 'playlists'
-            ? getFirstPlaylistsFocusableId()
-            : getFirstSearchFocusableId();
+            : getFirstPlaylistsFocusableId();
         if (targetId) {
           setFocusedId(targetId);
+        }
+      }
+      return;
+    }
+    if (activeTab === 'search') {
+      setLayout(null);
+      setLayoutError(null);
+      setLoading(false);
+      if (focusedIdRef.current === null && !isModalActive(activeTrapRef.current)) {
+        const pendingSearchFocus = searchInitialFocusIdRef.current;
+        if (
+          pendingSearchFocus &&
+          isValidContentNode(pendingSearchFocus, null, 'search')
+        ) {
+          setFocusedId(pendingSearchFocus);
+        } else if (!pendingSearchFocus) {
+          setFocusedId(getFirstSearchFocusableId());
         }
       }
       return;
@@ -1030,7 +1059,12 @@ export function BrowseScreen({
         e.key === 'Escape' ||
         e.key === 'Backspace'
       ) {
-        if (!onSidebar && isValidContentNode(currentFocused, currentLayout, currentTab)) {
+        if (
+          !onSidebar &&
+          (isValidContentNode(currentFocused, currentLayout, currentTab) ||
+            (currentTab === 'search' &&
+              (currentFocused === null || isSearchContentNodeId(currentFocused))))
+        ) {
           e.preventDefault();
           e.stopPropagation();
           e.stopImmediatePropagation();
@@ -1180,6 +1214,10 @@ export function BrowseScreen({
     setFocusedId('nav-screen-search');
   }, [setFocusedId]);
 
+  const handleConsumeSearchInitialFocus = useCallback(() => {
+    setSearchInitialFocusId(null);
+  }, []);
+
   const handleInternalPlayQueue = useCallback(
     (queue: PlaylistQueuePlayItem[], startIndex: number) => {
       const first = queue[startIndex];
@@ -1219,9 +1257,11 @@ export function BrowseScreen({
         currentUserId={currentUserId}
         playlistsRefreshToken={(playlistRefreshKey ?? 0) + internalPlaylistRefresh}
         searchRefreshKey={refreshKey}
+        searchInitialFocusId={activeTab === 'search' ? searchInitialFocusId : null}
         hasSwitchServer={Boolean(onSwitchServer)}
         onOpenPlaylist={handleOpenPlaylist}
         onNavigateToSearchSidebar={handleNavigateToSearchSidebar}
+        onSearchInitialFocusConsumed={handleConsumeSearchInitialFocus}
         onLockedLibrary={onLockedLibrary}
         onBrowseFolder={onBrowseFolder}
         onSelectItem={onSelectItem}

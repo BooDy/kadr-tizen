@@ -1624,6 +1624,93 @@ describe('BrowseScreen', () => {
       fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN });
     });
     expect(searchNav.className).toContain('tv-focus-ring');
+    expect(onRequestExit).not.toHaveBeenCalled();
+
+    // Third BACK_TIZEN while focused on nav-screen-search triggers onRequestExit
+    act(() => {
+      fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN });
+    });
+    expect(onRequestExit).toHaveBeenCalledTimes(1);
+  });
+
+  it('restores search-card-* initialFocusId after reload, clears it on tab switch, and routes Back to sidebar during in-flight reload', async () => {
+    searchApi.setSavedSearchState({ query: 'arrival', filter: 'movie' });
+    vi.spyOn(screensApi, 'fetchScreenLayout').mockResolvedValue(mockHomeLayout);
+
+    let resolveSearch!: (val: { query: string; total: number; items: any[] }) => void;
+    vi.spyOn(searchApi, 'fetchSearchResults').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSearch = resolve;
+        })
+    );
+    const onRequestExit = vi.fn();
+
+    render(
+      <FocusProvider>
+        <BrowseScreen
+          client={mockClient}
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          initialTab="search"
+          initialFocusId="search-card-901"
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+          onSwitchProfile={vi.fn()}
+          onRequestExit={onRequestExit}
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('search-loading')).toBeInTheDocument();
+      expect(document.getElementById('search-filter-movie')?.className).toContain('tv-focus-ring');
+    });
+
+    await act(async () => {
+      resolveSearch({
+        query: 'arrival',
+        total: 1,
+        items: [
+          {
+            id: 901,
+            library_id: 'lib-movies',
+            library_name: 'Movies',
+            item_type: 'movie',
+            title: 'Arrival',
+            release_year: 2016,
+            poster_url: '/poster/901.jpg',
+            duration_seconds: 6960,
+            playback_progress: 0,
+          },
+        ],
+      });
+    });
+
+    await waitFor(() => {
+      expect(document.getElementById('search-card-901')?.className).toContain('tv-focus-ring');
+    });
+
+    // Switch away from Search and back: starts fresh on search-key-a (consumed initialFocusId)
+    fireEvent.click(document.getElementById('nav-screen-home')!);
+    await waitFor(() => {
+      expect(screen.getByText('Home Featured Movie')).toBeInTheDocument();
+    });
+
+    vi.spyOn(searchApi, 'fetchSearchResults').mockImplementation(
+      () => new Promise(() => {})
+    );
+    fireEvent.click(document.getElementById('nav-screen-search')!);
+    await waitFor(() => {
+      expect(document.getElementById('search-key-a')?.className).toContain('tv-focus-ring');
+    });
+
+    // Pressing BACK_TIZEN while a search fetch is in flight returns to nav-screen-search without exiting
+    act(() => {
+      fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN });
+    });
+    expect(document.getElementById('nav-screen-search')?.className).toContain('tv-focus-ring');
+    expect(onRequestExit).not.toHaveBeenCalled();
   });
 });
 

@@ -2576,14 +2576,16 @@ describe('App State Machine & Router', () => {
         expect(screen.getByRole('dialog', { name: 'Dune: Part Two' })).toBeInTheDocument();
       });
 
-      // Close ItemDetailModal -> BrowseScreen remains on Search tab with query, filter, and results preserved
+      // Close ItemDetailModal -> BrowseScreen remains on Search tab with query, filter, results, and card focus preserved
       fireEvent.click(document.getElementById('detail-close-btn')!);
 
       await waitFor(() => {
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
         expect(screen.getByTestId('search-view')).toBeInTheDocument();
         expect(screen.getByTestId('search-card-200')).toBeInTheDocument();
+        expect(document.getElementById('search-card-200')?.className).toContain('tv-focus-ring');
       });
+      expect(document.activeElement?.id).toBe('search-card-200');
 
       const nativeInput = screen.getByTestId('search-native-input') as HTMLInputElement;
       expect(nativeInput.value).toBe('dune');
@@ -2593,6 +2595,30 @@ describe('App State Machine & Router', () => {
       );
       expect(document.getElementById('nav-screen-search')?.className).toContain('bg-[#FF6B00]/15');
       expect(searchApi.getSavedSearchState()).toEqual({ query: 'dune', filter: 'movie' });
+
+      // Direct play from search-card-200 -> PlayerScreen -> exit restores search-card-200 focus once results load
+      act(() => {
+        fireEvent.keyDown(window, { key: 'MediaPlay', keyCode: TVKeys.PLAY });
+      });
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('search-view')).not.toBeInTheDocument();
+        expect(screen.getByText('Dune: Part Two')).toBeInTheDocument();
+      });
+
+      await act(async () => {
+        fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+      });
+      await act(async () => {
+        fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('search-view')).toBeInTheDocument();
+        expect(screen.getByTestId('search-card-200')).toBeInTheDocument();
+        expect(document.getElementById('search-card-200')?.className).toContain('tv-focus-ring');
+      });
+      expect(document.activeElement?.id).toBe('search-card-200');
 
       // Switching profile resets saved search state cleanly
       fireEvent.click(document.getElementById('nav-switch-profile')!);
