@@ -1,6 +1,7 @@
 node_modules/
 dist/
 *.wgt
+*.sha256
 .superpowers/
 .env*
 *.tsbuildinfo

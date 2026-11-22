@@ -104,7 +104,7 @@ function tizenClassicBundlePlugin() {
               }
             },
           });
-          unwrapPlugin.postcss = true;
+          unwrapPlugin.postcss = true as const;
 
           const res = await postcss([unwrapPlugin]).process(rawCss, { from: undefined });
           let cleanCss = res.css;

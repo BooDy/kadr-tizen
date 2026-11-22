@@ -1,0 +1,109 @@
+name: CI & Tizen Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-and-verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install zip utility for fallback .wgt packaging
+        run: sudo apt-get update && sudo apt-get install -y zip
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Enforce Chromium 69 zero-gap CSS gate
+        run: (! grep -rn "gap-" src/)
+
+      - name: Run dual TypeScript type checks
+        run: npx tsc -p tsconfig.json && npx tsc -p tsconfig.node.json
+
+      - name: Run unit & integration test suite
+        run: npm test -- --run
+
+      - name: Stage optional Tizen signing certificates
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TIZEN_AUTHOR_P12_BASE64: ${{ secrets.TIZEN_AUTHOR_P12_BASE64 }}
+          TIZEN_DISTRIBUTOR_P12_BASE64: ${{ secrets.TIZEN_DISTRIBUTOR_P12_BASE64 }}
+          TIZEN_AUTHOR_PASSWORD: ${{ secrets.TIZEN_AUTHOR_PASSWORD }}
+          TIZEN_DISTRIBUTOR_PASSWORD: ${{ secrets.TIZEN_DISTRIBUTOR_PASSWORD }}
+          TIZEN_CLI_BIN_INPUT: ${{ vars.TIZEN_CLI_BIN || secrets.TIZEN_CLI_BIN }}
+          TIZEN_SECURITY_PROFILE_INPUT: ${{ vars.TIZEN_SECURITY_PROFILE || secrets.TIZEN_SECURITY_PROFILE }}
+        run: |
+          set -euo pipefail
+          PROFILE_NAME="${TIZEN_SECURITY_PROFILE_INPUT:-kadr}"
+          TIZEN_BIN="${TIZEN_CLI_BIN_INPUT:-$(command -v tizen || true)}"
+
+          if [ -n "${TIZEN_AUTHOR_P12_BASE64:-}" ] && [ -n "${TIZEN_DISTRIBUTOR_P12_BASE64:-}" ]; then
+            CERT_DIR="${RUNNER_TEMP}/tizen-certs"
+            mkdir -p "$CERT_DIR"
+            printf '%s' "$TIZEN_AUTHOR_P12_BASE64" | tr -d '\r\n' | base64 --decode > "$CERT_DIR/author.p12"
+            printf '%s' "$TIZEN_DISTRIBUTOR_P12_BASE64" | tr -d '\r\n' | base64 --decode > "$CERT_DIR/distributor.p12"
+            chmod 600 "$CERT_DIR/author.p12" "$CERT_DIR/distributor.p12"
+
+            if [ -n "$TIZEN_BIN" ] && [ -x "$TIZEN_BIN" ]; then
+              "$TIZEN_BIN" security-profiles add -f -A \
+                -n "$PROFILE_NAME" \
+                -a "$CERT_DIR/author.p12" \
+                -p "${TIZEN_AUTHOR_PASSWORD:-}" \
+                -d "$CERT_DIR/distributor.p12" \
+                -dp "${TIZEN_DISTRIBUTOR_PASSWORD:-}"
+              echo "TIZEN_CLI_BIN=$TIZEN_BIN" >> "$GITHUB_ENV"
+              echo "TIZEN_SECURITY_PROFILE=$PROFILE_NAME" >> "$GITHUB_ENV"
+              echo "Configured Tizen security profile '$PROFILE_NAME'."
+            else
+              echo "Tizen certificates decoded, but Tizen CLI binary was not found; falling back to standard .wgt zip archive."
+            fi
+          else
+            if [ -n "$TIZEN_BIN" ] && [ -x "$TIZEN_BIN" ]; then
+              echo "TIZEN_CLI_BIN=$TIZEN_BIN" >> "$GITHUB_ENV"
+              echo "TIZEN_SECURITY_PROFILE=$PROFILE_NAME" >> "$GITHUB_ENV"
+            fi
+            echo "Tizen signing certificate secrets not configured; packaging will fall back to standard .wgt zip archive if CLI/profile is absent."
+          fi
+
+      - name: Build chrome69 bundle and package .wgt + .sha256
+        env:
+          TIZEN_CLI_BIN: ${{ env.TIZEN_CLI_BIN || vars.TIZEN_CLI_BIN || secrets.TIZEN_CLI_BIN || '' }}
+          TIZEN_SECURITY_PROFILE: ${{ env.TIZEN_SECURITY_PROFILE || vars.TIZEN_SECURITY_PROFILE || secrets.TIZEN_SECURITY_PROFILE || 'kadr' }}
+        run: |
+          npm run build && npm run package:wgt -- --no-build
+          sha256sum -c kadr.wgt.sha256
+
+      - name: Upload .wgt and SHA-256 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kadr-tizenos-wgt
+          path: |
+            kadr.wgt
+            kadr.wgt.sha256
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            kadr.wgt
+            kadr.wgt.sha256
+          generate_release_notes: true
