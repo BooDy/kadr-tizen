@@ -143,3 +143,41 @@ export interface LibraryFolderResponse {
   items: CardViewModel[];
   images: FolderImage[];
 }
+
+export type SearchFilterType =
+  | 'all'
+  | 'movie'
+  | 'show'
+  | 'episode'
+  | 'anime'
+  | 'music'
+  | 'audiobook'
+  | 'live_channel';
+
+export interface SearchResultItem {
+  id: number;
+  library_id: string;
+  library_name: string;
+  item_type: string;
+  title: string;
+  original_title?: string | null;
+  release_year?: number | null;
+  overview?: string | null;
+  poster_url: string;
+  backdrop_url?: string | null;
+  badge?: string | null;
+  rating?: number | null;
+  duration_seconds: number;
+  playback_progress?: number | null;
+  series_title?: string | null;
+  season?: number | null;
+  episode?: number | null;
+  genres?: string[];
+  director?: string | null;
+}
+
+export interface SearchResponse {
+  query: string;
+  total: number;
+  items: SearchResultItem[];
+}
