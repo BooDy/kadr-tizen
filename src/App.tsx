@@ -27,6 +27,7 @@ import {
   PlaybackProgressSnapshot,
 } from './utils/playbackProgress';
 import { setItemWatchState, setBatchWatchState } from './api/playback';
+import { resetSavedSearchState } from './api/search';
 import { disarmBootErrorTrap } from './utils/bootTrap';
 import { exitTvApp } from './utils/tizenLifecycle';
 
@@ -123,6 +124,7 @@ export default function App() {
       setPlayerItem(null);
       sessionProgressRef.current.clear();
       client.clearLibraryUnlockTokens();
+      resetSavedSearchState();
       setSessionExpiredNotice('Session expired — please enter your PIN to continue');
       setView('profiles');
     };
@@ -247,6 +249,7 @@ export default function App() {
     setSuspendedItemDetail(null);
     sessionProgressRef.current.clear();
     client.clearLibraryUnlockTokens();
+    resetSavedSearchState();
     setView('connect');
   };
 
@@ -595,6 +598,7 @@ export default function App() {
                 setSuspendedItemDetail(null);
                 sessionProgressRef.current.clear();
                 client.clearLibraryUnlockTokens();
+                resetSavedSearchState();
                 setView('profiles');
               }}
               onSwitchServer={handleSwitchServer}

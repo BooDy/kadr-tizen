@@ -8,6 +8,12 @@ import { WidgetRenderer } from '../components/widgets/WidgetRenderer';
 import { TVButton } from '../components/tv/TVButton';
 import { SidebarCard } from '../components/tv/SidebarCard';
 import { PlaylistsView } from './PlaylistsView';
+import {
+  SearchView,
+  getFirstSearchFocusableId,
+  isSearchContentNodeId,
+  isSearchLeftmostNodeId,
+} from './SearchView';
 import { PlaylistDetailModal, PlaylistQueuePlayItem } from './PlaylistDetailModal';
 import { MediaItemDetail } from '../api/items';
 import { PlaylistItem } from './PlayerScreen';
@@ -21,8 +27,10 @@ import {
   Server,
   Folder,
   ListVideo,
+  Search,
 } from 'lucide-react';
 import { useFocusContext } from '../navigation/FocusContext';
+import { isTextInputElement } from '../navigation/useFocusable';
 import { TVKeys } from '../navigation/keys';
 
 export interface BrowseScreenProps {
@@ -138,6 +146,9 @@ function isLeftmostContentNode(
   ) {
     return true;
   }
+  if (activeTab === 'search') {
+    return isSearchLeftmostNodeId(id);
+  }
   if (activeTab === 'playlists') {
     if (id === 'playlists-create-btn') return true;
     if (id.startsWith('playlist-card-')) {
@@ -201,6 +212,12 @@ function isValidContentNode(
     id === 'library-browse-folders-btn'
   ) {
     return true;
+  }
+  if (activeTab === 'search') {
+    return Boolean(
+      isSearchContentNodeId(id) &&
+        (typeof document === 'undefined' || document.getElementById(id))
+    );
   }
   if (activeTab === 'playlists') {
     if (id === 'playlists-create-btn' || id.startsWith('playlist-card-')) {
@@ -453,8 +470,20 @@ const BrowseSidebar = memo(function BrowseSidebar({
           );
         })}
         <SidebarCard
-          id="nav-screen-playlists"
+          id="nav-screen-search"
           order={screenItems.length + 1}
+          selected={activeTab === 'search'}
+          focused={sidebarFocusedId === 'nav-screen-search'}
+          expanded={isSidebarFocused}
+          title="Search"
+          subtitle="Movies, shows & episodes"
+          chip="/search"
+          tile={<Search className="w-6 h-6" />}
+          onSelect={() => onSelectScreen('search')}
+        />
+        <SidebarCard
+          id="nav-screen-playlists"
+          order={screenItems.length + 2}
           selected={activeTab === 'playlists'}
           focused={sidebarFocusedId === 'nav-screen-playlists'}
           expanded={isSidebarFocused}
@@ -473,7 +502,7 @@ const BrowseSidebar = memo(function BrowseSidebar({
       >
         <SidebarCard
           id="nav-switch-profile"
-          order={screenItems.length + 2}
+          order={screenItems.length + 3}
           selected={false}
           focused={sidebarFocusedId === 'nav-switch-profile'}
           expanded={isSidebarFocused}
@@ -537,8 +566,10 @@ interface BrowseMainContentProps {
   token?: string;
   currentUserId?: string;
   playlistsRefreshToken: number;
+  searchRefreshKey?: number;
   hasSwitchServer: boolean;
   onOpenPlaylist: (playlistId: string) => void;
+  onNavigateToSearchSidebar: () => void;
   onLockedLibrary?: (libraryId: string) => void;
   onBrowseFolder?: (libraryId: string, folderPath?: string) => void;
   onSelectItem: (itemId: number | string) => void;
@@ -563,8 +594,10 @@ const BrowseMainContent = memo(function BrowseMainContent({
   token,
   currentUserId,
   playlistsRefreshToken,
+  searchRefreshKey,
   hasSwitchServer,
   onOpenPlaylist,
+  onNavigateToSearchSidebar,
   onLockedLibrary,
   onBrowseFolder,
   onSelectItem,
@@ -575,7 +608,17 @@ const BrowseMainContent = memo(function BrowseMainContent({
 }: BrowseMainContentProps) {
   return (
     <main className="flex-1 h-full overflow-y-auto p-12 scrollbar-none">
-      {activeTab === 'playlists' ? (
+      {activeTab === 'search' ? (
+        <SearchView
+          client={client}
+          serverUrl={serverUrl}
+          token={token}
+          refreshKey={searchRefreshKey}
+          onSelectItem={onSelectItem}
+          onPlayItem={onPlayItem}
+          onNavigateToSidebar={onNavigateToSearchSidebar}
+        />
+      ) : activeTab === 'playlists' ? (
         <PlaylistsView
           client={client}
           serverUrl={serverUrl}
@@ -735,7 +778,9 @@ export function BrowseScreen({
   const librariesList = propLibraries || internalLibraries;
   const [activeTab, setActiveTab] = useState<string>(initialTab || 'home');
   const [layout, setLayout] = useState<ScreenLayout | null>(null);
-  const [loading, setLoading] = useState(initialTab !== 'playlists');
+  const [loading, setLoading] = useState(
+    initialTab !== 'playlists' && initialTab !== 'search'
+  );
   const [layoutError, setLayoutError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState<number>(0);
   const [internalPlaylistId, setInternalPlaylistId] = useState<string | null>(null);
@@ -817,7 +862,11 @@ export function BrowseScreen({
         if (!cancelled && data && data.length > 0) {
           setScreens(data);
           setActiveTab((prev) => {
-            if (prev === 'playlists' || (prev && data.some((s) => s.id === prev))) {
+            if (
+              prev === 'playlists' ||
+              prev === 'search' ||
+              (prev && data.some((s) => s.id === prev))
+            ) {
               return prev;
             }
             return initialTab || data[0].id;
@@ -863,15 +912,17 @@ export function BrowseScreen({
   }, [focusedId, activeTrap, layout, activeTab]);
 
   useEffect(() => {
-    if (activeTab === 'playlists') {
+    if (activeTab === 'playlists' || activeTab === 'search') {
       setLayout(null);
       setLayoutError(null);
       setLoading(false);
       if (focusedIdRef.current === null && !isModalActive(activeTrapRef.current)) {
         const targetId =
-          initialFocusId && isValidContentNode(initialFocusId, null, 'playlists')
+          initialFocusId && isValidContentNode(initialFocusId, null, activeTab)
             ? initialFocusId
-            : getFirstPlaylistsFocusableId();
+            : activeTab === 'playlists'
+            ? getFirstPlaylistsFocusableId()
+            : getFirstSearchFocusableId();
         if (targetId) {
           setFocusedId(targetId);
         }
@@ -925,11 +976,13 @@ export function BrowseScreen({
 
   const handleSelectScreen = useCallback(
     (screenId: string) => {
-      const info = getLibraryInfoRef.current(screenId);
-      if (info && info.isPrivate && !info.isUnlocked) {
-        setActiveTab(screenId);
-        onLockedLibrary?.(info.lib.id);
-        return;
+      if (screenId !== 'playlists' && screenId !== 'search') {
+        const info = getLibraryInfoRef.current(screenId);
+        if (info && info.isPrivate && !info.isUnlocked) {
+          setActiveTab(screenId);
+          onLockedLibrary?.(info.lib.id);
+          return;
+        }
       }
       setActiveTab(screenId);
     },
@@ -939,13 +992,14 @@ export function BrowseScreen({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const targetEl = e.target as HTMLElement | null;
+      const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
 
       // Guard 1: Never intercept Back/Backspace in input or textarea fields
       if (
-        targetEl &&
-        (targetEl.tagName === 'INPUT' ||
-          targetEl.tagName === 'TEXTAREA' ||
-          targetEl.isContentEditable)
+        isTextInputElement(targetEl) ||
+        isTextInputElement(activeEl) ||
+        targetEl?.isContentEditable ||
+        (activeEl as HTMLElement | null)?.isContentEditable
       ) {
         return;
       }
@@ -1008,7 +1062,13 @@ export function BrowseScreen({
 
       // ArrowRight from sidebar transitions into content area
       if (code === TVKeys.RIGHT || e.key === 'ArrowRight') {
-        if (onSidebar && (currentLayout || currentTab === 'playlists' || currentLayoutError)) {
+        if (
+          onSidebar &&
+          (currentLayout ||
+            currentTab === 'playlists' ||
+            currentTab === 'search' ||
+            currentLayoutError)
+        ) {
           e.preventDefault();
           e.stopPropagation();
           e.stopImmediatePropagation();
@@ -1017,6 +1077,8 @@ export function BrowseScreen({
             ? lastId
             : currentTab === 'playlists'
             ? getFirstPlaylistsFocusableId()
+            : currentTab === 'search'
+            ? getFirstSearchFocusableId()
             : currentLayoutError
             ? 'retry-layout-btn'
             : currentLayout
@@ -1059,7 +1121,7 @@ export function BrowseScreen({
     }
 
     return (screens.length > 0 ? screens : defaultScreens).filter(
-      (s) => s.id !== 'playlists'
+      (s) => s.id !== 'playlists' && s.id !== 'search'
     );
   }, [librariesList, screens]);
 
@@ -1093,7 +1155,7 @@ export function BrowseScreen({
     (currentLibInfo?.lib as { path?: string } | undefined)?.path?.startsWith('plugin://')
   );
   const targetLibId =
-    activeTab !== 'home' && activeTab !== 'playlists'
+    activeTab !== 'home' && activeTab !== 'playlists' && activeTab !== 'search'
       ? currentLibInfo?.lib.id || activeTab
       : null;
   const libraryHeading =
@@ -1113,6 +1175,10 @@ export function BrowseScreen({
   const handleRetryLayout = useCallback(() => {
     setRetryCount((c) => c + 1);
   }, []);
+
+  const handleNavigateToSearchSidebar = useCallback(() => {
+    setFocusedId('nav-screen-search');
+  }, [setFocusedId]);
 
   const handleInternalPlayQueue = useCallback(
     (queue: PlaylistQueuePlayItem[], startIndex: number) => {
@@ -1152,8 +1218,10 @@ export function BrowseScreen({
         token={token}
         currentUserId={currentUserId}
         playlistsRefreshToken={(playlistRefreshKey ?? 0) + internalPlaylistRefresh}
+        searchRefreshKey={refreshKey}
         hasSwitchServer={Boolean(onSwitchServer)}
         onOpenPlaylist={handleOpenPlaylist}
+        onNavigateToSearchSidebar={handleNavigateToSearchSidebar}
         onLockedLibrary={onLockedLibrary}
         onBrowseFolder={onBrowseFolder}
         onSelectItem={onSelectItem}

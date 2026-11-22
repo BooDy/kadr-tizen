@@ -11,6 +11,7 @@ import * as eventsApi from '../src/api/events';
 import * as subtitlesApi from '../src/api/subtitles';
 import * as playlistsApi from '../src/api/playlists';
 import * as playbackApi from '../src/api/playback';
+import * as searchApi from '../src/api/search';
 import { MediaItemDetail } from '../src/api/items';
 import { ApiClient } from '../src/api/client';
 import { ScreenLayout } from '../src/types/ast';
@@ -259,6 +260,7 @@ describe('App State Machine & Router', () => {
   beforeEach(() => {
     localStorage.clear();
     vi.restoreAllMocks();
+    searchApi.resetSavedSearchState();
     driverStateCb = null;
     driverTimeCb = null;
     vi.mocked(discovery.discoverLocalServers).mockResolvedValue([]);
@@ -2440,6 +2442,242 @@ describe('App State Machine & Router', () => {
     } finally {
       removeTokenSpy.mockRestore();
       warnSpy.mockRestore();
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('searches globally from BrowseScreen Search tab, opens ItemDetailModal on [OK], preserves search state across PlayerScreen, and clears search state on profile switch', async () => {
+    localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
+
+    const searchUrls: string[] = [];
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url =
+        typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
+      if (url.includes('/api/v1/search')) {
+        searchUrls.push(url);
+        return new Response(
+          JSON.stringify({
+            query: 'dune',
+            total: 1,
+            items: [
+              {
+                id: 200,
+                library_id: 'lib-movies',
+                library_name: 'Movies',
+                item_type: 'movie',
+                title: 'Dune: Part Two',
+                release_year: 2024,
+                poster_url: '/api/v1/artwork/200/poster',
+                badge: '4K',
+                duration_seconds: 9960,
+                playback_progress: 0.25,
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+
+    try {
+      await renderAuthenticatedApp();
+
+      await waitFor(() => {
+        expect(screen.getByText('Trending')).toBeInTheDocument();
+        expect(document.getElementById('nav-screen-search')).not.toBeNull();
+      });
+
+      // Navigate via D-pad to nav-screen-search (home -> movies -> shows -> search)
+      if (document.activeElement?.id !== 'nav-screen-home') {
+        act(() => {
+          fireEvent.keyDown(window, { key: 'ArrowLeft', keyCode: TVKeys.LEFT });
+        });
+      }
+      expect(document.getElementById('nav-screen-home')?.className).toContain('tv-focus-ring');
+
+      for (let i = 0; i < 3; i++) {
+        act(() => {
+          fireEvent.keyDown(window, { key: 'ArrowDown', keyCode: TVKeys.DOWN });
+        });
+      }
+      expect(document.getElementById('nav-screen-search')?.className).toContain('tv-focus-ring');
+
+      act(() => {
+        fireEvent.keyDown(window, { key: 'Enter', keyCode: TVKeys.ENTER });
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('search-view')).toBeInTheDocument();
+      });
+
+      // Enter SearchView via ArrowRight onto search-key-a
+      act(() => {
+        fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+      });
+      expect(document.getElementById('search-key-a')?.className).toContain('tv-focus-ring');
+
+      // Type 'dune' via D-pad keypad and select Movies filter
+      fireEvent.click(document.getElementById('search-key-d')!);
+      fireEvent.click(document.getElementById('search-key-u')!);
+      fireEvent.click(document.getElementById('search-key-n')!);
+      fireEvent.click(document.getElementById('search-key-e')!);
+      fireEvent.click(document.getElementById('search-filter-movie')!);
+
+      await waitFor(
+        () => {
+          expect(
+            searchUrls.some((u) => u.includes('q=dune') && u.includes('item_type=movie'))
+          ).toBe(true);
+          expect(screen.getByTestId('search-card-200')).toBeInTheDocument();
+        },
+        { timeout: 2000 }
+      );
+
+      // Navigate across keyboard right edge to search-card-200 and press [OK]
+      for (let i = 0; i < 6; i++) {
+        act(() => {
+          fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+        });
+      }
+      expect(document.getElementById('search-card-200')?.className).toContain('tv-focus-ring');
+
+      act(() => {
+        fireEvent.keyDown(window, { key: 'Enter', keyCode: TVKeys.ENTER });
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole('dialog', { name: 'Dune: Part Two' })).toBeInTheDocument();
+      });
+
+      // Play from ItemDetailModal -> PlayerScreen
+      fireEvent.click(screen.getByRole('button', { name: /Resume/i }));
+
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        expect(screen.getByText('Dune: Part Two')).toBeInTheDocument();
+      });
+
+      // Exit PlayerScreen (two Escapes: hide OSD, exit player) -> returns to ItemDetailModal
+      await act(async () => {
+        fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+      });
+      await act(async () => {
+        fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole('dialog', { name: 'Dune: Part Two' })).toBeInTheDocument();
+      });
+
+      // Close ItemDetailModal -> BrowseScreen remains on Search tab with query, filter, and results preserved
+      fireEvent.click(document.getElementById('detail-close-btn')!);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        expect(screen.getByTestId('search-view')).toBeInTheDocument();
+        expect(screen.getByTestId('search-card-200')).toBeInTheDocument();
+      });
+
+      const nativeInput = screen.getByTestId('search-native-input') as HTMLInputElement;
+      expect(nativeInput.value).toBe('dune');
+      expect(document.getElementById('search-filter-movie')).toHaveAttribute(
+        'aria-pressed',
+        'true'
+      );
+      expect(document.getElementById('nav-screen-search')?.className).toContain('bg-[#FF6B00]/15');
+      expect(searchApi.getSavedSearchState()).toEqual({ query: 'dune', filter: 'movie' });
+
+      // Switching profile resets saved search state cleanly
+      fireEvent.click(document.getElementById('nav-switch-profile')!);
+
+      await waitFor(() => {
+        expect(screen.getByText("Who's watching?")).toBeInTheDocument();
+      });
+      expect(searchApi.getSavedSearchState()).toEqual({ query: '', filter: 'all' });
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('clears saved Search state on mid-session 401 unauthorized and server switch', async () => {
+    localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url =
+        typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
+      if (url.includes('/api/v1/search')) {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+          status: 401,
+          statusText: 'Unauthorized',
+        });
+      }
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+
+    try {
+      await renderAuthenticatedApp();
+
+      await waitFor(() => {
+        expect(document.getElementById('nav-screen-search')).not.toBeNull();
+      });
+
+      fireEvent.click(document.getElementById('nav-screen-search')!);
+      await waitFor(() => {
+        expect(screen.getByTestId('search-view')).toBeInTheDocument();
+      });
+
+      // Trigger search query -> 401 redirects to ProfileSelectScreen and resets saved search state
+      fireEvent.click(document.getElementById('search-key-a')!);
+
+      await waitFor(
+        () => {
+          expect(screen.getByText("Who's watching?")).toBeInTheDocument();
+        },
+        { timeout: 2000 }
+      );
+      expect(searchApi.getSavedSearchState()).toEqual({ query: '', filter: 'all' });
+
+      // Re-authenticate with layout error so Change Server button is rendered, then trigger handleSwitchServer
+      vi.mocked(screensApi.fetchScreenLayout).mockRejectedValueOnce(new Error('Server down'));
+      vi.mocked(auth.authenticatePin).mockResolvedValueOnce({
+        success: true,
+        data: {
+          token: 'valid-test-token-2',
+          user_id: 'user-1',
+          username: 'Alice',
+          role: 'admin',
+        },
+      });
+      fireEvent.click(screen.getByText('Alice'));
+      await waitFor(() => {
+        expect(screen.getByText(/Enter PIN for Alice/i)).toBeInTheDocument();
+      });
+      fireEvent.keyDown(window, { key: '1', keyCode: 49 });
+      fireEvent.keyDown(window, { key: '2', keyCode: 50 });
+      fireEvent.keyDown(window, { key: '3', keyCode: 51 });
+      fireEvent.keyDown(window, { key: '4', keyCode: 52 });
+
+      await waitFor(() => {
+        expect(document.getElementById('change-server-btn')).not.toBeNull();
+      });
+      searchApi.setSavedSearchState({ query: 'stale', filter: 'anime' });
+      fireEvent.click(document.getElementById('change-server-btn')!);
+
+      await waitFor(() => {
+        expect(screen.getByText(/Connect to Kadr/i)).toBeInTheDocument();
+      });
+      expect(searchApi.getSavedSearchState()).toEqual({ query: '', filter: 'all' });
+    } finally {
       fetchSpy.mockRestore();
     }
   });

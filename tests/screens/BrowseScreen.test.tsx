@@ -6,6 +6,7 @@ import { ApiClient } from '../../src/api/client';
 import * as screensApi from '../../src/api/screens';
 import * as librariesApi from '../../src/api/libraries';
 import * as playlistsApi from '../../src/api/playlists';
+import * as searchApi from '../../src/api/search';
 import { ScreenLayout } from '../../src/types/ast';
 import { TVKeys } from '../../src/navigation/keys';
 
@@ -86,6 +87,7 @@ describe('BrowseScreen', () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    searchApi.resetSavedSearchState();
     mockClient = new ApiClient('http://localhost:8492');
     vi.spyOn(screensApi, 'fetchScreens').mockResolvedValue([
       { id: 'home', title: 'Home' },
@@ -1461,6 +1463,167 @@ describe('BrowseScreen', () => {
     });
 
     expect(onContentFocusChangeSpy).toHaveBeenCalledWith('card-carousel-home-201');
+  });
+
+  it('renders Search sidebar tab above Playlists, mounts SearchView without fetchScreenLayout, and bridges D-pad focus between sidebar, keyboard, and results', async () => {
+    const layoutSpy = vi
+      .spyOn(screensApi, 'fetchScreenLayout')
+      .mockResolvedValue(mockHomeLayout);
+    const searchSpy = vi.spyOn(searchApi, 'fetchSearchResults').mockResolvedValue({
+      query: 'a',
+      total: 1,
+      items: [
+        {
+          id: 901,
+          library_id: 'lib-movies',
+          library_name: 'Movies',
+          item_type: 'movie',
+          title: 'Arrival',
+          release_year: 2016,
+          poster_url: '/poster/901.jpg',
+          duration_seconds: 6960,
+          playback_progress: 0,
+        },
+      ],
+    });
+    const onRequestExit = vi.fn();
+
+    render(
+      <FocusProvider>
+        <BrowseScreen
+          client={mockClient}
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+          onSwitchProfile={vi.fn()}
+          onRequestExit={onRequestExit}
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(document.getElementById('nav-screen-search')).not.toBeNull();
+      expect(document.getElementById('nav-screen-playlists')).not.toBeNull();
+    });
+
+    const sidebarItems = screen.getByTestId('sidebar-items-container');
+    const navIds = Array.from(sidebarItems.querySelectorAll('[id^="nav-screen-"]')).map(
+      (el) => el.id
+    );
+    expect(navIds).toEqual([
+      'nav-screen-home',
+      'nav-screen-movies',
+      'nav-screen-shows',
+      'nav-screen-search',
+      'nav-screen-playlists',
+    ]);
+
+    const searchNav = document.getElementById('nav-screen-search')!;
+    fireEvent.click(searchNav);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('search-view')).toBeInTheDocument();
+    });
+    expect(layoutSpy).not.toHaveBeenCalledWith(mockClient, 'search');
+
+    // Escape outside <input> focuses sidebar Search item, and ArrowRight focuses search-key-a
+    act(() => {
+      fireEvent.keyDown(window, { key: 'Escape' });
+    });
+    expect(searchNav.className).toContain('tv-focus-ring');
+
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+    });
+    expect(document.getElementById('search-key-a')?.className).toContain('tv-focus-ring');
+
+    // ArrowLeft from leftmost search-key-a returns to nav-screen-search
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowLeft', keyCode: TVKeys.LEFT });
+    });
+    expect(searchNav.className).toContain('tv-focus-ring');
+
+    // Return to search-key-a, press Enter to search 'a', and bridge right into results
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+    });
+    expect(document.getElementById('search-key-a')?.className).toContain('tv-focus-ring');
+
+    act(() => {
+      fireEvent.keyDown(window, { key: 'Enter', keyCode: TVKeys.ENTER });
+    });
+
+    await waitFor(
+      () => {
+        expect(searchSpy).toHaveBeenCalledWith(
+          mockClient,
+          expect.objectContaining({ q: 'a' })
+        );
+        expect(document.getElementById('search-card-901')).toBeInTheDocument();
+      },
+      { timeout: 2000 }
+    );
+
+    for (let i = 0; i < 5; i++) {
+      act(() => {
+        fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+      });
+    }
+    expect(document.getElementById('search-key-f')?.className).toContain('tv-focus-ring');
+
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+    });
+    expect(document.getElementById('search-card-901')?.className).toContain('tv-focus-ring');
+
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowLeft', keyCode: TVKeys.LEFT });
+    });
+    expect(document.getElementById('search-key-f')?.className).toContain('tv-focus-ring');
+
+    // BACK_TIZEN when not editing <input> jumps back to nav-screen-search
+    act(() => {
+      fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN });
+    });
+    expect(searchNav.className).toContain('tv-focus-ring');
+
+    // Return into SearchView, move up to search-query-input, enter IME edit mode
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+    });
+    expect(document.getElementById('search-key-f')?.className).toContain('tv-focus-ring');
+
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowUp', keyCode: TVKeys.UP });
+    });
+    expect(document.getElementById('search-action-clear')?.className).toContain('tv-focus-ring');
+
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowUp', keyCode: TVKeys.UP });
+    });
+    expect(document.getElementById('search-query-input')?.className).toContain('tv-focus-ring');
+
+    act(() => {
+      fireEvent.keyDown(window, { key: 'Enter', keyCode: TVKeys.ENTER });
+    });
+    const nativeInput = document.getElementById('search-native-input') as HTMLInputElement;
+    expect(document.activeElement).toBe(nativeInput);
+
+    // BACK_TIZEN dispatched on window while <input> is focused must blur <input> without jumping to sidebar
+    act(() => {
+      fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN });
+    });
+    expect(document.activeElement).not.toBe(nativeInput);
+    expect(document.getElementById('search-query-input')?.className).toContain('tv-focus-ring');
+    expect(searchNav.className).not.toContain('tv-focus-ring');
+    expect(onRequestExit).not.toHaveBeenCalled();
+
+    // Second BACK_TIZEN outside <input> returns to sidebar nav-screen-search
+    act(() => {
+      fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN });
+    });
+    expect(searchNav.className).toContain('tv-focus-ring');
   });
 });
 
