@@ -353,6 +353,8 @@ export function PlayerScreen({
   currentQueueEntryRef.current = currentQueueEntry;
   const mediaTypeRef = useRef(mediaType);
   mediaTypeRef.current = mediaType;
+  const isLivePropRef = useRef(isLiveProp);
+  isLivePropRef.current = isLiveProp;
   const onSelectQueueIndexRef = useRef(onSelectQueueIndex);
   onSelectQueueIndexRef.current = onSelectQueueIndex;
 
@@ -384,7 +386,7 @@ export function PlayerScreen({
   const isAmbientDimmedRef = useRef(isAmbientDimmed);
   isAmbientDimmedRef.current = isAmbientDimmed;
   const ambientTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const audioEndedHandledRef = useRef(false);
+  const audioEndedHandledItemIdRef = useRef<string | null>(null);
 
   const [isLiveStream, setIsLiveStream] = useState<boolean>(() =>
     Boolean(
@@ -859,8 +861,8 @@ export function PlayerScreen({
   autoAdvanceCountdownRef.current = autoAdvanceCountdown;
   const autoAdvanceDismissedRef = useRef(false);
 
-  // Synchronously reset stream-selection and item-scoped state during render on itemId change
-  // so the first playback useEffect commit never runs with the prior queue track's useHls/technicalInfo.
+  // Pure render-phase state adjustment on itemId change so the first commit/useEffect never
+  // sees stale playerState ('ended'), useHls, or technicalInfo from the prior queue track.
   const [prevStreamItemId, setPrevStreamItemId] = useState(itemId);
   if (prevStreamItemId !== itemId) {
     setPrevStreamItemId(itemId);
@@ -869,51 +871,79 @@ export function PlayerScreen({
       technical,
       forceHtml5 || isBrowserEnv
     );
+    setPlayerState('buffering');
     setTechnicalInfo(technical);
-    technicalInfoRef.current = technical;
     setUseHls(nextCompat.useHls);
-    isHlsRef.current = nextCompat.useHls;
-    hlsAutoFallbackDoneRef.current = nextCompat.autoFallbackDone;
-    hlsTranscodeFailedRef.current = false;
-    hlsUnavailableForItemRef.current = false;
-    directStreamTriedRef.current = false;
-    audioEndedHandledRef.current = false;
     setHlsSeekOffsetMs(null);
-    hlsSeekOffsetMsRef.current = null;
-    sessionResumeMsRef.current = 0;
-    restoreResumeMsRef.current = null;
-    pauseAfterRestoreRef.current = false;
     setPlaybackError(null);
     setShowDetailsModal(false);
     setAutoAdvanceCountdown(null);
-    autoAdvanceDismissedRef.current = false;
     setOsdFocusedItem('progress');
-    osdFocusedItemRef.current = 'progress';
 
     const nextTracks = Array.isArray(technical?.audio_tracks) ? technical.audio_tracks : [];
     const nextAudioIndex = pickInitialAudioTrackIndex(nextTracks, loadAudioPreference());
-    audioTracksRef.current = nextTracks;
     setAudioTracks(nextTracks);
-    selectedAudioTrackIndexRef.current = nextAudioIndex;
     setSelectedAudioTrackIndex(nextAudioIndex);
-    isAudioModalOpenRef.current = false;
     setIsAudioModalOpen(false);
-    pendingAudioSyncAfterForegroundRef.current = false;
 
     const nextKnownDurMs =
       technical?.duration_seconds !== undefined && technical.duration_seconds > 0
         ? technical.duration_seconds * 1000
         : 0;
     setKnownDurationMs(nextKnownDurMs);
-    knownDurationMsRef.current = nextKnownDurMs;
     const nextIsLive = Boolean(
       isLiveProp ||
         mediaType === 'live_channel' ||
         (technical?.duration_seconds !== undefined && technical.duration_seconds <= 0)
     );
     setIsLiveStream(nextIsLive);
-    isLiveStreamRef.current = nextIsLive;
   }
+
+  // Reset per-item stream/playback refs synchronously on commit before passive useEffects run
+  useLayoutEffect(() => {
+    const nextCompat = computeInitialPlaybackMode(
+      mediaTypeRef.current ?? currentQueueEntryRef.current?.mediaType,
+      technicalPropRef.current,
+      forceHtml5Ref.current || isBrowserEnv
+    );
+    technicalInfoRef.current = technicalPropRef.current;
+    isHlsRef.current = nextCompat.useHls;
+    hlsAutoFallbackDoneRef.current = nextCompat.autoFallbackDone;
+    hlsTranscodeFailedRef.current = false;
+    hlsUnavailableForItemRef.current = false;
+    directStreamTriedRef.current = false;
+    audioEndedHandledItemIdRef.current = null;
+    hlsSeekOffsetMsRef.current = null;
+    sessionResumeMsRef.current = 0;
+    restoreResumeMsRef.current = null;
+    pauseAfterRestoreRef.current = false;
+    autoAdvanceDismissedRef.current = false;
+    osdFocusedItemRef.current = 'progress';
+
+    const nextTracks = Array.isArray(technicalPropRef.current?.audio_tracks)
+      ? technicalPropRef.current.audio_tracks
+      : [];
+    audioTracksRef.current = nextTracks;
+    selectedAudioTrackIndexRef.current = pickInitialAudioTrackIndex(
+      nextTracks,
+      loadAudioPreference()
+    );
+    isAudioModalOpenRef.current = false;
+    pendingAudioSyncAfterForegroundRef.current = false;
+
+    const nextKnownDurMs =
+      technicalPropRef.current?.duration_seconds !== undefined &&
+      technicalPropRef.current.duration_seconds > 0
+        ? technicalPropRef.current.duration_seconds * 1000
+        : 0;
+    knownDurationMsRef.current = nextKnownDurMs;
+    isLiveStreamRef.current = Boolean(
+      isLivePropRef.current ||
+        mediaTypeRef.current === 'live_channel' ||
+        (technicalPropRef.current?.duration_seconds !== undefined &&
+          technicalPropRef.current.duration_seconds <= 0)
+    );
+  }, [itemId, isBrowserEnv]);
 
   useEffect(() => {
     const activeTech = technicalInfo ?? technical;
@@ -1051,18 +1081,19 @@ export function PlayerScreen({
 
   // Handle auto-advance trigger near media end (video 5s countdown vs audio 0s immediate transition)
   useEffect(() => {
-    if (playerState !== 'ended') {
-      audioEndedHandledRef.current = false;
+    const itemKey = String(itemId);
+    if (playerState !== 'ended' && audioEndedHandledItemIdRef.current === itemKey) {
+      audioEndedHandledItemIdRef.current = null;
     }
 
     if (isAudioMode) {
       if (autoAdvanceCountdown !== null) {
         setAutoAdvanceCountdown(null);
       }
-      if (playerState !== 'ended' || audioEndedHandledRef.current) {
+      if (playerState !== 'ended' || audioEndedHandledItemIdRef.current === itemKey) {
         return;
       }
-      audioEndedHandledRef.current = true;
+      audioEndedHandledItemIdRef.current = itemKey;
 
       const restartFromBeginning = () => {
         setPositionMs(0);
@@ -1112,6 +1143,7 @@ export function PlayerScreen({
       setAutoAdvanceCountdown(5);
     }
   }, [
+    itemId,
     isAudioMode,
     effectiveRepeatMode,
     playlist?.length,

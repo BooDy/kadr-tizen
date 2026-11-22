@@ -658,4 +658,90 @@ describe('PlayerScreen Audio Mode, 60s Ambient Auto-Dim & Queue Completion', () 
     expect(screen.getAllByText('HLS • AAC').length).toBeGreaterThan(0);
     expect(screen.getByTestId('audio-btn-repeat')).toHaveTextContent('Repeat: All');
   });
+
+  it('does not cascade auto-advance from Track 1 completion onto Track 3 while Track 2 is still buffering', async () => {
+    const client = new ApiClient(serverUrl);
+    const flacTech = { audio_codec: 'flac', container: 'flac', duration_seconds: 180 };
+    const playlist: PlaylistItem[] = [
+      { id: 301, title: 'Track 1', mediaType: 'music', technical: flacTech, durationSeconds: 180 },
+      { id: 302, title: 'Track 2', mediaType: 'music', technical: flacTech, durationSeconds: 200 },
+      { id: 303, title: 'Track 3', mediaType: 'music', technical: flacTech, durationSeconds: 220 },
+    ];
+    vi.spyOn(itemsApi, 'fetchMediaItem').mockImplementation(async (_c, id) => ({
+      id: Number(id),
+      title: `Track ${String(id).slice(-1)}`,
+      media_type: 'music',
+      technical: flacTech,
+    }));
+
+    const onNext = vi.fn();
+    const { container, rerender } = render(
+      <FocusProvider>
+        <PlayerScreen
+          client={client}
+          itemId={301}
+          title="Track 1"
+          mediaType="music"
+          technical={flacTech}
+          playlist={playlist}
+          currentIndex={0}
+          onNext={onNext}
+          onExit={vi.fn()}
+          serverUrl={serverUrl}
+          token={token}
+        />
+      </FocusProvider>
+    );
+
+    await flushMicrotasks();
+    const video1 = container.querySelector('video') as HTMLVideoElement;
+    expect(video1).not.toBeNull();
+
+    // Prevent Track 2's play() from auto-dispatching 'playing' so we test Track 2 while still buffering
+    playSpy.mockImplementation(() => Promise.resolve());
+
+    act(() => {
+      video1.dispatchEvent(new Event('ended'));
+    });
+    expect(onNext).toHaveBeenCalledTimes(1);
+
+    // Caller switches itemId -> 302 (currentIndex=1, hasNext=true), Track 2 has NOT fired 'playing' yet
+    rerender(
+      <FocusProvider>
+        <PlayerScreen
+          client={client}
+          itemId={302}
+          title="Track 2"
+          mediaType="music"
+          technical={flacTech}
+          playlist={playlist}
+          currentIndex={1}
+          onNext={onNext}
+          onExit={vi.fn()}
+          serverUrl={serverUrl}
+          token={token}
+        />
+      </FocusProvider>
+    );
+
+    expect(onNext).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('Buffering...')).toBeInTheDocument();
+
+    await flushMicrotasks();
+
+    // Still must NOT have cascaded past Track 2 into Track 3 while Track 2 is buffering
+    expect(onNext).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('audio-title')).toHaveTextContent('Track 2');
+
+    // Once Track 2 plays and naturally ends, onNext fires a second time cleanly
+    const video2 = container.querySelector('video') as HTMLVideoElement;
+    act(() => {
+      video2.dispatchEvent(new Event('playing'));
+    });
+    expect(onNext).toHaveBeenCalledTimes(1);
+    act(() => {
+      video2.dispatchEvent(new Event('ended'));
+    });
+    expect(onNext).toHaveBeenCalledTimes(2);
+  });
 });
