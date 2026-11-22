@@ -344,7 +344,6 @@ export function PlayerScreen({
   isAudioModalOpenRef.current = isAudioModalOpen;
 
   const pendingAudioSyncAfterForegroundRef = useRef(false);
-  const prevAudioItemIdRef = useRef(itemId);
 
   const currentQueueEntry =
     currentIndex !== undefined && playlist && currentIndex >= 0 && currentIndex < playlist.length
@@ -360,9 +359,8 @@ export function PlayerScreen({
   const [itemDetailMeta, setItemDetailMeta] = useState<FetchedAudioDetailMeta | null>(null);
   const activeDetailMeta =
     itemDetailMeta && String(itemDetailMeta.itemId) === String(itemId) ? itemDetailMeta : null;
-  const [itemMediaType, setItemMediaType] = useState<string | undefined>(mediaType);
   const effectiveMediaType =
-    activeDetailMeta?.mediaType ?? mediaType ?? currentQueueEntry?.mediaType ?? itemMediaType;
+    activeDetailMeta?.mediaType ?? mediaType ?? currentQueueEntry?.mediaType;
   const isAudioMode = isAudioMediaType(effectiveMediaType);
   const isAudioModeRef = useRef(isAudioMode);
   isAudioModeRef.current = isAudioMode;
@@ -622,9 +620,6 @@ export function PlayerScreen({
             overview: detail.overview,
             releaseYear: detail.release_year ?? detail.card?.release_year,
           });
-          if (detail.media_type) {
-            setItemMediaType(detail.media_type);
-          }
           const resolvedType =
             detail.media_type ?? mediaTypeRef.current ?? currentQueueEntryRef.current?.mediaType;
           const resolvedIsAudio = isAudioMediaType(resolvedType);
@@ -864,34 +859,61 @@ export function PlayerScreen({
   autoAdvanceCountdownRef.current = autoAdvanceCountdown;
   const autoAdvanceDismissedRef = useRef(false);
 
-  useEffect(() => {
-    setTechnicalInfo(technical);
-    technicalInfoRef.current = technical;
-    const itemCompat = computeInitialPlaybackMode(
-      mediaType ?? currentQueueEntryRef.current?.mediaType,
+  // Synchronously reset stream-selection and item-scoped state during render on itemId change
+  // so the first playback useEffect commit never runs with the prior queue track's useHls/technicalInfo.
+  const [prevStreamItemId, setPrevStreamItemId] = useState(itemId);
+  if (prevStreamItemId !== itemId) {
+    setPrevStreamItemId(itemId);
+    const nextCompat = computeInitialPlaybackMode(
+      mediaType ?? currentQueueEntry?.mediaType,
       technical,
       forceHtml5 || isBrowserEnv
     );
-    hlsAutoFallbackDoneRef.current = itemCompat.autoFallbackDone;
+    setTechnicalInfo(technical);
+    technicalInfoRef.current = technical;
+    setUseHls(nextCompat.useHls);
+    isHlsRef.current = nextCompat.useHls;
+    hlsAutoFallbackDoneRef.current = nextCompat.autoFallbackDone;
     hlsTranscodeFailedRef.current = false;
     hlsUnavailableForItemRef.current = false;
     directStreamTriedRef.current = false;
     audioEndedHandledRef.current = false;
-    setUseHls(itemCompat.useHls);
+    setHlsSeekOffsetMs(null);
+    hlsSeekOffsetMsRef.current = null;
+    sessionResumeMsRef.current = 0;
+    restoreResumeMsRef.current = null;
+    pauseAfterRestoreRef.current = false;
+    setPlaybackError(null);
+    setShowDetailsModal(false);
+    setAutoAdvanceCountdown(null);
+    autoAdvanceDismissedRef.current = false;
+    setOsdFocusedItem('progress');
+    osdFocusedItemRef.current = 'progress';
 
-    if (prevAudioItemIdRef.current !== itemId) {
-      prevAudioItemIdRef.current = itemId;
-      const nextTracks = Array.isArray(technical?.audio_tracks) ? technical.audio_tracks : [];
-      const nextAudioIndex = pickInitialAudioTrackIndex(nextTracks, loadAudioPreference());
-      audioTracksRef.current = nextTracks;
-      setAudioTracks(nextTracks);
-      selectedAudioTrackIndexRef.current = nextAudioIndex;
-      setSelectedAudioTrackIndex(nextAudioIndex);
-      isAudioModalOpenRef.current = false;
-      setIsAudioModalOpen(false);
-      pendingAudioSyncAfterForegroundRef.current = false;
-    }
-  }, [itemId]);
+    const nextTracks = Array.isArray(technical?.audio_tracks) ? technical.audio_tracks : [];
+    const nextAudioIndex = pickInitialAudioTrackIndex(nextTracks, loadAudioPreference());
+    audioTracksRef.current = nextTracks;
+    setAudioTracks(nextTracks);
+    selectedAudioTrackIndexRef.current = nextAudioIndex;
+    setSelectedAudioTrackIndex(nextAudioIndex);
+    isAudioModalOpenRef.current = false;
+    setIsAudioModalOpen(false);
+    pendingAudioSyncAfterForegroundRef.current = false;
+
+    const nextKnownDurMs =
+      technical?.duration_seconds !== undefined && technical.duration_seconds > 0
+        ? technical.duration_seconds * 1000
+        : 0;
+    setKnownDurationMs(nextKnownDurMs);
+    knownDurationMsRef.current = nextKnownDurMs;
+    const nextIsLive = Boolean(
+      isLiveProp ||
+        mediaType === 'live_channel' ||
+        (technical?.duration_seconds !== undefined && technical.duration_seconds <= 0)
+    );
+    setIsLiveStream(nextIsLive);
+    isLiveStreamRef.current = nextIsLive;
+  }
 
   useEffect(() => {
     const activeTech = technicalInfo ?? technical;
@@ -904,16 +926,14 @@ export function PlayerScreen({
     autoAdvanceDismissedRef.current = false;
     setAutoAdvanceCountdown(null);
     setShowDetailsModal(false);
-    setHlsSeekOffsetMs(null);
-    hlsSeekOffsetMsRef.current = null;
-    sessionResumeMsRef.current = 0;
+    setTechnicalInfo(technical);
+    technicalInfoRef.current = technical;
     targetSeekMsRef.current = null;
     seekDirectionRef.current = null;
     seekLockUntilMsRef.current = 0;
     setSeekHud(null);
     setOsdFocusedItem('progress');
     osdFocusedItemRef.current = 'progress';
-    setItemMediaType(mediaType);
     const nextKnownDurMs =
       technical?.duration_seconds !== undefined && technical.duration_seconds > 0
         ? technical.duration_seconds * 1000

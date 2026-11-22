@@ -552,4 +552,110 @@ describe('PlayerScreen Audio Mode, 60s Ambient Auto-Dim & Queue Completion', () 
     );
     expect(playbackApi.endPlaybackSession).toHaveBeenCalledWith(client, 'sess-audio-player');
   });
+
+  it('switches cleanly in place across mixed wma (HLS) and flac (Direct Play) queue tracks without stale probe requests', async () => {
+    const client = new ApiClient(serverUrl);
+    const wmaTech = { audio_codec: 'wmav2', container: 'wma', duration_seconds: 190 };
+    const flacTech = { audio_codec: 'flac', container: 'flac', duration_seconds: 240 };
+    const playlist: PlaylistItem[] = [
+      { id: 501, title: 'WMA Track', mediaType: 'music', technical: wmaTech, durationSeconds: 190 },
+      { id: 502, title: 'FLAC Track', mediaType: 'music', technical: flacTech, durationSeconds: 240 },
+    ];
+
+    vi.spyOn(itemsApi, 'fetchMediaItem').mockImplementation(async (_c, id) => ({
+      id: Number(id),
+      title: String(id) === '501' ? 'WMA Track' : 'FLAC Track',
+      media_type: 'music',
+      technical: String(id) === '501' ? wmaTech : flacTech,
+    }));
+
+    // 1. Mount on .wma track (HLS)
+    const { rerender } = render(
+      <FocusProvider>
+        <PlayerScreen
+          client={client}
+          itemId={501}
+          title="WMA Track"
+          mediaType="music"
+          technical={wmaTech}
+          playlist={playlist}
+          currentIndex={0}
+          onExit={vi.fn()}
+          serverUrl={serverUrl}
+          token={token}
+        />
+      </FocusProvider>
+    );
+
+    await flushMicrotasks();
+
+    const wmaInitialUrls = fetchSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(wmaInitialUrls.some((u: string) => u.includes('/api/v1/media/501/hls/master.m3u8'))).toBe(
+      true
+    );
+    expect(wmaInitialUrls.some((u: string) => u.includes('/api/v1/stream/501'))).toBe(false);
+    expect(screen.getAllByText('HLS • AAC').length).toBeGreaterThan(0);
+
+    // Cycle repeat mode to confirm state persists across in-place track switches
+    fireEvent.click(screen.getByTestId('audio-btn-repeat'));
+    expect(screen.getByTestId('audio-btn-repeat')).toHaveTextContent('Repeat: All');
+
+    // 2. Switch in-place wma -> flac: zero /hls/master.m3u8 requests for 502!
+    fetchSpy.mockClear();
+    rerender(
+      <FocusProvider>
+        <PlayerScreen
+          client={client}
+          itemId={502}
+          title="FLAC Track"
+          mediaType="music"
+          technical={flacTech}
+          playlist={playlist}
+          currentIndex={1}
+          onExit={vi.fn()}
+          serverUrl={serverUrl}
+          token={token}
+        />
+      </FocusProvider>
+    );
+
+    await flushMicrotasks();
+
+    const flacSwitchUrls = fetchSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(
+      flacSwitchUrls.some((u: string) => u.includes('/api/v1/media/502/hls/master.m3u8'))
+    ).toBe(false);
+    expect(flacSwitchUrls.some((u: string) => u.includes('/api/v1/stream/502'))).toBe(true);
+    expect(screen.getAllByText('DIRECT • FLAC').length).toBeGreaterThan(0);
+    expect(screen.getByTestId('audio-btn-repeat')).toHaveTextContent('Repeat: All');
+
+    // 3. Switch in-place flac -> wma: zero /api/v1/stream/501 requests for 501!
+    fetchSpy.mockClear();
+    rerender(
+      <FocusProvider>
+        <PlayerScreen
+          client={client}
+          itemId={501}
+          title="WMA Track"
+          mediaType="music"
+          technical={wmaTech}
+          playlist={playlist}
+          currentIndex={0}
+          onExit={vi.fn()}
+          serverUrl={serverUrl}
+          token={token}
+        />
+      </FocusProvider>
+    );
+
+    await flushMicrotasks();
+
+    const wmaSwitchBackUrls = fetchSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(wmaSwitchBackUrls.some((u: string) => u.includes('/api/v1/stream/501'))).toBe(false);
+    expect(
+      wmaSwitchBackUrls.some((u: string) => u.includes('/api/v1/media/501/hls/master.m3u8'))
+    ).toBe(true);
+    expect(screen.getAllByText('HLS • AAC').length).toBeGreaterThan(0);
+    expect(screen.getByTestId('audio-btn-repeat')).toHaveTextContent('Repeat: All');
+  });
 });
