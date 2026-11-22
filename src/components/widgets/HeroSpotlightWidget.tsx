@@ -45,15 +45,15 @@ export function HeroSpotlightWidget({ widget, serverUrl, onPlay, onDetails }: He
       )}
       <div className="absolute inset-0 bg-gradient-to-t from-[#2A0A0A] via-[#2A0A0A]/70 to-transparent p-12 flex items-end justify-between">
         <div className="flex flex-col justify-end max-w-3xl flex-1 pr-6">
-          <div className="flex items-center gap-3 mb-3">
+          <div className="flex items-center mb-3">
             {item.badge && (
-              <span className="px-2.5 py-1 bg-[#FFB800]/20 text-[#FFB800] border border-[#FFB800]/30 text-xs font-bold rounded">
+              <span className="px-2.5 py-1 bg-[#FFB800]/20 text-[#FFB800] border border-[#FFB800]/30 text-xs font-bold rounded mr-3 last:mr-0">
                 {item.badge}
               </span>
             )}
             {item.rating && (
-              <span className="flex items-center gap-1 text-[#FFB800] text-sm font-semibold bg-[#2A0A0A]/80 px-2 py-0.5 rounded border border-[rgba(245,229,229,0.08)]">
-                <Star className="w-3.5 h-3.5 fill-current" /> {item.rating.toFixed(1)}
+              <span className="flex items-center text-[#FFB800] text-sm font-semibold bg-[#2A0A0A]/80 px-2 py-0.5 rounded border border-[rgba(245,229,229,0.08)] mr-3 last:mr-0">
+                <Star className="w-3.5 h-3.5 fill-current mr-1" /> {item.rating.toFixed(1)}
               </span>
             )}
             {item.release_year && (
@@ -70,17 +70,17 @@ export function HeroSpotlightWidget({ widget, serverUrl, onPlay, onDetails }: He
             </p>
           )}
 
-          <div className="flex gap-8">
+          <div className="flex">
             <TVButton
               id={`hero-play-${widget.id}`}
               groupId="hero"
               variant="primary"
               onEnter={() => onPlay(item.id, resumeMs)}
               onClick={() => onPlay(item.id, resumeMs)}
-              className="!px-12 !py-6 !text-3xl font-extrabold rounded-2xl gap-4"
+              className="!px-12 !py-6 !text-3xl font-extrabold rounded-2xl mr-8"
               autoFocus
             >
-              <Play className="w-10 h-10 fill-current" />
+              <Play className="w-10 h-10 fill-current mr-4" />
               {hasResume ? 'Resume' : 'Play'}
             </TVButton>
             <TVButton
@@ -88,9 +88,9 @@ export function HeroSpotlightWidget({ widget, serverUrl, onPlay, onDetails }: He
               groupId="hero"
               variant="secondary"
               onEnter={() => onDetails(item.id)}
-              className="!px-12 !py-6 !text-3xl font-extrabold rounded-2xl gap-4"
+              className="!px-12 !py-6 !text-3xl font-extrabold rounded-2xl"
             >
-              <Info className="w-10 h-10" /> Details
+              <Info className="w-10 h-10 mr-4" /> Details
             </TVButton>
           </div>
         </div>

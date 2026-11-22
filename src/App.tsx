@@ -1,11 +1,11 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { FocusProvider } from './navigation/FocusContext';
 import { ApiClient } from './api/client';
 import { listProfiles, authenticatePin } from './api/auth';
 import { fetchMediaItem, MediaItemDetail } from './api/items';
 import { unlockLibrary } from './api/libraries';
 import { subscribeEvents, PlaylistUpdatedPayload } from './api/events';
-import { ProfileCard, FolderImage } from './types/kadr';
+import { ProfileCard, FolderImage, UserRole } from './types/kadr';
 import { ServerConnectScreen } from './screens/ServerConnectScreen';
 import { ProfileSelectScreen } from './screens/ProfileSelectScreen';
 import { BrowseScreen } from './screens/BrowseScreen';
@@ -41,10 +41,14 @@ export default function App() {
   );
   const [token, setToken] = useState<string | null>(() => {
     localStorage.removeItem('kadr_token');
+    localStorage.removeItem('kadr_username');
+    localStorage.removeItem('kadr_user_role');
     return null;
   });
   const [profiles, setProfiles] = useState<ProfileCard[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentUsername, setCurrentUsername] = useState<string | null>(null);
+  const [currentUserRole, setCurrentUserRole] = useState<UserRole | null>(null);
   const [activeItem, setActiveItem] = useState<MediaItemDetail | null>(null);
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
   const [addToPlaylistTarget, setAddToPlaylistTarget] = useState<AddToPlaylistTarget | null>(null);
@@ -106,12 +110,20 @@ export default function App() {
     setIsExitModalOpen(false);
   }, [view]);
 
+  const clearAuthIdentity = useCallback(() => {
+    localStorage.removeItem('kadr_token');
+    localStorage.removeItem('kadr_username');
+    localStorage.removeItem('kadr_user_role');
+    setToken(null);
+    setCurrentUserId(null);
+    setCurrentUsername(null);
+    setCurrentUserRole(null);
+  }, []);
+
   useEffect(() => {
     const handleUnauthorized = () => {
       unauthorizedRedirectRef.current = true;
-      localStorage.removeItem('kadr_token');
-      setToken(null);
-      setCurrentUserId(null);
+      clearAuthIdentity();
       setActiveItem(null);
       setActivePlaylistId(null);
       setAddToPlaylistTarget(null);
@@ -135,7 +147,7 @@ export default function App() {
     return () => {
       client.setOnUnauthorized(null);
     };
-  }, [client]);
+  }, [client, clearAuthIdentity]);
 
   useEffect(() => {
     const handleOnline = () => setIsOffline(false);
@@ -222,9 +234,25 @@ export default function App() {
     if (res.success && res.data) {
       unauthorizedRedirectRef.current = false;
       setSessionExpiredNotice(null);
+      const resolvedUserId = res.data.user_id || userId;
+      const matchedProfile = profiles.find((p) => p.id === resolvedUserId);
+      const resolvedUsername = res.data.username || matchedProfile?.username || '';
+      const resolvedRole = res.data.role || matchedProfile?.role || null;
       localStorage.setItem('kadr_token', res.data.token);
+      if (resolvedUsername) {
+        localStorage.setItem('kadr_username', resolvedUsername);
+      } else {
+        localStorage.removeItem('kadr_username');
+      }
+      if (resolvedRole) {
+        localStorage.setItem('kadr_user_role', resolvedRole);
+      } else {
+        localStorage.removeItem('kadr_user_role');
+      }
       setToken(res.data.token);
-      setCurrentUserId(res.data.user_id || userId);
+      setCurrentUserId(resolvedUserId);
+      setCurrentUsername(resolvedUsername || null);
+      setCurrentUserRole(resolvedRole);
       setView('browse');
       return { success: true };
     }
@@ -236,10 +264,8 @@ export default function App() {
     setSessionExpiredNotice(null);
     localStorage.removeItem('kadr_server_url');
     localStorage.removeItem('kadr_server_name');
-    localStorage.removeItem('kadr_token');
+    clearAuthIdentity();
     setServerUrl(null);
-    setToken(null);
-    setCurrentUserId(null);
     setActiveItem(null);
     setActivePlaylistId(null);
     setAddToPlaylistTarget(null);
@@ -527,6 +553,13 @@ export default function App() {
     }
   };
 
+  const activeProfile = useMemo(
+    () => profiles.find((p) => p.id === currentUserId),
+    [profiles, currentUserId]
+  );
+  const resolvedUsername = currentUsername || activeProfile?.username || undefined;
+  const resolvedUserRole = currentUserRole || activeProfile?.role || undefined;
+
   return (
     <FocusProvider>
       <div
@@ -585,6 +618,9 @@ export default function App() {
               serverUrl={serverUrl || ''}
               token={token || undefined}
               currentUserId={currentUserId || undefined}
+              currentUsername={resolvedUsername}
+              currentUserRole={resolvedUserRole}
+              onUnlockedLibrariesChanged={() => setScreenRefreshKey((k) => k + 1)}
               initialTab={activeBrowseTab}
               onTabChange={setActiveBrowseTab}
               initialFocusId={lastBrowseFocusId}
@@ -605,9 +641,7 @@ export default function App() {
               onSwitchProfile={() => {
                 if (unauthorizedRedirectRef.current) return;
                 setSessionExpiredNotice(null);
-                localStorage.removeItem('kadr_token');
-                setToken(null);
-                setCurrentUserId(null);
+                clearAuthIdentity();
                 setActiveItem(null);
                 setActivePlaylistId(null);
                 setAddToPlaylistTarget(null);

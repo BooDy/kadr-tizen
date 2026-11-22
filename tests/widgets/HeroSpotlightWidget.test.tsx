@@ -5,7 +5,7 @@ import { HeroSpotlightWidget } from '../../src/components/widgets/HeroSpotlightW
 import { HeroBannerWidgetNode } from '../../src/types/ast';
 
 describe('HeroSpotlightWidget', () => {
-  it('renders hero spotlight action buttons with enlarged padding, gap-8 spacing, and text-3xl font size', () => {
+  it('renders hero spotlight action buttons with enlarged padding, mr-8 margin spacing (zero gap-*), and text-3xl font size', () => {
     const mockWidget: HeroBannerWidgetNode = {
       type: 'hero_banner',
       id: 'spotlight-1',
@@ -20,7 +20,7 @@ describe('HeroSpotlightWidget', () => {
       },
     };
 
-    render(
+    const { container } = render(
       <FocusProvider>
         <HeroSpotlightWidget
           widget={mockWidget}
@@ -38,7 +38,9 @@ describe('HeroSpotlightWidget', () => {
     expect(resumeBtn.className).toContain('!px-12');
     expect(resumeBtn.className).toContain('!text-3xl');
     expect(resumeBtn.className).toContain('font-extrabold');
-    expect(resumeBtn.parentElement?.className).toContain('gap-8');
+    expect(resumeBtn.className).toContain('mr-8');
+    expect(resumeBtn.parentElement?.className).not.toContain('gap-');
+    expect(container.innerHTML).not.toMatch(/\bgap-/);
 
     expect(detailsBtn.className).toContain('!py-6');
     expect(detailsBtn.className).toContain('!px-12');

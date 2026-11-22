@@ -18,7 +18,14 @@ export function KeypadGrid({
   const digits = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
 
   return (
-    <div className="grid grid-cols-3 gap-3 my-4">
+    <div
+      className="grid grid-cols-3 my-4"
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+        gridGap: '12px',
+      }}
+    >
       {digits.map((d, idx) => (
         <TVButton
           key={d}

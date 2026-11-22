@@ -21,7 +21,7 @@ export function CardCarouselWidget({
   return (
     <div className="mb-10">
       <h3 className="text-2xl font-bold text-[#F5E5E5] mb-4 px-2">{widget.title}</h3>
-      <div className="flex gap-6 overflow-x-auto scrollbar-none py-2 px-2">
+      <div className="flex overflow-x-auto scrollbar-none py-2 px-2">
         {items.map((item, idx) => {
           const imgUrl = item.poster_url
             ? item.poster_url.startsWith('http')
@@ -38,7 +38,7 @@ export function CardCarouselWidget({
             : undefined;
 
           return (
-            <div key={item.id} className="shrink-0 mr-6">
+            <div key={item.id} className="shrink-0 mr-6 last:mr-0">
               <TVCard
                 id={`card-${widget.id}-${item.id}`}
                 groupId={`carousel-${widget.id}`}

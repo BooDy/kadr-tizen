@@ -14,9 +14,16 @@ import {
   isSearchContentNodeId,
   isSearchLeftmostNodeId,
 } from './SearchView';
+import {
+  SettingsView,
+  getFirstSettingsFocusableId,
+  isSettingsContentNodeId,
+  isSettingsLeftmostNodeId,
+} from './SettingsView';
 import { PlaylistDetailModal, PlaylistQueuePlayItem } from './PlaylistDetailModal';
 import { MediaItemDetail } from '../api/items';
 import { PlaylistItem } from './PlayerScreen';
+import type { UserRole } from '../types/kadr';
 import {
   Users,
   Lock,
@@ -28,6 +35,7 @@ import {
   Folder,
   ListVideo,
   Search,
+  Settings,
 } from 'lucide-react';
 import { useFocusContext } from '../navigation/FocusContext';
 import { isTextInputElement } from '../navigation/useFocusable';
@@ -38,6 +46,9 @@ export interface BrowseScreenProps {
   serverUrl: string;
   token?: string;
   currentUserId?: string;
+  currentUsername?: string;
+  currentUserRole?: UserRole;
+  onUnlockedLibrariesChanged?: () => void;
   onSelectItem: (itemId: number | string) => void;
   onPlayItem: (
     itemId: number | string,
@@ -150,6 +161,9 @@ function isLeftmostContentNode(
   if (activeTab === 'search') {
     return isSearchLeftmostNodeId(id);
   }
+  if (activeTab === 'settings') {
+    return isSettingsLeftmostNodeId(id);
+  }
   if (activeTab === 'playlists') {
     if (id === 'playlists-create-btn') return true;
     if (id.startsWith('playlist-card-')) {
@@ -217,6 +231,12 @@ function isValidContentNode(
   if (activeTab === 'search') {
     return Boolean(
       isSearchContentNodeId(id) &&
+        (typeof document === 'undefined' || document.getElementById(id))
+    );
+  }
+  if (activeTab === 'settings') {
+    return Boolean(
+      isSettingsContentNodeId(id) &&
         (typeof document === 'undefined' || document.getElementById(id))
     );
   }
@@ -494,6 +514,18 @@ const BrowseSidebar = memo(function BrowseSidebar({
           tile={<ListVideo className="w-6 h-6" />}
           onSelect={() => onSelectScreen('playlists')}
         />
+        <SidebarCard
+          id="nav-screen-settings"
+          order={screenItems.length + 3}
+          selected={activeTab === 'settings'}
+          focused={sidebarFocusedId === 'nav-screen-settings'}
+          expanded={isSidebarFocused}
+          title="Settings"
+          subtitle="Quality, languages & TV info"
+          chip="/settings"
+          tile={<Settings className="w-6 h-6" />}
+          onSelect={() => onSelectScreen('settings')}
+        />
       </div>
 
       {/* Bottom: profile switcher & remote hints */}
@@ -503,7 +535,7 @@ const BrowseSidebar = memo(function BrowseSidebar({
       >
         <SidebarCard
           id="nav-switch-profile"
-          order={screenItems.length + 3}
+          order={screenItems.length + 4}
           selected={false}
           focused={sidebarFocusedId === 'nav-switch-profile'}
           expanded={isSidebarFocused}
@@ -566,12 +598,15 @@ interface BrowseMainContentProps {
   serverUrl: string;
   token?: string;
   currentUserId?: string;
+  currentUsername?: string;
+  currentUserRole?: UserRole;
   playlistsRefreshToken: number;
   searchRefreshKey?: number;
   searchInitialFocusId?: string | null;
   hasSwitchServer: boolean;
   onOpenPlaylist: (playlistId: string) => void;
   onNavigateToSearchSidebar: () => void;
+  onNavigateToSettingsSidebar: () => void;
   onSearchInitialFocusConsumed?: () => void;
   onLockedLibrary?: (libraryId: string) => void;
   onBrowseFolder?: (libraryId: string, folderPath?: string) => void;
@@ -580,6 +615,7 @@ interface BrowseMainContentProps {
   onRetryLayout: () => void;
   onSwitchProfile: () => void;
   onSwitchServer?: () => void;
+  onUnlockedLibrariesChanged?: () => void;
 }
 
 const BrowseMainContent = memo(function BrowseMainContent({
@@ -596,12 +632,15 @@ const BrowseMainContent = memo(function BrowseMainContent({
   serverUrl,
   token,
   currentUserId,
+  currentUsername,
+  currentUserRole,
   playlistsRefreshToken,
   searchRefreshKey,
   searchInitialFocusId,
   hasSwitchServer,
   onOpenPlaylist,
   onNavigateToSearchSidebar,
+  onNavigateToSettingsSidebar,
   onSearchInitialFocusConsumed,
   onLockedLibrary,
   onBrowseFolder,
@@ -610,6 +649,7 @@ const BrowseMainContent = memo(function BrowseMainContent({
   onRetryLayout,
   onSwitchProfile,
   onSwitchServer,
+  onUnlockedLibrariesChanged,
 }: BrowseMainContentProps) {
   return (
     <main className="flex-1 h-full overflow-y-auto p-12 scrollbar-none">
@@ -633,6 +673,17 @@ const BrowseMainContent = memo(function BrowseMainContent({
           currentUserId={currentUserId}
           refreshKey={playlistsRefreshToken}
           onOpenPlaylist={onOpenPlaylist}
+        />
+      ) : activeTab === 'settings' ? (
+        <SettingsView
+          client={client}
+          serverUrl={serverUrl}
+          username={currentUsername}
+          userRole={currentUserRole}
+          onNavigateToSidebar={onNavigateToSettingsSidebar}
+          onSwitchProfile={onSwitchProfile}
+          onSwitchServer={onSwitchServer}
+          onUnlockedLibrariesChanged={onUnlockedLibrariesChanged}
         />
       ) : loading ? (
         <div className="w-full h-full flex items-center justify-center text-[#5C3C3C] text-2xl">
@@ -764,6 +815,9 @@ export function BrowseScreen({
   serverUrl,
   token,
   currentUserId,
+  currentUsername,
+  currentUserRole,
+  onUnlockedLibrariesChanged,
   onSelectItem,
   onPlayItem,
   onSwitchProfile,
@@ -786,7 +840,7 @@ export function BrowseScreen({
   const [activeTab, setActiveTab] = useState<string>(initialTab || 'home');
   const [layout, setLayout] = useState<ScreenLayout | null>(null);
   const [loading, setLoading] = useState(
-    initialTab !== 'playlists' && initialTab !== 'search'
+    initialTab !== 'playlists' && initialTab !== 'search' && initialTab !== 'settings'
   );
   const [layoutError, setLayoutError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState<number>(0);
@@ -877,6 +931,7 @@ export function BrowseScreen({
             if (
               prev === 'playlists' ||
               prev === 'search' ||
+              prev === 'settings' ||
               (prev && data.some((s) => s.id === prev))
             ) {
               return prev;
@@ -959,6 +1014,21 @@ export function BrowseScreen({
       }
       return;
     }
+    if (activeTab === 'settings') {
+      setLayout(null);
+      setLayoutError(null);
+      setLoading(false);
+      if (focusedIdRef.current === null && !isModalActive(activeTrapRef.current)) {
+        const targetId =
+          initialFocusId && isValidContentNode(initialFocusId, null, 'settings')
+            ? initialFocusId
+            : getFirstSettingsFocusableId();
+        if (targetId) {
+          setFocusedId(targetId);
+        }
+      }
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     fetchScreenLayout(client, activeTab)
@@ -1006,7 +1076,7 @@ export function BrowseScreen({
 
   const handleSelectScreen = useCallback(
     (screenId: string) => {
-      if (screenId !== 'playlists' && screenId !== 'search') {
+      if (screenId !== 'playlists' && screenId !== 'search' && screenId !== 'settings') {
         const info = getLibraryInfoRef.current(screenId);
         if (info && info.isPrivate && !info.isUnlocked) {
           setActiveTab(screenId);
@@ -1064,7 +1134,9 @@ export function BrowseScreen({
           !onSidebar &&
           (isValidContentNode(currentFocused, currentLayout, currentTab) ||
             (currentTab === 'search' &&
-              (currentFocused === null || isSearchContentNodeId(currentFocused))))
+              (currentFocused === null || isSearchContentNodeId(currentFocused))) ||
+            (currentTab === 'settings' &&
+              (currentFocused === null || isSettingsContentNodeId(currentFocused))))
         ) {
           e.preventDefault();
           e.stopPropagation();
@@ -1102,6 +1174,7 @@ export function BrowseScreen({
           (currentLayout ||
             currentTab === 'playlists' ||
             currentTab === 'search' ||
+            currentTab === 'settings' ||
             currentLayoutError)
         ) {
           e.preventDefault();
@@ -1114,6 +1187,8 @@ export function BrowseScreen({
             ? getFirstPlaylistsFocusableId()
             : currentTab === 'search'
             ? getFirstSearchFocusableId()
+            : currentTab === 'settings'
+            ? getFirstSettingsFocusableId()
             : currentLayoutError
             ? 'retry-layout-btn'
             : currentLayout
@@ -1156,7 +1231,7 @@ export function BrowseScreen({
     }
 
     return (screens.length > 0 ? screens : defaultScreens).filter(
-      (s) => s.id !== 'playlists' && s.id !== 'search'
+      (s) => s.id !== 'playlists' && s.id !== 'search' && s.id !== 'settings'
     );
   }, [librariesList, screens]);
 
@@ -1190,7 +1265,10 @@ export function BrowseScreen({
     (currentLibInfo?.lib as { path?: string } | undefined)?.path?.startsWith('plugin://')
   );
   const targetLibId =
-    activeTab !== 'home' && activeTab !== 'playlists' && activeTab !== 'search'
+    activeTab !== 'home' &&
+    activeTab !== 'playlists' &&
+    activeTab !== 'search' &&
+    activeTab !== 'settings'
       ? currentLibInfo?.lib.id || activeTab
       : null;
   const libraryHeading =
@@ -1213,6 +1291,10 @@ export function BrowseScreen({
 
   const handleNavigateToSearchSidebar = useCallback(() => {
     setFocusedId('nav-screen-search');
+  }, [setFocusedId]);
+
+  const handleNavigateToSettingsSidebar = useCallback(() => {
+    setFocusedId('nav-screen-settings');
   }, [setFocusedId]);
 
   const handleConsumeSearchInitialFocus = useCallback(() => {
@@ -1264,12 +1346,15 @@ export function BrowseScreen({
         serverUrl={serverUrl}
         token={token}
         currentUserId={currentUserId}
+        currentUsername={currentUsername}
+        currentUserRole={currentUserRole}
         playlistsRefreshToken={(playlistRefreshKey ?? 0) + internalPlaylistRefresh}
         searchRefreshKey={refreshKey}
         searchInitialFocusId={activeTab === 'search' ? searchInitialFocusId : null}
         hasSwitchServer={Boolean(onSwitchServer)}
         onOpenPlaylist={handleOpenPlaylist}
         onNavigateToSearchSidebar={handleNavigateToSearchSidebar}
+        onNavigateToSettingsSidebar={handleNavigateToSettingsSidebar}
         onSearchInitialFocusConsumed={handleConsumeSearchInitialFocus}
         onLockedLibrary={onLockedLibrary}
         onBrowseFolder={onBrowseFolder}
@@ -1278,6 +1363,7 @@ export function BrowseScreen({
         onRetryLayout={handleRetryLayout}
         onSwitchProfile={handleSwitchProfileStable}
         onSwitchServer={onSwitchServer}
+        onUnlockedLibrariesChanged={onUnlockedLibrariesChanged}
       />
 
       {!onOpenPlaylist && internalPlaylistId && (

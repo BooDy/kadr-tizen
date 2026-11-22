@@ -2849,5 +2849,150 @@ describe('App State Machine & Router', () => {
       expect(document.getElementById('play-folder-all-btn')).not.toBeNull();
     });
   });
+
+  it('opens Settings from BrowseScreen sidebar, displays profile identity, persists 720p HLS cap into PlayerScreen, and re-locks unlocked private libraries', async () => {
+    localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
+
+    vi.mocked(screensApi.fetchScreens).mockResolvedValue([
+      { id: 'home', title: 'Home' },
+      { id: 'lib-vault', title: 'Secret Vault' },
+    ]);
+    vi.mocked(librariesApi.fetchLibraries).mockResolvedValue([
+      { id: 'lib-vault', name: 'Secret Vault', media_type: 'movie', is_private: true },
+    ]);
+    vi.mocked(librariesApi.unlockLibrary).mockResolvedValue({
+      token: 'jwt-vault',
+      unlock_token: 'vault-unlock-123',
+    });
+
+    const hlsUrls: string[] = [];
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url =
+        typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
+      if (url.includes('/hls/master.m3u8')) {
+        hlsUrls.push(url);
+        return new Response('#EXTM3U\n', {
+          status: 200,
+          headers: { 'Content-Type': 'application/vnd.apple.mpegurl' },
+        });
+      }
+      if (url.includes('/api/v1/discovery')) {
+        return new Response(
+          JSON.stringify({
+            app: 'kadr',
+            server_id: 'srv-1',
+            name: 'Living Room Server',
+            version: '1.0.0',
+            protocol_version: 1,
+            port: 8492,
+            setup_completed: true,
+            status: 'online',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+
+    try {
+      await renderAuthenticatedApp();
+
+      await waitFor(() => {
+        expect(screen.getByText('Hero Dune Feature')).toBeInTheDocument();
+        expect(screen.getByText('Secret Vault')).toBeInTheDocument();
+      });
+      expect(localStorage.getItem('kadr_username')).toBe('Alice');
+      expect(localStorage.getItem('kadr_user_role')).toBe('admin');
+
+      // Unlock Secret Vault private library first
+      expect(document.getElementById('nav-screen-lib-vault')?.textContent).toContain('PIN LOCKED');
+      fireEvent.click(document.getElementById('nav-screen-lib-vault')!);
+
+      await waitFor(() => {
+        expect(screen.getByText('Unlock Private Library')).toBeInTheDocument();
+      });
+      fireEvent.keyDown(window, { key: '1', keyCode: 49 });
+      fireEvent.keyDown(window, { key: '2', keyCode: 50 });
+      fireEvent.keyDown(window, { key: '3', keyCode: 51 });
+      fireEvent.keyDown(window, { key: '4', keyCode: 52 });
+
+      await waitFor(() => {
+        expect(screen.queryByText('Unlock Private Library')).not.toBeInTheDocument();
+        expect(document.getElementById('nav-screen-lib-vault')?.textContent).not.toContain('PIN LOCKED');
+      });
+
+      // Open Settings tab from BrowseScreen sidebar
+      const settingsNav = document.getElementById('nav-screen-settings');
+      expect(settingsNav).not.toBeNull();
+      fireEvent.click(settingsNav!);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('settings-view')).toBeInTheDocument();
+      });
+
+      // Change HLS Max Quality to 720p
+      fireEvent.click(document.getElementById('settings-hls-height-720')!);
+      expect(document.getElementById('settings-hls-height-720')).toHaveAttribute(
+        'aria-pressed',
+        'true'
+      );
+
+      // Switch to Account & Privacy category and verify username, role, and Re-lock Private Libraries
+      fireEvent.click(document.getElementById('settings-cat-account')!);
+      const accountPanel = await screen.findByTestId('settings-panel-account');
+      expect(accountPanel).toHaveTextContent('Alice');
+      expect(accountPanel).toHaveTextContent('admin');
+      expect(screen.getByTestId('settings-unlocked-count')).toHaveTextContent('1');
+
+      const fetchScreensCallsBefore = vi.mocked(screensApi.fetchScreens).mock.calls.length;
+      fireEvent.click(document.getElementById('settings-lock-libraries-btn')!);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('settings-unlocked-count')).toHaveTextContent('0');
+        expect(screen.getByText(/All private libraries have been re-locked/i)).toBeInTheDocument();
+        expect(vi.mocked(screensApi.fetchScreens).mock.calls.length).toBeGreaterThan(
+          fetchScreensCallsBefore
+        );
+      });
+      expect(document.getElementById('nav-screen-lib-vault')?.textContent).toContain('PIN LOCKED');
+
+      // Return to Home and start playback -> PlayerScreen uses persisted max_height=720
+      fireEvent.click(document.getElementById('nav-screen-home')!);
+      await waitFor(() => {
+        expect(document.getElementById('hero-play-hero-1')).not.toBeNull();
+      });
+      fireEvent.click(document.getElementById('hero-play-hero-1')!);
+
+      await waitFor(() => {
+        expect(hlsUrls.some((u) => u.includes('/api/v1/media/100/hls/master.m3u8'))).toBe(true);
+      });
+      const masterUrl = hlsUrls.find((u) => u.includes('/api/v1/media/100/hls/master.m3u8'))!;
+      expect(masterUrl).toContain('max_height=720');
+      expect(masterUrl).not.toContain('max_height=1080');
+
+      // Exit PlayerScreen and switch profile -> clears persisted username and role
+      await act(async () => {
+        fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+      });
+      await act(async () => {
+        fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+      });
+      await waitFor(() => {
+        expect(document.getElementById('nav-switch-profile')).not.toBeNull();
+      });
+
+      fireEvent.click(document.getElementById('nav-switch-profile')!);
+      await waitFor(() => {
+        expect(screen.getByText("Who's watching?")).toBeInTheDocument();
+      });
+      expect(localStorage.getItem('kadr_username')).toBeNull();
+      expect(localStorage.getItem('kadr_user_role')).toBeNull();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
 });
 

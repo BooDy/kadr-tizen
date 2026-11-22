@@ -1517,6 +1517,7 @@ describe('BrowseScreen', () => {
       'nav-screen-shows',
       'nav-screen-search',
       'nav-screen-playlists',
+      'nav-screen-settings',
     ]);
 
     const searchNav = document.getElementById('nav-screen-search')!;
@@ -1711,6 +1712,131 @@ describe('BrowseScreen', () => {
     });
     expect(document.getElementById('nav-screen-search')?.className).toContain('tv-focus-ring');
     expect(onRequestExit).not.toHaveBeenCalled();
+  });
+
+  it('renders Settings sidebar tab below Playlists and above Profiles, mounts SettingsView without fetchScreenLayout, and bridges D-pad focus and 2-layer Back', async () => {
+    const layoutSpy = vi
+      .spyOn(screensApi, 'fetchScreenLayout')
+      .mockResolvedValue(mockHomeLayout);
+    const onRequestExit = vi.fn();
+
+    render(
+      <FocusProvider>
+        <BrowseScreen
+          client={mockClient}
+          serverUrl="http://localhost:8492"
+          token="test-token"
+          currentUsername="Alice"
+          currentUserRole="admin"
+          onSelectItem={vi.fn()}
+          onPlayItem={vi.fn()}
+          onSwitchProfile={vi.fn()}
+          onSwitchServer={vi.fn()}
+          onRequestExit={onRequestExit}
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Home Featured Movie')).toBeInTheDocument();
+      expect(document.getElementById('nav-screen-settings')).not.toBeNull();
+    });
+
+    const sidebarItems = screen.getByTestId('sidebar-items-container');
+    const navIds = Array.from(sidebarItems.querySelectorAll('[id^="nav-screen-"]')).map(
+      (el) => el.id
+    );
+    expect(navIds).toEqual([
+      'nav-screen-home',
+      'nav-screen-movies',
+      'nav-screen-shows',
+      'nav-screen-search',
+      'nav-screen-playlists',
+      'nav-screen-settings',
+    ]);
+
+    // D-pad navigation: content -> sidebar -> step down Playlists -> Settings -> Profiles -> back to Settings
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowLeft', keyCode: TVKeys.LEFT });
+    });
+    expect(document.activeElement?.id).toBe('nav-screen-home');
+
+    for (let i = 0; i < 4; i++) {
+      act(() => {
+        fireEvent.keyDown(window, { key: 'ArrowDown', keyCode: TVKeys.DOWN });
+      });
+    }
+    expect(document.activeElement?.id).toBe('nav-screen-playlists');
+
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowDown', keyCode: TVKeys.DOWN });
+    });
+    expect(document.activeElement?.id).toBe('nav-screen-settings');
+
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowDown', keyCode: TVKeys.DOWN });
+    });
+    expect(document.activeElement?.id).toBe('nav-switch-profile');
+
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowUp', keyCode: TVKeys.UP });
+    });
+    expect(document.activeElement?.id).toBe('nav-screen-settings');
+
+    // Open Settings via Enter without requesting AST layout for 'settings'
+    act(() => {
+      fireEvent.keyDown(window, { key: 'Enter', keyCode: TVKeys.ENTER });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('settings-view')).toBeInTheDocument();
+    });
+    expect(layoutSpy).not.toHaveBeenCalledWith(mockClient, 'settings');
+
+    // ArrowRight from nav-screen-settings focuses settings-cat-playback
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+    });
+    expect(document.getElementById('settings-cat-playback')?.className).toContain('tv-focus-ring');
+
+    // ArrowLeft from settings-cat-playback returns to nav-screen-settings
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowLeft', keyCode: TVKeys.LEFT });
+    });
+    expect(document.getElementById('nav-screen-settings')?.className).toContain('tv-focus-ring');
+
+    // ArrowRight -> settings-cat-playback -> ArrowRight -> settings-hls-height-0 -> ArrowLeft -> settings-cat-playback
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+    });
+    expect(document.getElementById('settings-cat-playback')?.className).toContain('tv-focus-ring');
+
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+    });
+    expect(document.getElementById('settings-hls-height-0')?.className).toContain('tv-focus-ring');
+
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowLeft', keyCode: TVKeys.LEFT });
+    });
+    expect(document.getElementById('settings-cat-playback')?.className).toContain('tv-focus-ring');
+
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT });
+    });
+    expect(document.getElementById('settings-hls-height-0')?.className).toContain('tv-focus-ring');
+
+    // 2-layer Back: SettingsView -> nav-screen-settings -> onRequestExit
+    act(() => {
+      fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN });
+    });
+    expect(document.getElementById('nav-screen-settings')?.className).toContain('tv-focus-ring');
+    expect(onRequestExit).not.toHaveBeenCalled();
+
+    act(() => {
+      fireEvent.keyDown(window, { keyCode: TVKeys.BACK_TIZEN });
+    });
+    expect(onRequestExit).toHaveBeenCalledTimes(1);
   });
 });
 
