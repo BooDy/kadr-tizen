@@ -228,4 +228,59 @@ describe('virtualWindow calculators', () => {
       { startIndex: 25, endIndex: 30, label: '26–31' },
     ]);
   });
+
+  it('coerces -0 anchors to +0 and renders exact scrolled viewport when anchor is null', () => {
+    const negZeroRow = computeVirtualRowWindow({
+      totalItems: 180,
+      columns: 6,
+      rowHeightPx: 384,
+      rowSpacingPx: 24,
+      viewportHeightPx: 760,
+      scrollTopPx: 0,
+      anchorRow: -0.5,
+      overscanRows: 3,
+    });
+    expect(Object.is(negZeroRow.startRow, 0)).toBe(true);
+    expect(Object.is(negZeroRow.startIndex, 0)).toBe(true);
+    expect(Object.is(negZeroRow.topSpacerPx, 0)).toBe(true);
+
+    const negZeroHoriz = computeVirtualHorizontalWindow({
+      totalItems: 180,
+      itemWidthPx: 320,
+      itemSpacingPx: 16,
+      viewportWidthPx: 1760,
+      scrollLeftPx: 0,
+      anchorIndex: -0,
+      overscanItems: 8,
+    });
+    expect(Object.is(negZeroHoriz.startIndex, 0)).toBe(true);
+    expect(Object.is(negZeroHoriz.leftSpacerPx, 0)).toBe(true);
+
+    const scrolledRow = computeVirtualRowWindow({
+      totalItems: 180,
+      columns: 6,
+      rowHeightPx: 384,
+      rowSpacingPx: 24,
+      viewportHeightPx: 760,
+      scrollTopPx: 15 * 408,
+      anchorRow: null,
+      overscanRows: 3,
+    });
+    expect(scrolledRow.startRow).toBe(12);
+    expect(scrolledRow.endRow).toBe(19);
+    expect(scrolledRow.startIndex).toBe(72);
+    expect(scrolledRow.endIndex).toBe(120);
+
+    const scrolledHoriz = computeVirtualHorizontalWindow({
+      totalItems: 180,
+      itemWidthPx: 320,
+      itemSpacingPx: 16,
+      viewportWidthPx: 1760,
+      scrollLeftPx: 80 * 336,
+      anchorIndex: null,
+      overscanItems: 8,
+    });
+    expect(scrolledHoriz.startIndex).toBeLessThanOrEqual(80);
+    expect(scrolledHoriz.endIndex).toBeGreaterThan(80);
+  });
 });

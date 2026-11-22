@@ -99,7 +99,10 @@ function chunkIntoRows(ids: string[], cols: number): string[][] {
   return rows;
 }
 
-function scrollElementIntoViewIfClipped(el: HTMLElement | null) {
+function scrollElementIntoViewIfClipped(
+  el: HTMLElement | null,
+  lastProgrammaticScrollTopRef?: React.MutableRefObject<number | null>
+) {
   if (!el || typeof el.scrollIntoView !== 'function') return;
   const rect = el.getBoundingClientRect();
   if (rect.width === 0 && rect.height === 0) return;
@@ -112,6 +115,9 @@ function scrollElementIntoViewIfClipped(el: HTMLElement | null) {
         return;
       }
       el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      if (lastProgrammaticScrollTopRef) {
+        lastProgrammaticScrollTopRef.current = container.scrollTop;
+      }
       return;
     }
   }
@@ -127,6 +133,8 @@ interface FolderDirItemProps {
   name: string;
   path: string;
   itemCount: number;
+  isUserScrollingRef: React.MutableRefObject<boolean>;
+  lastProgrammaticScrollTopRef: React.MutableRefObject<number | null>;
   onNavigate: (path: string, nodeId: string) => void;
 }
 
@@ -136,6 +144,8 @@ const FolderDirItem = memo(function FolderDirItem({
   name,
   path,
   itemCount,
+  isUserScrollingRef,
+  lastProgrammaticScrollTopRef,
   onNavigate,
 }: FolderDirItemProps) {
   const handleActivate = useCallback(() => {
@@ -150,10 +160,10 @@ const FolderDirItem = memo(function FolderDirItem({
   });
 
   useEffect(() => {
-    if (isFocused) {
-      scrollElementIntoViewIfClipped(ref.current);
+    if (isFocused && !isUserScrollingRef.current) {
+      scrollElementIntoViewIfClipped(ref.current, lastProgrammaticScrollTopRef);
     }
-  }, [isFocused, ref]);
+  }, [isFocused, ref, isUserScrollingRef, lastProgrammaticScrollTopRef]);
 
   return (
     <button
@@ -198,6 +208,8 @@ interface FolderMediaCardProps {
   imageUrl?: string;
   badge?: string;
   progressPercent?: number;
+  isUserScrollingRef: React.MutableRefObject<boolean>;
+  lastProgrammaticScrollTopRef: React.MutableRefObject<number | null>;
   onSelectItemId: (itemId: number | string, nodeId: string) => void;
 }
 
@@ -210,6 +222,8 @@ const FolderMediaCard = memo(function FolderMediaCard({
   imageUrl,
   badge,
   progressPercent,
+  isUserScrollingRef,
+  lastProgrammaticScrollTopRef,
   onSelectItemId,
 }: FolderMediaCardProps) {
   const [imgError, setImgError] = useState(false);
@@ -230,10 +244,10 @@ const FolderMediaCard = memo(function FolderMediaCard({
   });
 
   useEffect(() => {
-    if (isFocused) {
-      scrollElementIntoViewIfClipped(ref.current);
+    if (isFocused && !isUserScrollingRef.current) {
+      scrollElementIntoViewIfClipped(ref.current, lastProgrammaticScrollTopRef);
     }
-  }, [isFocused, ref]);
+  }, [isFocused, ref, isUserScrollingRef, lastProgrammaticScrollTopRef]);
 
   return (
     <div
@@ -311,6 +325,8 @@ interface FolderPhotoCardProps {
   image: FolderImage;
   index: number;
   imageUrl?: string;
+  isUserScrollingRef: React.MutableRefObject<boolean>;
+  lastProgrammaticScrollTopRef: React.MutableRefObject<number | null>;
   onSelectPhoto: (index: number, nodeId: string) => void;
 }
 
@@ -320,6 +336,8 @@ const FolderPhotoCard = memo(function FolderPhotoCard({
   image,
   index,
   imageUrl,
+  isUserScrollingRef,
+  lastProgrammaticScrollTopRef,
   onSelectPhoto,
 }: FolderPhotoCardProps) {
   const [hasError, setHasError] = useState(false);
@@ -345,10 +363,10 @@ const FolderPhotoCard = memo(function FolderPhotoCard({
   });
 
   useEffect(() => {
-    if (isFocused) {
-      scrollElementIntoViewIfClipped(ref.current);
+    if (isFocused && !isUserScrollingRef.current) {
+      scrollElementIntoViewIfClipped(ref.current, lastProgrammaticScrollTopRef);
     }
-  }, [isFocused, ref]);
+  }, [isFocused, ref, isUserScrollingRef, lastProgrammaticScrollTopRef]);
 
   return (
     <div
@@ -408,12 +426,19 @@ interface FolderFocusBridgeProps {
   validNodeIds: Set<string>;
   contentRows: string[][];
   dialogRef: React.RefObject<HTMLDivElement | null>;
+  scrollContainerRef: React.RefObject<HTMLDivElement | null>;
   exitedChildPathRef: React.MutableRefObject<string | null>;
   autoFocusedFolderKeyRef: React.MutableRefObject<string | null>;
   lastFocusedItemIdRef: React.MutableRefObject<string | null>;
   pendingWindowFocusIdRef: React.MutableRefObject<string | null>;
   setFocusedIdRef: React.MutableRefObject<((id: string | null) => void) | null>;
+  getFocusedIdRef: React.MutableRefObject<(() => string | null) | null>;
   goBackRef: React.MutableRefObject<() => void>;
+  isUserScrolling: boolean;
+  isUserScrollingRef: React.MutableRefObject<boolean>;
+  setIsUserScrolling: React.Dispatch<React.SetStateAction<boolean>>;
+  lastProgrammaticScrollTopRef: React.MutableRefObject<number | null>;
+  findFirstViewportCardId: () => string | null;
   requestNodeFocus: (nextId: string) => void;
   syncTargetFocusId: (nextId: string) => void;
 }
@@ -431,26 +456,41 @@ const FolderFocusBridge = memo(function FolderFocusBridge({
   validNodeIds,
   contentRows,
   dialogRef,
+  scrollContainerRef,
   exitedChildPathRef,
   autoFocusedFolderKeyRef,
   lastFocusedItemIdRef,
   pendingWindowFocusIdRef,
   setFocusedIdRef,
+  getFocusedIdRef,
   goBackRef,
+  isUserScrolling,
+  isUserScrollingRef,
+  setIsUserScrolling,
+  lastProgrammaticScrollTopRef,
+  findFirstViewportCardId,
   requestNodeFocus,
   syncTargetFocusId,
 }: FolderFocusBridgeProps) {
-  const { focusedId, setFocusedId, pushTrap, popTrap, activeTrap } = useFocusContext();
+  const { focusedId, setFocusedId, pushTrap, popTrap, activeTrap, getFocusedId } =
+    useFocusContext();
   setFocusedIdRef.current = setFocusedId;
 
   const focusedIdRef = useRef(focusedId);
   focusedIdRef.current = focusedId;
+  getFocusedIdRef.current = () => (getFocusedId ? getFocusedId() : focusedIdRef.current);
 
   const activeTrapRef = useRef(activeTrap);
   activeTrapRef.current = activeTrap;
 
   const contentRowsRef = useRef(contentRows);
   contentRowsRef.current = contentRows;
+
+  const validNodeIdsRef = useRef(validNodeIds);
+  validNodeIdsRef.current = validNodeIds;
+
+  const findFirstViewportCardIdRef = useRef(findFirstViewportCardId);
+  findFirstViewportCardIdRef.current = findFirstViewportCardId;
 
   // Trap lifecycle: push only our trap on open, pop ONLY 'folder-browser-modal' on close
   useEffect(() => {
@@ -567,7 +607,9 @@ const FolderFocusBridge = memo(function FolderFocusBridge({
     if (!isOpen || loading) return;
     if (activeTrap && activeTrap !== 'folder-browser-modal') return;
     if (hasOtherStackedModal()) return;
-    if (pendingWindowFocusIdRef.current) return;
+    if (pendingWindowFocusIdRef.current && validNodeIds.has(pendingWindowFocusIdRef.current)) {
+      return;
+    }
 
     const statusTag = isLocked ? 'locked' : error ? 'error' : 'loaded';
     const folderKey = `${libraryId}:${currentPath}:${statusTag}`;
@@ -579,9 +621,16 @@ const FolderFocusBridge = memo(function FolderFocusBridge({
       return;
     }
 
+    if (isUserScrolling) {
+      return;
+    }
+
     if (focusedId && validNodeIds.has(focusedId)) {
       lastFocusedItemIdRef.current = focusedId;
       syncTargetFocusId(focusedId);
+      if (scrollContainerRef.current) {
+        lastProgrammaticScrollTopRef.current = scrollContainerRef.current.scrollTop;
+      }
       return;
     }
 
@@ -603,16 +652,19 @@ const FolderFocusBridge = memo(function FolderFocusBridge({
     activeTrap,
     focusedId,
     validNodeIds,
+    isUserScrolling,
     hasOtherStackedModal,
     computePreferredFocusId,
     autoFocusedFolderKeyRef,
     lastFocusedItemIdRef,
     pendingWindowFocusIdRef,
+    scrollContainerRef,
+    lastProgrammaticScrollTopRef,
     requestNodeFocus,
     syncTargetFocusId,
   ]);
 
-  // Capture keydown: Back navigation + Fast Page-Up / Page-Down (~5 rows/items)
+  // Capture keydown: Back navigation + Arrow recovery after wheel scroll + Fast Page-Up / Page-Down (~5 rows/items)
   useEffect(() => {
     if (!isOpen) return;
 
@@ -638,6 +690,16 @@ const FolderFocusBridge = memo(function FolderFocusBridge({
         return;
       }
 
+      const isArrowKey =
+        code === TVKeys.UP ||
+        code === TVKeys.DOWN ||
+        code === TVKeys.LEFT ||
+        code === TVKeys.RIGHT ||
+        e.key === 'ArrowUp' ||
+        e.key === 'ArrowDown' ||
+        e.key === 'ArrowLeft' ||
+        e.key === 'ArrowRight';
+
       const isPageUp =
         code === TVKeys.CH_UP ||
         code === TVKeys.REWIND ||
@@ -654,7 +716,25 @@ const FolderFocusBridge = memo(function FolderFocusBridge({
         e.key === 'ChannelDown' ||
         e.key === 'MediaFastForward';
 
-      if (!isPageUp && !isPageDown) {
+      if (!isArrowKey && !isPageUp && !isPageDown) {
+        return;
+      }
+
+      const wasUserScrolling = isUserScrollingRef.current;
+      if (wasUserScrolling) {
+        setIsUserScrolling(false);
+      }
+
+      if (isArrowKey) {
+        const curFocused = focusedIdRef.current;
+        if (wasUserScrolling && (!curFocused || !validNodeIdsRef.current.has(curFocused))) {
+          const viewportCardId = findFirstViewportCardIdRef.current();
+          if (viewportCardId) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            requestNodeFocus(viewportCardId);
+          }
+        }
         return;
       }
 
@@ -666,7 +746,10 @@ const FolderFocusBridge = memo(function FolderFocusBridge({
       e.preventDefault();
       e.stopImmediatePropagation();
 
-      const curId = pendingWindowFocusIdRef.current ?? focusedIdRef.current;
+      let curId = pendingWindowFocusIdRef.current ?? focusedIdRef.current;
+      if (!curId && wasUserScrolling) {
+        curId = findFirstViewportCardIdRef.current();
+      }
       let foundRow = -1;
       let foundCol = 0;
 
@@ -710,7 +793,15 @@ const FolderFocusBridge = memo(function FolderFocusBridge({
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [isOpen, hasOtherStackedModal, goBackRef, pendingWindowFocusIdRef, requestNodeFocus]);
+  }, [
+    isOpen,
+    hasOtherStackedModal,
+    goBackRef,
+    pendingWindowFocusIdRef,
+    isUserScrollingRef,
+    setIsUserScrolling,
+    requestNodeFocus,
+  ]);
 
   return null;
 });
@@ -749,6 +840,7 @@ export function FolderBrowserModal({
   const itemGridRef = useRef<HTMLDivElement | null>(null);
   const imageGridRef = useRef<HTMLDivElement | null>(null);
   const setFocusedIdRef = useRef<((id: string | null) => void) | null>(null);
+  const getFocusedIdRef = useRef<(() => string | null) | null>(null);
   const onLockedLibraryRef = useRef(onLockedLibrary);
   onLockedLibraryRef.current = onLockedLibrary;
   const onSelectItemRef = useRef(onSelectItem);
@@ -773,11 +865,25 @@ export function FolderBrowserModal({
     scrollTop: 0,
     viewportHeight: 0,
   });
+  const [isUserScrolling, setIsUserScrolling] = useState(false);
+  const isUserScrollingRef = useRef(isUserScrolling);
+  isUserScrollingRef.current = isUserScrolling;
+  const programmaticScrollRef = useRef(false);
+  const lastProgrammaticScrollTopRef = useRef<number | null>(null);
   const [pendingCommitTick, setPendingCommitTick] = useState(0);
+
+  const applyProgrammaticScrollTop = useCallback((container: HTMLElement, nextScrollTop: number) => {
+    programmaticScrollRef.current = true;
+    lastProgrammaticScrollTopRef.current = nextScrollTop;
+    container.scrollTop = nextScrollTop;
+    lastProgrammaticScrollTopRef.current = container.scrollTop;
+    programmaticScrollRef.current = false;
+  }, []);
 
   useEffect(() => {
     if (!isOpen) return;
     let isMounted = true;
+    pendingWindowFocusIdRef.current = null;
     setLoading(true);
     setError(null);
 
@@ -842,13 +948,14 @@ export function FolderBrowserModal({
   useEffect(() => {
     if (!isOpen) return;
     pendingWindowFocusIdRef.current = null;
+    setIsUserScrolling(false);
     if (scrollContainerRef.current) {
-      scrollContainerRef.current.scrollTop = 0;
+      applyProgrammaticScrollTop(scrollContainerRef.current, 0);
     }
     setScrollState((prev) =>
       prev.scrollTop === 0 ? prev : { scrollTop: 0, viewportHeight: prev.viewportHeight }
     );
-  }, [isOpen, libraryId, currentPath]);
+  }, [isOpen, libraryId, currentPath, applyProgrammaticScrollTop]);
 
   useLayoutEffect(() => {
     if (!isOpen) return;
@@ -869,6 +976,7 @@ export function FolderBrowserModal({
 
   const navigateToPath = useCallback(
     (nextPath: string, sourceNodeId?: string) => {
+      setIsUserScrolling(false);
       if (sourceNodeId) {
         lastFocusedItemIdRef.current = sourceNodeId;
       }
@@ -888,6 +996,7 @@ export function FolderBrowserModal({
 
   /** Go up one folder; close the browser only when already at the library root. */
   const goBack = useCallback(() => {
+    setIsUserScrolling(false);
     if (!isAtRoot) {
       exitedChildPathRef.current = currentPath;
       lastFocusedItemIdRef.current = null;
@@ -915,12 +1024,14 @@ export function FolderBrowserModal({
   goBackRef.current = goBack;
 
   const handleSelectItemCard = useCallback((itemId: number | string, nodeId: string) => {
+    setIsUserScrolling(false);
     lastFocusedItemIdRef.current = nodeId;
     setFocusedIdRef.current?.(nodeId);
     onSelectItemRef.current(itemId);
   }, []);
 
   const handleSelectPhotoCard = useCallback((idx: number, nodeId: string) => {
+    setIsUserScrolling(false);
     lastFocusedItemIdRef.current = nodeId;
     setFocusedIdRef.current?.(nodeId);
     const images = folderDataRef.current?.images || [];
@@ -1008,7 +1119,7 @@ export function FolderBrowserModal({
       rowSpacingPx,
       viewportHeightPx: scrollState.viewportHeight,
       scrollTopPx: Math.max(0, scrollState.scrollTop - offsetTop),
-      anchorRow: targetPos?.section === section ? targetPos.row : null,
+      anchorRow: isUserScrolling ? null : targetPos?.section === section ? targetPos.row : null,
       thresholdItems: VIRTUAL_GRID_ITEM_THRESHOLD,
     });
   };
@@ -1022,39 +1133,103 @@ export function FolderBrowserModal({
   const hasVirtualizedSectionRef = useRef(hasVirtualizedSection);
   hasVirtualizedSectionRef.current = hasVirtualizedSection;
 
+  const findFirstViewportCardId = useCallback((): string | null => {
+    const scrollTop = scrollContainerRef.current?.scrollTop ?? scrollState.scrollTop;
+    const sections: Array<{
+      key: GridSectionKey;
+      count: number;
+      gridEl: HTMLDivElement | null;
+      getId: (idx: number) => string;
+    }> = [
+      {
+        key: 'dir',
+        count: dirList.length,
+        gridEl: dirGridRef.current,
+        getId: (idx) => `folder-dir-${idx}`,
+      },
+      {
+        key: 'item',
+        count: itemList.length,
+        gridEl: itemGridRef.current,
+        getId: (idx) => `folder-item-${itemList[idx].id}`,
+      },
+      {
+        key: 'image',
+        count: imageList.length,
+        gridEl: imageGridRef.current,
+        getId: (idx) => `folder-image-${idx}`,
+      },
+    ];
+
+    for (const sec of sections) {
+      if (sec.count === 0) continue;
+      const { rowHeightPx, rowSpacingPx } = SECTION_ROW_METRICS[sec.key];
+      const rowStride = rowHeightPx + rowSpacingPx;
+      const offsetTop = sec.gridEl?.offsetTop ?? 0;
+      const totalRows = Math.ceil(sec.count / GRID_COLS);
+      const sectionBottom = offsetTop + totalRows * rowStride;
+      if (sectionBottom <= scrollTop) continue;
+
+      const firstVisibleRow = Math.max(
+        0,
+        Math.min(totalRows - 1, Math.floor(Math.max(0, scrollTop - offsetTop) / rowStride))
+      );
+      const startIdx = Math.min(sec.count - 1, firstVisibleRow * GRID_COLS);
+      for (let i = startIdx; i < sec.count; i++) {
+        const candidateId = sec.getId(i);
+        if (typeof document !== 'undefined' && document.getElementById(candidateId)) {
+          return candidateId;
+        }
+      }
+    }
+
+    for (const row of contentRows) {
+      for (const id of row) {
+        if (typeof document !== 'undefined' && document.getElementById(id)) {
+          return id;
+        }
+      }
+    }
+    return contentRows[0]?.[0] ?? null;
+  }, [dirList.length, itemList, imageList.length, scrollState.scrollTop, contentRows]);
+
   const syncTargetFocusId = useCallback((nextId: string) => {
     if (!hasVirtualizedSectionRef.current) return;
     setTargetFocusId((prev) => (prev === nextId ? prev : nextId));
   }, []);
 
-  const scrollTargetRowIntoView = useCallback((nextId: string) => {
-    const container = scrollContainerRef.current;
-    const pos = nodeSectionRowMapRef.current.get(nextId);
-    if (!container || !pos) return;
-    const gridRefs: Record<GridSectionKey, HTMLDivElement | null> = {
-      dir: dirGridRef.current,
-      item: itemGridRef.current,
-      image: imageGridRef.current,
-    };
-    const { rowHeightPx, rowSpacingPx } = SECTION_ROW_METRICS[pos.section];
-    const rowStride = rowHeightPx + rowSpacingPx;
-    const gridOffsetTop = gridRefs[pos.section]?.offsetTop ?? 0;
-    const viewportH = container.clientHeight || DEFAULT_GRID_VIEWPORT_HEIGHT_PX;
-    const targetRowTop = gridOffsetTop + pos.row * rowStride;
-    const nextScrollTop = Math.max(
-      0,
-      targetRowTop - Math.max(0, Math.floor((viewportH - rowHeightPx) / 2))
-    );
-    container.scrollTop = nextScrollTop;
-    setScrollState((prev) =>
-      prev.scrollTop === nextScrollTop && prev.viewportHeight === container.clientHeight
-        ? prev
-        : { scrollTop: nextScrollTop, viewportHeight: container.clientHeight }
-    );
-  }, []);
+  const scrollTargetRowIntoView = useCallback(
+    (nextId: string) => {
+      const container = scrollContainerRef.current;
+      const pos = nodeSectionRowMapRef.current.get(nextId);
+      if (!container || !pos) return;
+      const gridRefs: Record<GridSectionKey, HTMLDivElement | null> = {
+        dir: dirGridRef.current,
+        item: itemGridRef.current,
+        image: imageGridRef.current,
+      };
+      const { rowHeightPx, rowSpacingPx } = SECTION_ROW_METRICS[pos.section];
+      const rowStride = rowHeightPx + rowSpacingPx;
+      const gridOffsetTop = gridRefs[pos.section]?.offsetTop ?? 0;
+      const viewportH = container.clientHeight || DEFAULT_GRID_VIEWPORT_HEIGHT_PX;
+      const targetRowTop = gridOffsetTop + pos.row * rowStride;
+      const nextScrollTop = Math.max(
+        0,
+        targetRowTop - Math.max(0, Math.floor((viewportH - rowHeightPx) / 2))
+      );
+      applyProgrammaticScrollTop(container, nextScrollTop);
+      setScrollState((prev) =>
+        prev.scrollTop === nextScrollTop && prev.viewportHeight === container.clientHeight
+          ? prev
+          : { scrollTop: nextScrollTop, viewportHeight: container.clientHeight }
+      );
+    },
+    [applyProgrammaticScrollTop]
+  );
 
   const requestNodeFocus = useCallback(
     (nextId: string) => {
+      setIsUserScrolling(false);
       lastFocusedItemIdRef.current = nextId;
       const mountedEl = typeof document !== 'undefined' ? document.getElementById(nextId) : null;
       if (mountedEl) {
@@ -1063,7 +1238,7 @@ export function FolderBrowserModal({
           setTargetFocusId((prev) => (prev === nextId ? prev : nextId));
         }
         setFocusedIdRef.current?.(nextId);
-        scrollElementIntoViewIfClipped(mountedEl);
+        scrollElementIntoViewIfClipped(mountedEl, lastProgrammaticScrollTopRef);
         return;
       }
 
@@ -1086,6 +1261,10 @@ export function FolderBrowserModal({
   useLayoutEffect(() => {
     const pendingId = pendingWindowFocusIdRef.current;
     if (!pendingId || !isOpen || loading) return;
+    if (!nodeSectionRowMapRef.current.has(pendingId)) {
+      pendingWindowFocusIdRef.current = null;
+      return;
+    }
     const el = typeof document !== 'undefined' ? document.getElementById(pendingId) : null;
     if (!el) return;
     pendingWindowFocusIdRef.current = null;
@@ -1097,7 +1276,7 @@ export function FolderBrowserModal({
         el.focus();
       }
     }
-    scrollElementIntoViewIfClipped(el);
+    scrollElementIntoViewIfClipped(el, lastProgrammaticScrollTopRef);
   }, [isOpen, loading, targetFocusId, pendingCommitTick, folderData]);
 
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
@@ -1105,11 +1284,60 @@ export function FolderBrowserModal({
     const el = e.currentTarget;
     const nextTop = el.scrollTop;
     const nextHeight = el.clientHeight;
+    const expectedTop = lastProgrammaticScrollTopRef.current;
+    const isProgrammatic =
+      programmaticScrollRef.current ||
+      (expectedTop !== null && Math.abs(nextTop - expectedTop) <= 4);
+
+    if (isProgrammatic) {
+      if (!programmaticScrollRef.current) {
+        lastProgrammaticScrollTopRef.current = null;
+      }
+    } else {
+      lastProgrammaticScrollTopRef.current = null;
+      setIsUserScrolling((prev) => (prev ? prev : true));
+    }
+
     setScrollState((prev) =>
       prev.scrollTop === nextTop && prev.viewportHeight === nextHeight
         ? prev
         : { scrollTop: nextTop, viewportHeight: nextHeight }
     );
+  }, []);
+
+  const handleScrollAreaWheel = useCallback(() => {
+    lastProgrammaticScrollTopRef.current = null;
+  }, []);
+
+  const handleScrollAreaClickCapture = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (!hasVirtualizedSectionRef.current && !isUserScrollingRef.current) return;
+    const cardEl = (e.target as HTMLElement | null)?.closest?.('[id]') as HTMLElement | null;
+    if (!cardEl || !nodeSectionRowMapRef.current.has(cardEl.id)) return;
+    if (isUserScrollingRef.current) {
+      setIsUserScrolling(false);
+    }
+    lastFocusedItemIdRef.current = cardEl.id;
+    if (hasVirtualizedSectionRef.current) {
+      setTargetFocusId((prev) => (prev === cardEl.id ? prev : cardEl.id));
+    }
+  }, []);
+
+  const handleScrollAreaFocusCapture = useCallback((e: React.FocusEvent<HTMLDivElement>) => {
+    if (!hasVirtualizedSectionRef.current && !isUserScrollingRef.current) return;
+    const cardEl = (e.target as HTMLElement | null)?.closest?.('[id]') as HTMLElement | null;
+    if (!cardEl || !nodeSectionRowMapRef.current.has(cardEl.id)) return;
+    // Ignore passive focus triggered by FocusContext.registerNode while user is wheel scrolling
+    if (isUserScrollingRef.current && getFocusedIdRef.current?.() === cardEl.id) return;
+    if (isUserScrollingRef.current) {
+      setIsUserScrolling(false);
+    }
+    lastFocusedItemIdRef.current = cardEl.id;
+    if (hasVirtualizedSectionRef.current) {
+      setTargetFocusId((prev) => (prev === cardEl.id ? prev : cardEl.id));
+    }
+    if (getFocusedIdRef.current?.() !== cardEl.id) {
+      setFocusedIdRef.current?.(cardEl.id);
+    }
   }, []);
 
   if (!isOpen) return null;
@@ -1295,6 +1523,9 @@ export function FolderBrowserModal({
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
+        onWheel={handleScrollAreaWheel}
+        onClickCapture={handleScrollAreaClickCapture}
+        onFocusCapture={handleScrollAreaFocusCapture}
         data-folder-scroll-container="true"
         className="flex-1 overflow-y-auto mt-6 pr-4 scrollbar-thin relative"
       >
@@ -1380,6 +1611,8 @@ export function FolderBrowserModal({
                         name={dir.name}
                         path={dir.path}
                         itemCount={dir.item_count}
+                        isUserScrollingRef={isUserScrollingRef}
+                        lastProgrammaticScrollTopRef={lastProgrammaticScrollTopRef}
                         onNavigate={navigateToPath}
                       />
                     );
@@ -1421,6 +1654,8 @@ export function FolderBrowserModal({
                               ? Math.round(item.playback_progress * 100)
                               : undefined
                           }
+                          isUserScrollingRef={isUserScrollingRef}
+                          lastProgrammaticScrollTopRef={lastProgrammaticScrollTopRef}
                           onSelectItemId={handleSelectItemCard}
                         />
                       );
@@ -1477,6 +1712,8 @@ export function FolderBrowserModal({
                             token,
                             unlockTokens
                           )}
+                          isUserScrollingRef={isUserScrollingRef}
+                          lastProgrammaticScrollTopRef={lastProgrammaticScrollTopRef}
                           onSelectPhoto={handleSelectPhotoCard}
                         />
                       );
@@ -1519,12 +1756,19 @@ export function FolderBrowserModal({
         validNodeIds={validNodeIds}
         contentRows={contentRows}
         dialogRef={dialogRef}
+        scrollContainerRef={scrollContainerRef}
         exitedChildPathRef={exitedChildPathRef}
         autoFocusedFolderKeyRef={autoFocusedFolderKeyRef}
         lastFocusedItemIdRef={lastFocusedItemIdRef}
         pendingWindowFocusIdRef={pendingWindowFocusIdRef}
         setFocusedIdRef={setFocusedIdRef}
+        getFocusedIdRef={getFocusedIdRef}
         goBackRef={goBackRef}
+        isUserScrolling={isUserScrolling}
+        isUserScrollingRef={isUserScrollingRef}
+        setIsUserScrolling={setIsUserScrolling}
+        lastProgrammaticScrollTopRef={lastProgrammaticScrollTopRef}
+        findFirstViewportCardId={findFirstViewportCardId}
         requestNodeFocus={requestNodeFocus}
         syncTargetFocusId={syncTargetFocusId}
       />

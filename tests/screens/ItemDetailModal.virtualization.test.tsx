@@ -64,6 +64,8 @@ describe('ItemDetailModal Episode Strip Virtualization', () => {
     const strip = cards[0].parentElement as HTMLElement;
     expect(strip.style.paddingLeft).toBe('');
     expect(strip.style.paddingRight).toBe('');
+    expect(screen.queryByTestId('episode-strip-left-spacer')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('episode-strip-right-spacer')).not.toBeInTheDocument();
 
     expect(screen.getByTestId('detail-remote-footer')).not.toHaveTextContent('±10 Eps');
   });
@@ -149,10 +151,16 @@ describe('ItemDetailModal Episode Strip Virtualization', () => {
     expect(container.querySelectorAll('[id^="episode-card-"]').length).toBeLessThan(30);
     expect(document.getElementById('episode-card-1')).toBeNull();
 
-    // Strip spacers maintain exact horizontal offset
+    // Strip spacers maintain exact horizontal offset without trailing paddingRight collapse
     const strip = card101.parentElement as HTMLElement;
-    expect(parseInt(strip.style.paddingLeft || '0', 10)).toBeGreaterThan(0);
-    expect(parseInt(strip.style.paddingRight || '0', 10)).toBeGreaterThan(0);
+    expect(strip.style.paddingLeft).toBe('');
+    expect(strip.style.paddingRight).toBe('');
+    const leftSpacer = screen.getByTestId('episode-strip-left-spacer');
+    const rightSpacer = screen.getByTestId('episode-strip-right-spacer');
+    expect(parseInt(leftSpacer.style.width || '0', 10)).toBeGreaterThan(0);
+    expect(leftSpacer.style.flexShrink).toBe('0');
+    expect(parseInt(rightSpacer.style.width || '0', 10)).toBeGreaterThan(0);
+    expect(rightSpacer.style.flexShrink).toBe('0');
 
     // Deterministic ArrowRight / ArrowLeft on episode cards & full playlist index preservation
     act(() => {
@@ -244,8 +252,14 @@ describe('ItemDetailModal Episode Strip Virtualization', () => {
     expect(mountedCards.length).toBeLessThan(30);
 
     const strip = card145!.parentElement as HTMLElement;
-    expect(parseInt(strip.style.paddingLeft || '0', 10)).toBeGreaterThan(0);
-    expect(parseInt(strip.style.paddingRight || '0', 10)).toBeGreaterThan(0);
+    expect(strip.style.paddingLeft).toBe('');
+    expect(strip.style.paddingRight).toBe('');
+    const leftSpacer = screen.getByTestId('episode-strip-left-spacer');
+    const rightSpacer = screen.getByTestId('episode-strip-right-spacer');
+    expect(parseInt(leftSpacer.style.width || '0', 10)).toBeGreaterThan(0);
+    expect(leftSpacer.style.flexShrink).toBe('0');
+    expect(parseInt(rightSpacer.style.width || '0', 10)).toBeGreaterThan(0);
+    expect(rightSpacer.style.flexShrink).toBe('0');
     expect(document.getElementById('episode-range-pill-100')?.getAttribute('data-active')).toBe(
       'true'
     );
@@ -306,5 +320,68 @@ describe('ItemDetailModal Episode Strip Virtualization', () => {
     });
     expect(screen.queryByTestId('episode-range-pills')).not.toBeInTheDocument();
     expect(container.querySelectorAll('[id^="episode-card-"]')).toHaveLength(5);
+  });
+
+  it('mounts episode-card-81 when externally wheel-scrolled to episode 80 while detail-play-btn is focused, and ArrowUp from action strip restores active episode', () => {
+    render(
+      <FocusProvider>
+        <FocusProbe />
+        <ItemDetailModal
+          isOpen={true}
+          item={makeShowWithEpisodes(180)}
+          serverUrl="http://localhost:8492"
+          onPlay={vi.fn()}
+          onClose={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    expect(screen.getByTestId('probe-focus').textContent).toBe('detail-play-btn');
+    const initialCard1 = document.getElementById('episode-card-1')!;
+    expect(initialCard1).not.toBeNull();
+    expect(document.getElementById('episode-card-81')).toBeNull();
+
+    const strip = initialCard1.parentElement as HTMLElement;
+    Object.defineProperty(strip, 'clientWidth', { value: 1760, configurable: true });
+
+    // External wheel/scrollbar scroll to episode 80 (80 * 336 = 26880px) while focus stays on detail-play-btn
+    act(() => {
+      strip.scrollLeft = 80 * 336;
+      fireEvent.scroll(strip);
+    });
+
+    expect(document.getElementById('episode-card-81')).not.toBeNull();
+    expect(document.getElementById('episode-card-1')).toBeNull();
+
+    // Navigate down to episode-card-1 via pill-0 -> ArrowDown, then ArrowDown to action strip
+    const pill0 = document.getElementById('episode-range-pill-0')!;
+    act(() => {
+      pill0.focus();
+    });
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowDown', keyCode: TVKeys.DOWN });
+    });
+    expect(screen.getByTestId('probe-focus').textContent).toBe('episode-card-1');
+
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowDown', keyCode: TVKeys.DOWN });
+    });
+    expect(screen.getByTestId('probe-focus').textContent).toBe('episode-action-watch-toggle');
+
+    // Wheel-scroll strip away to episode 80 while on #episode-action-strip
+    act(() => {
+      strip.scrollLeft = 80 * 336;
+      fireEvent.scroll(strip);
+    });
+    expect(document.getElementById('episode-card-81')).not.toBeNull();
+    expect(document.getElementById('episode-card-1')).toBeNull();
+
+    // ArrowUp from #episode-action-strip brings active episode (episode-card-1) back into view and focuses it
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowUp', keyCode: TVKeys.UP });
+    });
+    expect(screen.getByTestId('probe-focus').textContent).toBe('episode-card-1');
+    expect(document.getElementById('episode-card-1')).not.toBeNull();
+    expect(document.activeElement).toBe(document.getElementById('episode-card-1'));
   });
 });

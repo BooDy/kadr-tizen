@@ -376,4 +376,74 @@ describe('FolderBrowserModal virtualization', () => {
     expect(itemsGrid.style.paddingTop).toBe('');
     expect(itemsGrid.style.paddingBottom).toBe('');
   });
+
+  it('mounts row 15 (folder-item-91) when externally scrolled while folder-item-1 was auto-focused, suppresses self-heal snap-back when focusedId becomes null, and resumes D-pad from viewport', async () => {
+    vi.mocked(foldersApi.fetchLibraryFolders).mockResolvedValue(makeLargeItemsResponse(240));
+
+    const { container } = render(
+      <FocusProvider>
+        <FocusProbe />
+        <FolderBrowserModal
+          client={client}
+          serverUrl={serverUrl}
+          libraryId={libraryId}
+          onClose={vi.fn()}
+          onSelectItem={vi.fn()}
+          onSelectImage={vi.fn()}
+          onStartSlideshow={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('probe-focus').textContent).toBe('folder-item-1');
+    });
+    expect(document.getElementById('folder-item-91')).toBeNull();
+
+    const scrollContainer = container.querySelector(
+      '[data-folder-scroll-container="true"]'
+    ) as HTMLElement;
+    Object.defineProperty(scrollContainer, 'clientHeight', { value: 760, configurable: true });
+
+    // External mouse-wheel / pointer scroll to row 15 (15 * 388 = 5820)
+    act(() => {
+      scrollContainer.scrollTop = 15 * 388;
+      fireEvent.scroll(scrollContainer);
+    });
+
+    await waitFor(() => {
+      expect(document.getElementById('folder-item-91')).not.toBeNull();
+    });
+    expect(document.getElementById('folder-item-1')).toBeNull();
+    expect(scrollContainer.scrollTop).toBe(15 * 388);
+
+    // Scroll to row 38 then row 39 where endRow is already clamped at 39 so old focused card unmounts and focusedId becomes null
+    act(() => {
+      scrollContainer.scrollTop = 38 * 388;
+      fireEvent.scroll(scrollContainer);
+    });
+    await waitFor(() => {
+      expect(document.getElementById('folder-item-229')).not.toBeNull();
+    });
+
+    act(() => {
+      scrollContainer.scrollTop = 39 * 388;
+      fireEvent.scroll(scrollContainer);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('probe-focus').textContent).toBe('');
+    });
+
+    // Passive self-heal must NOT snap scrollTop or focusedId back to row 0 / folder-item-1
+    expect(scrollContainer.scrollTop).toBe(39 * 388);
+    expect(document.getElementById('folder-item-1')).toBeNull();
+    expect(document.getElementById('folder-item-235')).not.toBeNull();
+
+    // Pressing ArrowDown while focusedId === null during user scrolling picks up from current scrolled viewport
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowDown', keyCode: TVKeys.DOWN });
+    });
+    expect(screen.getByTestId('probe-focus').textContent).toBe('folder-item-235');
+    expect(document.getElementById('folder-item-235')).not.toBeNull();
+  });
 });

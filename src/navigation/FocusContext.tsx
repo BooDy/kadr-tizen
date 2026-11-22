@@ -24,12 +24,14 @@ export interface FocusContextType {
   popFocusTrap: (trapGroupId?: string) => void;
   getFocusedId?: () => string | null;
   getActiveTrap?: () => string | null;
+  getTrapReturnFocusId?: () => string | null;
   subscribeNodeFocus?: (id: string, listener: () => void) => () => void;
 }
 
 export interface FocusStore {
   getFocusedId: () => string | null;
   getActiveTrap: () => string | null;
+  getTrapReturnFocusId?: () => string | null;
   subscribeNodeFocus: (id: string, listener: () => void) => () => void;
   subscribeActiveTrap: (listener: () => void) => () => void;
   setFocusedId: (id: string | null | ((prev: string | null) => string | null)) => void;
@@ -311,6 +313,10 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
 
   const getFocusedId = useCallback(() => focusedIdRef.current, []);
   const getActiveTrap = useCallback(() => activeTrapRef.current, []);
+  const getTrapReturnFocusId = useCallback(
+    () => trapStackRef.current[0]?.previousFocusedId ?? null,
+    []
+  );
 
   const subscribeNodeFocus = useCallback((id: string, listener: () => void) => {
     let set = nodeListenersRef.current.get(id);
@@ -345,7 +351,15 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       if (!nodeSeqRef.current.has(node.id)) {
         nodeSeqRef.current.set(node.id, nextSeqCounterRef.current++);
       }
+      const prevNode = nodesRef.current.get(node.id);
+      const isExistingMountedNode = Boolean(
+        prevNode && prevNode.element === node.element && prevNode.groupId === node.groupId
+      );
       nodesRef.current.set(node.id, node);
+
+      if (isExistingMountedNode) {
+        return;
+      }
 
       const topTrap = trapStackRef.current[trapStackRef.current.length - 1];
       const activeTrap = topTrap?.trapGroupId ?? null;
@@ -799,6 +813,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     () => ({
       getFocusedId,
       getActiveTrap,
+      getTrapReturnFocusId,
       subscribeNodeFocus,
       subscribeActiveTrap,
       setFocusedId,
@@ -812,6 +827,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
     [
       getFocusedId,
       getActiveTrap,
+      getTrapReturnFocusId,
       subscribeNodeFocus,
       subscribeActiveTrap,
       setFocusedId,
@@ -835,6 +851,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       popFocusTrap: popTrap,
       getFocusedId,
       getActiveTrap,
+      getTrapReturnFocusId,
       subscribeNodeFocus,
     }),
     [
@@ -847,6 +864,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
       popTrap,
       getFocusedId,
       getActiveTrap,
+      getTrapReturnFocusId,
       subscribeNodeFocus,
     ]
   );

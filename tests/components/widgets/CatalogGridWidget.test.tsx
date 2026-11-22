@@ -495,4 +495,148 @@ describe('CatalogGridWidget virtualization & zero-gap layout', () => {
     expect(screen.getByTestId('probe-focus').textContent).toBe('grid-movies-121');
     expect(document.activeElement?.id).toBe('grid-movies-121');
   });
+
+  it('mounts row 15 (grid-movies-91) when <main> is externally scrolled while grid-movies-1 is auto-focused, and ArrowDown recovers onto the scrolled viewport', async () => {
+    const widget = makeGridWidget(180);
+    const { container } = render(
+      <FocusProvider>
+        <FocusProbe />
+        <main data-testid="browse-main" style={{ height: '760px', overflowY: 'auto' }}>
+          <CatalogGridWidget
+            widget={widget}
+            serverUrl="http://localhost:8492"
+            onSelectItem={vi.fn()}
+            autoFocusFirstItem
+          />
+        </main>
+      </FocusProvider>
+    );
+
+    const mainEl = screen.getByTestId('browse-main') as HTMLElement;
+    Object.defineProperty(mainEl, 'clientHeight', { value: 760, configurable: true });
+
+    expect(screen.getByTestId('probe-focus').textContent).toBe('grid-movies-1');
+    expect(document.getElementById('grid-movies-1')).not.toBeNull();
+    expect(document.getElementById('grid-movies-91')).toBeNull();
+
+    // External mouse-wheel / pointer scroll to row 15 (15 * 408 = 6120)
+    act(() => {
+      mainEl.scrollTop = 15 * 408;
+      fireEvent.scroll(mainEl);
+    });
+
+    await waitFor(() => {
+      expect(document.getElementById('grid-movies-91')).not.toBeNull();
+    });
+    expect(document.getElementById('grid-movies-1')).toBeNull();
+    expect(mainEl.scrollTop).toBe(15 * 408);
+    expect(container.querySelectorAll('[id^="grid-movies-"]').length).toBeLessThan(90);
+
+    // Subsequent ArrowDown while focusedId === null recovers onto the first visible card in the scrolled viewport
+    expect(screen.getByTestId('probe-focus').textContent).toBe('');
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowDown', keyCode: TVKeys.DOWN });
+    });
+    expect(screen.getByTestId('probe-focus').textContent).toBe('grid-movies-91');
+    expect(document.activeElement?.id).toBe('grid-movies-91');
+    expect(document.getElementById('grid-movies-91')).not.toBeNull();
+  });
+
+  it('keeps grid-movies-151 mounted when item-detail-modal trap opens, rerenders, or remounts, and popTrap restores focusedId', () => {
+    function TrapHarness() {
+      const { focusedId, activeTrap, setFocusedId, pushTrap, popTrap } = useFocusContext();
+      const [widget, setWidget] = useState(() => makeGridWidget(180));
+      const [showGrid, setShowGrid] = useState(true);
+
+      return (
+        <div>
+          <div data-testid="probe-focus">{focusedId ?? ''}</div>
+          <div data-testid="probe-trap">{activeTrap ?? ''}</div>
+          <button
+            data-testid="open-modal-trap"
+            onClick={() => {
+              pushTrap('item-detail-modal');
+              setFocusedId('detail-play-btn');
+            }}
+          >
+            Open Modal
+          </button>
+          <button
+            data-testid="close-modal-trap"
+            onClick={() => {
+              popTrap('item-detail-modal');
+            }}
+          >
+            Close Modal
+          </button>
+          <button
+            data-testid="refresh-widget"
+            onClick={() => {
+              setWidget(makeGridWidget(180));
+            }}
+          >
+            Refresh Widget
+          </button>
+          <button data-testid="unmount-grid" onClick={() => setShowGrid(false)}>
+            Unmount
+          </button>
+          <button data-testid="remount-grid" onClick={() => setShowGrid(true)}>
+            Remount
+          </button>
+          <main style={{ height: '760px', overflowY: 'auto' }}>
+            {showGrid && (
+              <CatalogGridWidget
+                widget={widget}
+                serverUrl="http://localhost:8492"
+                onSelectItem={vi.fn()}
+                autoFocusFirstItem
+              />
+            )}
+          </main>
+        </div>
+      );
+    }
+
+    render(
+      <FocusProvider>
+        <FocusSetter targetId="grid-movies-151" />
+        <TrapHarness />
+      </FocusProvider>
+    );
+
+    expect(screen.getByTestId('probe-focus').textContent).toBe('grid-movies-151');
+    expect(document.getElementById('grid-movies-151')).not.toBeNull();
+
+    // Open item-detail-modal trap -> focusedId moves to detail-play-btn while scrollTop stays 0 in JSDOM
+    act(() => {
+      fireEvent.click(screen.getByTestId('open-modal-trap'));
+    });
+    expect(screen.getByTestId('probe-trap').textContent).toBe('item-detail-modal');
+    expect(screen.getByTestId('probe-focus').textContent).toBe('detail-play-btn');
+    expect(document.getElementById('grid-movies-151')).not.toBeNull();
+
+    // Rerender with refreshed widget layout while modal trap is open
+    act(() => {
+      fireEvent.click(screen.getByTestId('refresh-widget'));
+    });
+    expect(document.getElementById('grid-movies-151')).not.toBeNull();
+
+    // Simulate BrowseScreen loading=true -> loading=false unmount/remount while modal trap is open
+    act(() => {
+      fireEvent.click(screen.getByTestId('unmount-grid'));
+    });
+    expect(document.getElementById('grid-movies-151')).toBeNull();
+    act(() => {
+      fireEvent.click(screen.getByTestId('remount-grid'));
+    });
+    expect(document.getElementById('grid-movies-151')).not.toBeNull();
+
+    // Close modal trap -> FocusContext.popTrap restores focusedId === 'grid-movies-151'
+    act(() => {
+      fireEvent.click(screen.getByTestId('close-modal-trap'));
+    });
+    expect(screen.getByTestId('probe-trap').textContent).toBe('');
+    expect(screen.getByTestId('probe-focus').textContent).toBe('grid-movies-151');
+    expect(document.activeElement?.id).toBe('grid-movies-151');
+  });
 });

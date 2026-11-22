@@ -47,6 +47,15 @@ const EPISODE_CARD_SPACING_PX = 16;
 const EPISODE_CARD_STRIDE_PX = EPISODE_CARD_WIDTH_PX + EPISODE_CARD_SPACING_PX;
 const EPISODE_FAST_SKIP_COUNT = 10;
 
+function isEpisodeControlId(id: string | null | undefined): boolean {
+  if (!id) return false;
+  return (
+    id.startsWith('episode-card-') ||
+    id.startsWith('episode-range-pill-') ||
+    id.startsWith('episode-action-')
+  );
+}
+
 function resolveDefaultActiveEpisodeId(
   seasonEps: EpisodeCard[],
   initialFocusedId: string | null | undefined,
@@ -843,6 +852,7 @@ export function ItemDetailModal({
         document.getElementById(initialFocusedId);
       if (el) {
         setFocusedId(initialFocusedId);
+        setIsFocusInEpisodeControls(isEpisodeControlId(initialFocusedId));
         el.focus();
         notifyViewState(initialFocusedId);
         return;
@@ -854,6 +864,7 @@ export function ItemDetailModal({
         document.getElementById('detail-close-btn');
       if (fallbackEl) {
         setFocusedId(fallbackEl.id);
+        setIsFocusInEpisodeControls(isEpisodeControlId(fallbackEl.id));
         fallbackEl.focus();
         notifyViewState(fallbackEl.id);
       }
@@ -894,6 +905,8 @@ export function ItemDetailModal({
   );
   const [stripScrollLeft, setStripScrollLeft] = useState(0);
   const [stripViewportWidth, setStripViewportWidth] = useState(0);
+  const [isStripUserScrolling, setIsStripUserScrolling] = useState(false);
+  const [isFocusInEpisodeControls, setIsFocusInEpisodeControls] = useState(false);
   const [pendingEpisodeCommitTick, setPendingEpisodeCommitTick] = useState(0);
 
   if (prevSeasonScopeKey !== seasonScopeKey) {
@@ -907,11 +920,19 @@ export function ItemDetailModal({
       )
     );
     setStripScrollLeft(0);
+    setIsStripUserScrolling(false);
+    setIsFocusInEpisodeControls(false);
   }
 
   const episodeStripRef = useRef<HTMLDivElement | null>(null);
   const pendingEpisodeFocusRef = useRef<{ scopeKey: string; cardId: string } | null>(null);
   const hasScrolledInitialEpisodeRef = useRef<string | null>(null);
+  const isStripUserScrollingRef = useRef(isStripUserScrolling);
+  isStripUserScrollingRef.current = isStripUserScrolling;
+  const stripScrollLeftRef = useRef(stripScrollLeft);
+  stripScrollLeftRef.current = stripScrollLeft;
+  const programmaticStripScrollRef = useRef(false);
+  const lastProgrammaticStripScrollLeftRef = useRef<number | null>(null);
 
   const activeEpisode = useMemo(() => {
     if (visibleSeasonEpisodes.length === 0) return null;
@@ -942,6 +963,16 @@ export function ItemDetailModal({
     [visibleSeasonEpisodes.length]
   );
 
+  const hasPendingEpisodeJump =
+    pendingEpisodeFocusRef.current?.scopeKey === seasonScopeKey;
+  const liveFocusedId = getFocusedId();
+  const focusInEpisodeArea =
+    isFocusInEpisodeControls || isEpisodeControlId(liveFocusedId);
+  const effectiveAnchorIndex =
+    isStripUserScrolling || (!focusInEpisodeArea && stripScrollLeft > 0 && !hasPendingEpisodeJump)
+      ? null
+      : activeEpisodeIndex;
+
   const epWindow = useMemo(
     () =>
       computeVirtualHorizontalWindow({
@@ -950,11 +981,11 @@ export function ItemDetailModal({
         itemSpacingPx: EPISODE_CARD_SPACING_PX,
         viewportWidthPx: stripViewportWidth,
         scrollLeftPx: stripScrollLeft,
-        anchorIndex: activeEpisodeIndex,
+        anchorIndex: effectiveAnchorIndex,
         overscanItems: 8,
         thresholdItems: VIRTUAL_EPISODE_THRESHOLD,
       }),
-    [visibleSeasonEpisodes.length, stripViewportWidth, stripScrollLeft, activeEpisodeIndex]
+    [visibleSeasonEpisodes.length, stripViewportWidth, stripScrollLeft, effectiveAnchorIndex]
   );
 
   const isStripVirtualizedRef = useRef(epWindow.isVirtualized);
@@ -980,9 +1011,18 @@ export function ItemDetailModal({
     [visibleSeasonEpisodes]
   );
 
-  const focusTargetById = useCallback(
+  const handleModalFocusChange = useCallback(
     (targetId: string) => {
       setFocusedId(targetId);
+      const inEpisodeArea = isEpisodeControlId(targetId);
+      setIsFocusInEpisodeControls((prev) => (prev === inEpisodeArea ? prev : inEpisodeArea));
+    },
+    [setFocusedId]
+  );
+
+  const focusTargetById = useCallback(
+    (targetId: string) => {
+      handleModalFocusChange(targetId);
       if (typeof document !== 'undefined') {
         const el =
           document.querySelector<HTMLElement>(`[data-focus-id="${targetId}"]`) ||
@@ -996,21 +1036,37 @@ export function ItemDetailModal({
         }
       }
     },
-    [setFocusedId]
+    [handleModalFocusChange]
   );
 
-  const scrollEpisodeIndexIntoView = useCallback((idx: number) => {
-    const strip = episodeStripRef.current;
-    if (!strip) return;
-    const viewportW = strip.clientWidth || DEFAULT_STRIP_VIEWPORT_WIDTH_PX;
-    const targetLeft = idx * EPISODE_CARD_STRIDE_PX;
-    const nextScrollLeft = Math.max(
-      0,
-      targetLeft - Math.max(0, Math.floor((viewportW - EPISODE_CARD_WIDTH_PX) / 2))
-    );
-    strip.scrollLeft = nextScrollLeft;
-    setStripScrollLeft((prev) => (prev === nextScrollLeft ? prev : nextScrollLeft));
-  }, []);
+  const applyProgrammaticStripScrollLeft = useCallback(
+    (strip: HTMLElement, nextScrollLeft: number) => {
+      programmaticStripScrollRef.current = true;
+      lastProgrammaticStripScrollLeftRef.current = nextScrollLeft;
+      strip.scrollLeft = nextScrollLeft;
+      lastProgrammaticStripScrollLeftRef.current = strip.scrollLeft;
+      programmaticStripScrollRef.current = false;
+    },
+    []
+  );
+
+  const scrollEpisodeIndexIntoView = useCallback(
+    (idx: number) => {
+      const strip = episodeStripRef.current;
+      if (!strip) return;
+      const viewportW = strip.clientWidth || DEFAULT_STRIP_VIEWPORT_WIDTH_PX;
+      const targetLeft = idx * EPISODE_CARD_STRIDE_PX;
+      const nextScrollLeft = Math.max(
+        0,
+        targetLeft - Math.max(0, Math.floor((viewportW - EPISODE_CARD_WIDTH_PX) / 2))
+      );
+      applyProgrammaticStripScrollLeft(strip, nextScrollLeft);
+      if (isStripVirtualizedRef.current) {
+        setStripScrollLeft((prev) => (prev === nextScrollLeft ? prev : nextScrollLeft));
+      }
+    },
+    [applyProgrammaticStripScrollLeft]
+  );
 
   const jumpToEpisodeIndex = useCallback(
     (targetIdx: number) => {
@@ -1020,6 +1076,8 @@ export function ItemDetailModal({
       if (!targetEp) return;
       const cardId = `episode-card-${targetEp.id}`;
 
+      setIsStripUserScrolling(false);
+      setIsFocusInEpisodeControls(true);
       setActiveEpisodeId(targetEp.id);
       scrollEpisodeIndexIntoView(clampedIdx);
 
@@ -1044,6 +1102,7 @@ export function ItemDetailModal({
     if (!effectiveOpen) {
       pendingEpisodeFocusRef.current = null;
       hasScrolledInitialEpisodeRef.current = null;
+      lastProgrammaticStripScrollLeftRef.current = null;
       return;
     }
     if (pendingEpisodeFocusRef.current && pendingEpisodeFocusRef.current.scopeKey !== seasonScopeKey) {
@@ -1070,7 +1129,7 @@ export function ItemDetailModal({
     if (epWindow.isVirtualized && activeEpisodeIndex > 0) {
       scrollEpisodeIndexIntoView(activeEpisodeIndex);
     } else {
-      strip.scrollLeft = 0;
+      applyProgrammaticStripScrollLeft(strip, 0);
     }
   }, [
     effectiveOpen,
@@ -1079,6 +1138,7 @@ export function ItemDetailModal({
     epWindow.isVirtualized,
     activeEpisodeIndex,
     scrollEpisodeIndexIntoView,
+    applyProgrammaticStripScrollLeft,
   ]);
 
   useLayoutEffect(() => {
@@ -1200,6 +1260,32 @@ export function ItemDetailModal({
 
         const isFastForward = code === TVKeys.FAST_FORWARD || e.key === 'MediaFastForward';
         const isRewind = code === TVKeys.REWIND || e.key === 'MediaRewind';
+
+        if (
+          !current &&
+          isStripUserScrollingRef.current &&
+          visibleSeasonEpisodes.length > 0 &&
+          (isFastForward ||
+            isRewind ||
+            code === TVKeys.LEFT ||
+            e.key === 'ArrowLeft' ||
+            code === TVKeys.RIGHT ||
+            e.key === 'ArrowRight')
+        ) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          const currentLeft = episodeStripRef.current?.scrollLeft ?? stripScrollLeftRef.current;
+          const firstVisibleIdx = Math.max(
+            0,
+            Math.min(
+              visibleSeasonEpisodes.length - 1,
+              Math.floor(currentLeft / EPISODE_CARD_STRIDE_PX)
+            )
+          );
+          jumpToEpisodeIndex(firstVisibleIdx);
+          return;
+        }
+
         if (
           (isFastForward || isRewind) &&
           (isEpisodeCard || isEpisodeRangePill || Boolean(pendingCardId))
@@ -1266,11 +1352,10 @@ export function ItemDetailModal({
         // Up Navigation
         else if (code === TVKeys.UP || e.key === 'ArrowUp') {
           if (isEpisodeAction) {
-            const targetEp = activeEpisode ?? visibleSeasonEpisodes[0];
-            if (targetEp) {
+            if (visibleSeasonEpisodes.length > 0) {
               e.preventDefault();
               e.stopImmediatePropagation();
-              focusTargetById(`episode-card-${targetEp.id}`);
+              jumpToEpisodeIndex(activeEpisodeIndex);
             }
           } else if (isEpisodeCard) {
             e.preventDefault();
@@ -1436,6 +1521,20 @@ export function ItemDetailModal({
     if (!isStripVirtualizedRef.current) return;
     const nextLeft = e.currentTarget.scrollLeft;
     const nextWidth = e.currentTarget.clientWidth;
+    const expectedLeft = lastProgrammaticStripScrollLeftRef.current;
+    const isProgrammatic =
+      programmaticStripScrollRef.current ||
+      (expectedLeft !== null && Math.abs(nextLeft - expectedLeft) <= 4);
+
+    if (isProgrammatic) {
+      if (!programmaticStripScrollRef.current) {
+        lastProgrammaticStripScrollLeftRef.current = null;
+      }
+    } else {
+      lastProgrammaticStripScrollLeftRef.current = null;
+      setIsStripUserScrolling((prev) => (prev ? prev : true));
+    }
+
     setStripScrollLeft((prev) => (prev === nextLeft ? prev : nextLeft));
     setStripViewportWidth((prev) => (prev === nextWidth ? prev : nextWidth));
   }, []);
@@ -1531,6 +1630,8 @@ export function ItemDetailModal({
 
   const handleSelectEpisode = useCallback(
     (ep: EpisodeCard) => {
+      setIsStripUserScrolling(false);
+      setIsFocusInEpisodeControls(true);
       const episodeFocusId = getFocusedId() || `episode-card-${ep.id}`;
       notifyViewState(episodeFocusId);
       const playlistIdx = episodePlaylist.findIndex((p) => String(p.id) === String(ep.id));
@@ -1549,16 +1650,29 @@ export function ItemDetailModal({
 
   const handleFocusSeasonTab = useCallback(
     (tabId: string) => {
-      setFocusedId(tabId);
+      handleModalFocusChange(tabId);
     },
-    [setFocusedId]
+    [handleModalFocusChange]
   );
 
   const handleFocusEpisodeCard = useCallback(
     (epId: number | string, cardFocusId?: string) => {
+      if (isStripUserScrollingRef.current && (!cardFocusId || getFocusedId() === cardFocusId)) {
+        if (episodeStripRef.current) {
+          lastProgrammaticStripScrollLeftRef.current = episodeStripRef.current.scrollLeft;
+        }
+        return;
+      }
+      if (cardFocusId && getFocusedId() !== cardFocusId) {
+        setIsStripUserScrolling(false);
+      }
+      setIsFocusInEpisodeControls(true);
       setActiveEpisodeId((prev) => (String(prev) === String(epId) ? prev : epId));
       if (cardFocusId && getFocusedId() !== cardFocusId) {
         setFocusedId(cardFocusId);
+      }
+      if (episodeStripRef.current && !isStripUserScrollingRef.current) {
+        lastProgrammaticStripScrollLeftRef.current = episodeStripRef.current.scrollLeft;
       }
     },
     [getFocusedId, setFocusedId]
@@ -1853,7 +1967,7 @@ export function ItemDetailModal({
                           nextEpisode.episode ?? 1
                         ).padStart(2, '0')} • "${nextEpisode.title}"`}
                         onActivate={handlePlayShowResume}
-                        onFocusAction={setFocusedId}
+                        onFocusAction={handleModalFocusChange}
                         autoFocus
                       />
                       <SecondaryDetailActionButton
@@ -1867,7 +1981,7 @@ export function ItemDetailModal({
                         }
                         label="Play from Beginning"
                         onActivate={handlePlayShowStart}
-                        onFocusAction={setFocusedId}
+                        onFocusAction={handleModalFocusChange}
                       />
                     </>
                   ) : (
@@ -1881,7 +1995,7 @@ export function ItemDetailModal({
                       eyebrowAriaHidden
                       label="Play"
                       onActivate={handlePlayShowStart}
-                      onFocusAction={setFocusedId}
+                      onFocusAction={handleModalFocusChange}
                       autoFocus
                     />
                   )
@@ -1894,7 +2008,7 @@ export function ItemDetailModal({
                       eyebrowAriaHidden
                       label={`Resume (${resumeMins}m)`}
                       onActivate={handlePlayMovieResume}
-                      onFocusAction={setFocusedId}
+                      onFocusAction={handleModalFocusChange}
                       autoFocus
                     />
                     <SecondaryDetailActionButton
@@ -1908,7 +2022,7 @@ export function ItemDetailModal({
                       }
                       label="Play from Beginning"
                       onActivate={handlePlayMovieStart}
-                      onFocusAction={setFocusedId}
+                      onFocusAction={handleModalFocusChange}
                     />
                   </>
                 ) : (
@@ -1919,7 +2033,7 @@ export function ItemDetailModal({
                     eyebrowAriaHidden
                     label="Play"
                     onActivate={handlePlayMovieStart}
-                    onFocusAction={setFocusedId}
+                    onFocusAction={handleModalFocusChange}
                     autoFocus
                   />
                 )}
@@ -1943,7 +2057,7 @@ export function ItemDetailModal({
                     }
                     label={isItemCompleted ? 'Mark Unwatched' : 'Mark Watched'}
                     onActivate={handleToggleMovieWatchState}
-                    onFocusAction={setFocusedId}
+                    onFocusAction={handleModalFocusChange}
                   />
                 )}
 
@@ -1959,7 +2073,7 @@ export function ItemDetailModal({
                     }
                     label="Mark Unwatched"
                     onActivate={handleClearMovieProgress}
-                    onFocusAction={setFocusedId}
+                    onFocusAction={handleModalFocusChange}
                   />
                 )}
 
@@ -1975,7 +2089,7 @@ export function ItemDetailModal({
                     }
                     label="Browse Folder"
                     onActivate={handleBrowseFolderClick}
-                    onFocusAction={setFocusedId}
+                    onFocusAction={handleModalFocusChange}
                   />
                 )}
 
@@ -1991,7 +2105,7 @@ export function ItemDetailModal({
                     }
                     label="Add to Playlist"
                     onActivate={handleOpenAddToPlaylist}
-                    onFocusAction={setFocusedId}
+                    onFocusAction={handleModalFocusChange}
                   />
                 )}
 
@@ -2006,7 +2120,7 @@ export function ItemDetailModal({
                   }
                   label="Back"
                   onActivate={onClose}
-                  onFocusAction={setFocusedId}
+                  onFocusAction={handleModalFocusChange}
                 />
               </div>
             </div>
@@ -2043,7 +2157,7 @@ export function ItemDetailModal({
                 selectedSeason={selectedSeason}
                 allSeasonWatched={allSeasonWatched}
                 onActivate={handleToggleSeasonWatchState}
-                onFocusButton={setFocusedId}
+                onFocusButton={handleModalFocusChange}
               />
             ) : (
               <div className="flex items-center text-[#a8a29e] font-mono text-xs tracking-wider uppercase">
@@ -2068,7 +2182,7 @@ export function ItemDetailModal({
                     activeEpisodeIndex <= group.endIndex
                   }
                   onActivate={jumpToEpisodeIndex}
-                  onFocusPill={setFocusedId}
+                  onFocusPill={handleModalFocusChange}
                 />
               ))}
             </div>
@@ -2078,16 +2192,25 @@ export function ItemDetailModal({
           <div
             ref={episodeStripRef}
             onScroll={handleEpisodeStripScroll}
+            onWheel={() => {
+              lastProgrammaticStripScrollLeftRef.current = null;
+            }}
+            onClickCapture={(e) => {
+              const cardEl = (e.target as HTMLElement | null)?.closest?.('[id^="episode-card-"]');
+              if (cardEl) {
+                setIsStripUserScrolling(false);
+                setIsFocusInEpisodeControls(true);
+              }
+            }}
             className="flex overflow-x-auto pb-3 pt-2 scrollbar-none"
-            style={
-              epWindow.isVirtualized
-                ? {
-                    paddingLeft: `${epWindow.leftSpacerPx}px`,
-                    paddingRight: `${epWindow.rightSpacerPx}px`,
-                  }
-                : undefined
-            }
           >
+            {epWindow.isVirtualized && epWindow.leftSpacerPx > 0 && (
+              <div
+                data-testid="episode-strip-left-spacer"
+                aria-hidden="true"
+                style={{ width: `${epWindow.leftSpacerPx}px`, flexShrink: 0 }}
+              />
+            )}
             {visibleSeasonEpisodes
               .slice(epWindow.startIndex, epWindow.endIndex)
               .map((ep, offset) => {
@@ -2107,6 +2230,13 @@ export function ItemDetailModal({
                   />
                 );
               })}
+            {epWindow.isVirtualized && epWindow.rightSpacerPx > 0 && (
+              <div
+                data-testid="episode-strip-right-spacer"
+                aria-hidden="true"
+                style={{ width: `${epWindow.rightSpacerPx}px`, flexShrink: 0 }}
+              />
+            )}
           </div>
 
           {/* Active-Episode Inline Action Strip */}
@@ -2129,7 +2259,7 @@ export function ItemDetailModal({
                     icon={<RotateCcw className="w-4 h-4 mr-2 text-[#ffb871] shrink-0" />}
                     label="Play from Beginning"
                     onActivate={() => handlePlayEpisodeFromStart(activeEpisode)}
-                    onFocusPill={setFocusedId}
+                    onFocusPill={handleModalFocusChange}
                   />
                 )}
                 <EpisodeActionPill
@@ -2147,7 +2277,7 @@ export function ItemDetailModal({
                     focusTargetById('episode-action-watch-toggle');
                     handleSetWatchState([activeEpisode.id], !activeEpWatched);
                   }}
-                  onFocusPill={setFocusedId}
+                  onFocusPill={handleModalFocusChange}
                 />
                 {activeEpResumable && (
                   <EpisodeActionPill
@@ -2159,7 +2289,7 @@ export function ItemDetailModal({
                       focusTargetById('episode-action-watch-toggle');
                       handleSetWatchState([activeEpisode.id], false);
                     }}
-                    onFocusPill={setFocusedId}
+                    onFocusPill={handleModalFocusChange}
                   />
                 )}
               </div>

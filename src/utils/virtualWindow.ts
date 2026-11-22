@@ -72,7 +72,7 @@ function normalizeAnchor(anchor: number | null | undefined, totalCount: number):
   if (anchor === null || anchor === undefined || !Number.isFinite(anchor)) {
     return null;
   }
-  const index = Math.trunc(anchor);
+  const index = Math.trunc(anchor) || 0;
   return index >= 0 && index < totalCount ? index : null;
 }
 
