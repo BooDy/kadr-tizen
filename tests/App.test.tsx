@@ -2707,5 +2707,147 @@ describe('App State Machine & Router', () => {
       fetchSpy.mockRestore();
     }
   });
+
+  it('plays a Music album folder via FolderBrowserModal Play All in AudioPlayerOverlay mode and jumps to track 2 via onSelectQueueIndex', async () => {
+    localStorage.setItem('kadr_server_url', 'http://192.168.1.100:8492');
+
+    vi.mocked(screensApi.fetchScreens).mockResolvedValue([
+      { id: 'home', title: 'Home' },
+      { id: 'lib-music', title: 'Music' },
+    ]);
+    vi.mocked(librariesApi.fetchLibraries).mockResolvedValue([
+      {
+        id: 'lib-music',
+        name: 'Music',
+        media_type: 'music',
+        is_private: false,
+      },
+    ]);
+
+    const albumFolderResponse: LibraryFolderResponse = {
+      library_id: 'lib-music',
+      library_name: 'Music',
+      current_path: 'Midnight Horizon',
+      parent_path: '',
+      breadcrumbs: [
+        { name: 'Music', path: '' },
+        { name: 'Midnight Horizon', path: 'Midnight Horizon' },
+      ],
+      directories: [],
+      items: [
+        {
+          id: 901,
+          title: 'Track 1: Dawn',
+          subtitle: 'Horizon Quartet',
+          poster_url: '/api/v1/artwork/901/poster',
+          media_type: 'music',
+          playback_progress: 0,
+        },
+        {
+          id: 902,
+          title: 'Track 2: Eclipse',
+          subtitle: 'Horizon Quartet',
+          poster_url: '/api/v1/artwork/902/poster',
+          media_type: 'music',
+          playback_progress: 0,
+        },
+      ],
+      images: [],
+    };
+
+    vi.mocked(foldersApi.fetchLibraryFolders).mockResolvedValue(albumFolderResponse);
+
+    const track1Detail: MediaItemDetail = {
+      id: 901,
+      title: 'Track 1: Dawn',
+      media_type: 'music',
+      poster_url: '/api/v1/artwork/901/poster',
+      duration_seconds: 210,
+      technical: { audio_codec: 'flac', container: 'flac', duration_seconds: 210 },
+      card: {
+        id: 901,
+        title: 'Track 1: Dawn',
+        subtitle: 'Horizon Quartet',
+        media_type: 'music',
+      },
+    };
+    const track2Detail: MediaItemDetail = {
+      id: 902,
+      title: 'Track 2: Eclipse',
+      media_type: 'music',
+      poster_url: '/api/v1/artwork/902/poster',
+      duration_seconds: 245,
+      technical: { audio_codec: 'flac', container: 'flac', duration_seconds: 245 },
+      card: {
+        id: 902,
+        title: 'Track 2: Eclipse',
+        subtitle: 'Horizon Quartet',
+        media_type: 'music',
+      },
+    };
+
+    vi.mocked(items.fetchMediaItem).mockImplementation(async (_client, id) => {
+      if (String(id) === '902') return track2Detail;
+      return track1Detail;
+    });
+
+    await renderAuthenticatedApp();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^Music$/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /^Music$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Browse Folders/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Browse Folders/i }));
+
+    await waitFor(() => {
+      expect(document.getElementById('play-folder-all-btn')).not.toBeNull();
+    });
+
+    fireEvent.click(document.getElementById('play-folder-all-btn')!);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('audio-player-overlay')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('audio-title')).toHaveTextContent('Track 1: Dawn');
+    expect(screen.getByTestId('audio-queue-column')).toBeInTheDocument();
+    expect(screen.getByTestId('audio-queue-item-0')).toHaveAttribute('data-active', 'true');
+    expect(screen.getByTestId('audio-queue-item-1')).toHaveAttribute('data-active', 'false');
+
+    // Navigate from Play/Pause to Next -> Forward -> Repeat -> Queue Item 0 -> Down to Queue Item 1 -> Enter [OK]
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT }); // forward
+      fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT }); // next
+      fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT }); // repeat
+      fireEvent.keyDown(window, { key: 'ArrowRight', keyCode: TVKeys.RIGHT }); // queue item 0
+      fireEvent.keyDown(window, { key: 'ArrowDown', keyCode: TVKeys.DOWN }); // queue item 1
+    });
+    expect(screen.getByTestId('audio-queue-item-1')).toHaveAttribute('data-focused', 'true');
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'Enter', keyCode: TVKeys.ENTER });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('audio-title')).toHaveTextContent('Track 2: Eclipse');
+    });
+    expect(screen.getByTestId('audio-queue-item-1')).toHaveAttribute('data-active', 'true');
+    expect(screen.getByText('Track 2 of 2')).toBeInTheDocument();
+
+    // Pressing Back exits PlayerScreen cleanly back to the album FolderBrowserModal
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'Escape', keyCode: TVKeys.BACK_TIZEN });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('audio-player-overlay')).not.toBeInTheDocument();
+      expect(document.getElementById('play-folder-all-btn')).not.toBeNull();
+    });
+  });
 });
 

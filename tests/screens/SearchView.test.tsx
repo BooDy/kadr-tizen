@@ -755,7 +755,7 @@ describe('SearchView', () => {
     const card105 = screen.getByTestId('search-card-105');
     expect(within(card105).getByText('BOOK')).toBeInTheDocument();
 
-    // Jump to card 101 -> Enter calls onSelectItem(101), TVKeys.PLAY calls onPlayItem(101, 45, 'Dune')
+    // Jump to card 101 -> Enter calls onSelectItem(101), TVKeys.PLAY calls onPlayItem with item_type
     act(() => {
       fireEvent.keyDown(window, { key: 'ArrowUp', keyCode: TVKeys.UP }); // space
       fireEvent.keyDown(window, { key: 'ArrowUp', keyCode: TVKeys.UP }); // query-input
@@ -771,7 +771,7 @@ describe('SearchView', () => {
     act(() => {
       fireEvent.keyDown(window, { key: 'MediaPlay', keyCode: TVKeys.PLAY });
     });
-    expect(onPlayItem).toHaveBeenCalledWith(101, 45, 'Dune');
+    expect(onPlayItem).toHaveBeenCalledWith(101, 45, 'Dune', undefined, undefined, undefined, 'movie');
 
     // Move to card 102 -> PLAY uses sentinel 1 for 0.003 progress
     act(() => {
@@ -781,7 +781,15 @@ describe('SearchView', () => {
     act(() => {
       fireEvent.keyDown(window, { keyCode: TVKeys.PLAY });
     });
-    expect(onPlayItem).toHaveBeenLastCalledWith(102, 1, 'The Kingsroad');
+    expect(onPlayItem).toHaveBeenLastCalledWith(
+      102,
+      1,
+      'The Kingsroad',
+      undefined,
+      undefined,
+      undefined,
+      'episode'
+    );
 
     // Move to card 104 (live_channel) -> PLAY uses 0
     act(() => {
@@ -792,7 +800,34 @@ describe('SearchView', () => {
     act(() => {
       fireEvent.keyDown(window, { key: 'MediaPlay', keyCode: TVKeys.PLAY });
     });
-    expect(onPlayItem).toHaveBeenLastCalledWith(104, 0, 'Al Jazeera Documentary');
+    expect(onPlayItem).toHaveBeenLastCalledWith(
+      104,
+      0,
+      'Al Jazeera Documentary',
+      undefined,
+      undefined,
+      undefined,
+      'live_channel'
+    );
+
+    // Move down from card 104 to row 1 then left to card 105 (audiobook) -> PLAY passes 'audiobook' mediaType
+    act(() => {
+      fireEvent.keyDown(window, { key: 'ArrowDown', keyCode: TVKeys.DOWN });
+      fireEvent.keyDown(window, { key: 'ArrowLeft', keyCode: TVKeys.LEFT });
+    });
+    expect(screen.getByTestId('probe-focus').textContent).toBe('search-card-105');
+    act(() => {
+      fireEvent.keyDown(window, { key: 'MediaPlay', keyCode: TVKeys.PLAY });
+    });
+    expect(onPlayItem).toHaveBeenLastCalledWith(
+      105,
+      0,
+      'Dune Messiah',
+      undefined,
+      undefined,
+      undefined,
+      'audiobook'
+    );
   });
 
   it('re-anchors focus safely when focused card disappears on refresh, handles modal trap guard, and restores saved search state', async () => {

@@ -104,13 +104,37 @@ describe('PlaylistDetailModal', () => {
     expect(screen.getByTestId('playlist-item-watched-102')).toHaveTextContent('Watched');
     expect(screen.getByText('LIVE')).toBeInTheDocument();
 
-    // 1. Play All -> starts at index 0 with preserved resumeMs per item
+    // 1. Play All -> starts at index 0 with preserved resumeMs and metadata per item
     fireEvent.click(document.getElementById('playlist-play-all-btn')!);
     expect(onPlayQueue).toHaveBeenCalledWith(
       [
-        { id: 101, title: 'Blade Runner 2049', resumeMs: 900000 },
-        { id: 102, title: 'Dune: Part Two', resumeMs: 0 },
-        { id: 103, title: 'Sci-Fi Live TV', resumeMs: 0 },
+        {
+          id: 101,
+          title: 'Blade Runner 2049',
+          resumeMs: 900000,
+          subtitle: 'Denis Villeneuve',
+          posterUrl: '/api/v1/artwork/101/poster',
+          mediaType: 'movie',
+          durationSeconds: 5400,
+        },
+        {
+          id: 102,
+          title: 'Dune: Part Two',
+          resumeMs: 0,
+          subtitle: undefined,
+          posterUrl: '/api/v1/artwork/102/poster',
+          mediaType: 'movie',
+          durationSeconds: 4200,
+        },
+        {
+          id: 103,
+          title: 'Sci-Fi Live TV',
+          resumeMs: 0,
+          subtitle: undefined,
+          posterUrl: '/api/v1/artwork/103/poster',
+          mediaType: 'live_channel',
+          durationSeconds: undefined,
+        },
       ],
       0
     );
@@ -120,9 +144,33 @@ describe('PlaylistDetailModal', () => {
     fireEvent.click(document.getElementById('playlist-item-play-102')!);
     expect(onPlayQueue).toHaveBeenCalledWith(
       [
-        { id: 101, title: 'Blade Runner 2049', resumeMs: 900000 },
-        { id: 102, title: 'Dune: Part Two', resumeMs: 0 },
-        { id: 103, title: 'Sci-Fi Live TV', resumeMs: 0 },
+        {
+          id: 101,
+          title: 'Blade Runner 2049',
+          resumeMs: 900000,
+          subtitle: 'Denis Villeneuve',
+          posterUrl: '/api/v1/artwork/101/poster',
+          mediaType: 'movie',
+          durationSeconds: 5400,
+        },
+        {
+          id: 102,
+          title: 'Dune: Part Two',
+          resumeMs: 0,
+          subtitle: undefined,
+          posterUrl: '/api/v1/artwork/102/poster',
+          mediaType: 'movie',
+          durationSeconds: 4200,
+        },
+        {
+          id: 103,
+          title: 'Sci-Fi Live TV',
+          resumeMs: 0,
+          subtitle: undefined,
+          posterUrl: '/api/v1/artwork/103/poster',
+          mediaType: 'live_channel',
+          durationSeconds: undefined,
+        },
       ],
       1
     );

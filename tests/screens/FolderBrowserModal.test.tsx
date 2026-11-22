@@ -1341,6 +1341,130 @@ describe('FolderBrowserModal', () => {
       expect(onPathChangeSpy).toHaveBeenCalledWith('');
     });
   });
+
+  it('renders #play-folder-all-btn when items exist and onPlayQueue is provided, and builds full queue starting at index 0', async () => {
+    const albumFolderResponse: LibraryFolderResponse = {
+      library_id: 'lib-music-1',
+      library_name: 'Music Library',
+      current_path: 'Pink Floyd/Dark Side',
+      parent_path: 'Pink Floyd',
+      breadcrumbs: [
+        { name: 'Music Library', path: '' },
+        { name: 'Pink Floyd', path: 'Pink Floyd' },
+        { name: 'Dark Side', path: 'Pink Floyd/Dark Side' },
+      ],
+      directories: [],
+      items: [
+        {
+          id: 801,
+          title: 'Speak to Me',
+          subtitle: 'Pink Floyd',
+          poster_url: '/api/v1/artwork/801/poster',
+          media_type: 'music',
+          playback_progress: 0.42,
+        },
+        {
+          id: 802,
+          title: 'Breathe',
+          subtitle: 'Pink Floyd',
+          poster_url: '/api/v1/artwork/802/poster',
+          media_type: 'music',
+          playback_progress: 0,
+        },
+        {
+          id: 803,
+          title: 'Radio Stream',
+          subtitle: 'Live FM',
+          poster_url: '/api/v1/artwork/803/poster',
+          media_type: 'live_channel',
+          playback_progress: 0.5,
+        },
+      ],
+      images: [],
+    };
+
+    vi.spyOn(foldersApi, 'fetchLibraryFolders').mockResolvedValue(albumFolderResponse);
+
+    // Without onPlayQueue -> #play-folder-all-btn must NOT render
+    const { rerender } = render(
+      <FocusProvider>
+        <FolderBrowserModal
+          isOpen={true}
+          client={client}
+          serverUrl={serverUrl}
+          libraryId="lib-music-1"
+          initialPath="Pink Floyd/Dark Side"
+          onClose={vi.fn()}
+          onSelectItem={vi.fn()}
+          onSelectImage={vi.fn()}
+          onStartSlideshow={vi.fn()}
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Speak to Me')).toBeInTheDocument();
+    });
+    expect(document.getElementById('play-folder-all-btn')).toBeNull();
+
+    const onPlayQueue = vi.fn();
+    rerender(
+      <FocusProvider>
+        <FolderBrowserModal
+          isOpen={true}
+          client={client}
+          serverUrl={serverUrl}
+          libraryId="lib-music-1"
+          initialPath="Pink Floyd/Dark Side"
+          onClose={vi.fn()}
+          onSelectItem={vi.fn()}
+          onSelectImage={vi.fn()}
+          onStartSlideshow={vi.fn()}
+          onPlayQueue={onPlayQueue}
+        />
+      </FocusProvider>
+    );
+
+    await waitFor(() => {
+      expect(document.getElementById('play-folder-all-btn')).not.toBeNull();
+    });
+
+    const playAllBtn = document.getElementById('play-folder-all-btn')!;
+    expect(playAllBtn).toHaveTextContent('Play All');
+
+    fireEvent.click(playAllBtn);
+
+    expect(onPlayQueue).toHaveBeenCalledTimes(1);
+    expect(onPlayQueue).toHaveBeenCalledWith(
+      [
+        {
+          id: 801,
+          title: 'Speak to Me',
+          subtitle: 'Pink Floyd',
+          posterUrl: '/api/v1/artwork/801/poster',
+          mediaType: 'music',
+          resumeMs: 42,
+        },
+        {
+          id: 802,
+          title: 'Breathe',
+          subtitle: 'Pink Floyd',
+          posterUrl: '/api/v1/artwork/802/poster',
+          mediaType: 'music',
+          resumeMs: 0,
+        },
+        {
+          id: 803,
+          title: 'Radio Stream',
+          subtitle: 'Live FM',
+          posterUrl: '/api/v1/artwork/803/poster',
+          mediaType: 'live_channel',
+          resumeMs: 0,
+        },
+      ],
+      0
+    );
+  });
 });
 
 

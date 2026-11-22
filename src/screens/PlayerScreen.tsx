@@ -1,10 +1,20 @@
-import { useEffect, useRef, useState, useCallback, useMemo, useContext } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useCallback,
+  useMemo,
+  useContext,
+} from 'react';
 import { createPlayerDriver, PlayerDriver, PlayerState, VideoLayoutHints } from '../player/driver';
 import { ErrorQRCode, DiagnosticPayload } from '../components/player/ErrorQRCode';
 import {
   KNOWN_COMPATIBILITY_INFO,
   SAMSUNG_TV_HLS_MAX_HEIGHT,
+  checkAudioCompatibility,
   hasMissingAudioStream,
+  isAudioMediaType,
   isSupportedOnSamsungTv,
   getPlaybackUrl,
 } from '../player/compatibility';
@@ -18,6 +28,7 @@ import { PlaybackSessionManager } from '../player/session';
 import { TVKeys } from '../navigation/keys';
 import { FocusContext } from '../navigation/FocusContext';
 import { PlayerOSD, PlayerOsdFocusItem } from '../components/osd/PlayerOSD';
+import { AudioPlayerOverlay, type AudioQueueEntry } from '../components/player/AudioPlayerOverlay';
 import { AudioTrackModal } from '../components/player/AudioTrackModal';
 import { SubtitleModal } from '../components/player/SubtitleModal';
 import { SubtitleOverlay } from '../components/player/SubtitleOverlay';
@@ -25,8 +36,13 @@ import { findActiveCueText } from '../player/subtitles';
 import { useStoryboard } from '../player/storyboard';
 import { useSubtitleCues } from '../player/useSubtitleCues';
 import {
+  type AudioRepeatMode,
+  cycleAudioRepeatMode,
+  cycleAudiobookSpeed,
+  loadAudiobookSpeed,
   loadAudioPreference,
   pickInitialAudioTrackIndex,
+  saveAudiobookSpeed,
   saveAudioPreference,
 } from '../player/audioPreferences';
 import {
@@ -42,6 +58,7 @@ import {
 } from '../player/subtitleSettings';
 import { TVButton } from '../components/tv/TVButton';
 import { AlertTriangle, RotateCcw, MonitorPlay, ArrowLeft, FastForward, Rewind, Layers, Info } from 'lucide-react';
+import { getAuthenticatedImageUrl } from '../utils/imageUrl';
 import { PlaybackProgressSnapshot } from '../utils/playbackProgress';
 import { setTvScreenSaver } from '../utils/tizenLifecycle';
 
@@ -68,11 +85,17 @@ export interface PlaylistItem {
   id: number | string;
   title: string;
   technical?: MediaItemDetail['technical'];
+  subtitle?: string;
+  posterUrl?: string;
+  mediaType?: string;
+  durationSeconds?: number;
 }
 
 export interface PlayerScreenProps {
   itemId: number | string;
   title?: string;
+  subtitle?: string;
+  posterUrl?: string;
   serverUrl: string;
   token: string;
   initialTimeMs?: number;
@@ -86,6 +109,7 @@ export interface PlayerScreenProps {
   currentIndex?: number;
   onNext?: () => void;
   onPrevious?: () => void;
+  onSelectQueueIndex?: (index: number) => void;
   onExit: (snapshot?: PlaybackProgressSnapshot) => void;
   onEpisodeProgress?: (snapshot: PlaybackProgressSnapshot) => void;
 }
@@ -133,10 +157,73 @@ function canBypassHlsForAudioLessVideo(
 const SEEK_COMMIT_DELAY_MS = 700;
 /** HLS seeks restart the server transcode, so wait longer to batch several skips into one restart. */
 const HLS_SEEK_COMMIT_DELAY_MS = 1000;
+/** Idle timeout before dedicated music/audiobook playback dims to Ambient Mode. */
+const AMBIENT_DIM_DELAY_MS = 60_000;
+
+interface FetchedAudioDetailMeta {
+  itemId: number | string;
+  title?: string;
+  mediaType?: string;
+  posterUrl?: string;
+  subtitle?: string;
+  overview?: string;
+  releaseYear?: number;
+}
+
+function computeInitialPlaybackMode(
+  mediaType: string | undefined,
+  tech: MediaItemDetail['technical'] | undefined,
+  useHtml5: boolean
+): { useHls: boolean; autoFallbackDone: boolean } {
+  if (isAudioMediaType(mediaType)) {
+    const compat = checkAudioCompatibility(tech?.audio_codec, tech?.container);
+    return { useHls: !compat.isSupported, autoFallbackDone: false };
+  }
+  const bypass = canBypassHlsForAudioLessVideo(tech, useHtml5);
+  return { useHls: !bypass, autoFallbackDone: bypass };
+}
+
+function resolveDetailSubtitle(detail: MediaItemDetail): string | undefined {
+  const record = detail as MediaItemDetail & {
+    subtitle?: string;
+    series_title?: string;
+    director?: string;
+    actors?: string[];
+    library_name?: string;
+  };
+  return (
+    record.subtitle ||
+    record.series_title ||
+    record.director ||
+    (Array.isArray(record.actors) && record.actors.length > 0 ? record.actors[0] : undefined) ||
+    detail.card?.subtitle ||
+    record.library_name
+  );
+}
+
+function isHardwareMediaTransportKey(e: KeyboardEvent): boolean {
+  const code = e.keyCode || e.which;
+  return (
+    code === TVKeys.PLAY ||
+    code === TVKeys.PAUSE ||
+    code === TVKeys.PLAY_PAUSE ||
+    code === TVKeys.STOP ||
+    code === TVKeys.MEDIA_TRACK_NEXT ||
+    code === TVKeys.MEDIA_TRACK_PREVIOUS ||
+    e.key === 'MediaPlay' ||
+    e.key === 'MediaPause' ||
+    e.key === 'MediaPlayPause' ||
+    e.key === 'MediaStop' ||
+    e.key === 'MediaTrackNext' ||
+    e.key === 'MediaTrackPrevious'
+  );
+}
 
 export function PlayerScreen({
   itemId,
   title = '',
+  subtitle: subtitleProp,
+  posterUrl: posterUrlProp,
   serverUrl,
   token,
   initialTimeMs,
@@ -150,6 +237,7 @@ export function PlayerScreen({
   currentIndex,
   onNext,
   onPrevious,
+  onSelectQueueIndex,
   onExit,
   onEpisodeProgress,
 }: PlayerScreenProps) {
@@ -258,7 +346,48 @@ export function PlayerScreen({
   const pendingAudioSyncAfterForegroundRef = useRef(false);
   const prevAudioItemIdRef = useRef(itemId);
 
+  const currentQueueEntry =
+    currentIndex !== undefined && playlist && currentIndex >= 0 && currentIndex < playlist.length
+      ? playlist[currentIndex]
+      : undefined;
+  const currentQueueEntryRef = useRef(currentQueueEntry);
+  currentQueueEntryRef.current = currentQueueEntry;
+  const mediaTypeRef = useRef(mediaType);
+  mediaTypeRef.current = mediaType;
+  const onSelectQueueIndexRef = useRef(onSelectQueueIndex);
+  onSelectQueueIndexRef.current = onSelectQueueIndex;
+
+  const [itemDetailMeta, setItemDetailMeta] = useState<FetchedAudioDetailMeta | null>(null);
+  const activeDetailMeta =
+    itemDetailMeta && String(itemDetailMeta.itemId) === String(itemId) ? itemDetailMeta : null;
   const [itemMediaType, setItemMediaType] = useState<string | undefined>(mediaType);
+  const effectiveMediaType =
+    activeDetailMeta?.mediaType ?? mediaType ?? currentQueueEntry?.mediaType ?? itemMediaType;
+  const isAudioMode = isAudioMediaType(effectiveMediaType);
+  const isAudioModeRef = useRef(isAudioMode);
+  isAudioModeRef.current = isAudioMode;
+  const normalizedAudioMediaType: 'music' | 'audiobook' =
+    effectiveMediaType?.trim().toLowerCase() === 'audiobook' ? 'audiobook' : 'music';
+
+  const [audiobookSpeed, setAudiobookSpeed] = useState<number>(() => loadAudiobookSpeed());
+  const audiobookSpeedRef = useRef(audiobookSpeed);
+  audiobookSpeedRef.current = audiobookSpeed;
+  const [repeatMode, setRepeatMode] = useState<AudioRepeatMode>('off');
+  const effectivePlaybackRate =
+    isAudioMode && normalizedAudioMediaType === 'audiobook' ? audiobookSpeed : 1;
+  const effectivePlaybackRateRef = useRef(effectivePlaybackRate);
+  effectivePlaybackRateRef.current = effectivePlaybackRate;
+  const effectiveRepeatMode: AudioRepeatMode =
+    isAudioMode && normalizedAudioMediaType === 'music' ? repeatMode : 'off';
+  const effectiveRepeatModeRef = useRef(effectiveRepeatMode);
+  effectiveRepeatModeRef.current = effectiveRepeatMode;
+
+  const [isAmbientDimmed, setIsAmbientDimmed] = useState(false);
+  const isAmbientDimmedRef = useRef(isAmbientDimmed);
+  isAmbientDimmedRef.current = isAmbientDimmed;
+  const ambientTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const audioEndedHandledRef = useRef(false);
+
   const [isLiveStream, setIsLiveStream] = useState<boolean>(() =>
     Boolean(
       isLiveProp ||
@@ -273,9 +402,13 @@ export function PlayerScreen({
   const knownDurationMsRef = useRef(knownDurationMs);
   knownDurationMsRef.current = knownDurationMs;
 
-  const initialBypassHls = canBypassHlsForAudioLessVideo(technical, forceHtml5 || isBrowserEnv);
-  const [useHls, setUseHls] = useState<boolean>(() => !initialBypassHls);
-  const hlsAutoFallbackDoneRef = useRef<boolean>(initialBypassHls);
+  const initialCompat = computeInitialPlaybackMode(
+    mediaType ?? currentQueueEntry?.mediaType,
+    technical,
+    forceHtml5 || isBrowserEnv
+  );
+  const [useHls, setUseHls] = useState<boolean>(() => initialCompat.useHls);
+  const hlsAutoFallbackDoneRef = useRef<boolean>(initialCompat.autoFallbackDone);
   const hlsTranscodeFailedRef = useRef<boolean>(false);
   const hlsUnavailableForItemRef = useRef<boolean>(false);
   const directStreamTriedRef = useRef<boolean>(false);
@@ -358,6 +491,12 @@ export function PlayerScreen({
       useHtml5Override?: boolean
     ): boolean => {
       const chosen = audioTracksRef.current.find((t) => t.audio_index === audioIndex);
+      if (isAudioModeRef.current) {
+        return checkAudioCompatibility(
+          chosen?.codec ?? activeTech?.audio_codec,
+          activeTech?.container
+        ).isSupported;
+      }
       return isSupportedOnSamsungTv(
         activeTech?.video_codec,
         chosen?.codec,
@@ -474,9 +613,22 @@ export function PlayerScreen({
       fetchMediaItem(apiClient, numericItemId)
         .then((detail) => {
           if (!isMounted) return;
+          setItemDetailMeta({
+            itemId,
+            title: detail.title,
+            mediaType: detail.media_type,
+            posterUrl: detail.poster_url ?? detail.card?.poster_url,
+            subtitle: resolveDetailSubtitle(detail),
+            overview: detail.overview,
+            releaseYear: detail.release_year ?? detail.card?.release_year,
+          });
           if (detail.media_type) {
             setItemMediaType(detail.media_type);
           }
+          const resolvedType =
+            detail.media_type ?? mediaTypeRef.current ?? currentQueueEntryRef.current?.mediaType;
+          const resolvedIsAudio = isAudioMediaType(resolvedType);
+
           const detailDurationSec =
             detail.duration_seconds ?? detail.technical?.duration_seconds;
           if (
@@ -512,7 +664,25 @@ export function PlayerScreen({
               audioTracksRef.current.find(
                 (t) => t.audio_index === selectedAudioTrackIndexRef.current
               )?.codec ?? detail.technical?.audio_codec;
-            if (
+            if (resolvedIsAudio) {
+              const audioCompat = checkAudioCompatibility(
+                activeTrackCodec,
+                detail.technical?.container
+              ).isSupported;
+              if (
+                !audioCompat &&
+                !hlsAutoFallbackDoneRef.current &&
+                !hlsUnavailableForItemRef.current
+              ) {
+                setUseHls(true);
+              } else if (
+                audioCompat &&
+                !hlsAutoFallbackDoneRef.current &&
+                !directStreamTriedRef.current
+              ) {
+                setUseHls(false);
+              }
+            } else if (
               !hlsAutoFallbackDoneRef.current &&
               !directStreamTriedRef.current &&
               canBypassHlsForAudioLessVideo(mergedTechnical, forceHtml5 || isBrowserEnv)
@@ -533,6 +703,12 @@ export function PlayerScreen({
             ) {
               setUseHls(true);
             }
+          } else if (
+            resolvedIsAudio &&
+            !hlsAutoFallbackDoneRef.current &&
+            !directStreamTriedRef.current
+          ) {
+            setUseHls(false);
           }
           const probedDurationMs =
             detail.duration_ms && detail.duration_ms > 0
@@ -691,12 +867,17 @@ export function PlayerScreen({
   useEffect(() => {
     setTechnicalInfo(technical);
     technicalInfoRef.current = technical;
-    const bypass = canBypassHlsForAudioLessVideo(technical, forceHtml5 || isBrowserEnv);
-    hlsAutoFallbackDoneRef.current = bypass;
+    const itemCompat = computeInitialPlaybackMode(
+      mediaType ?? currentQueueEntryRef.current?.mediaType,
+      technical,
+      forceHtml5 || isBrowserEnv
+    );
+    hlsAutoFallbackDoneRef.current = itemCompat.autoFallbackDone;
     hlsTranscodeFailedRef.current = false;
     hlsUnavailableForItemRef.current = false;
     directStreamTriedRef.current = false;
-    setUseHls(!bypass);
+    audioEndedHandledRef.current = false;
+    setUseHls(itemCompat.useHls);
 
     if (prevAudioItemIdRef.current !== itemId) {
       prevAudioItemIdRef.current = itemId;
@@ -804,13 +985,101 @@ export function PlayerScreen({
     onPreviousRef.current?.();
   }, [buildAndFlushSnapshot]);
 
+  const handleSelectQueueIndex = useCallback(
+    (index: number) => {
+      if (!onSelectQueueIndexRef.current) return;
+      buildAndFlushSnapshot(undefined, false);
+      onSelectQueueIndexRef.current(index);
+    },
+    [buildAndFlushSnapshot]
+  );
+
+  const handleTogglePlayPause = useCallback(() => {
+    if (playerStateRef.current === 'playing') {
+      driverRef.current?.pause();
+    } else {
+      driverRef.current?.play();
+    }
+  }, []);
+
+  const handleRestartTrack = useCallback(() => {
+    setPositionMs(0);
+    positionMsRef.current = 0;
+    driverRef.current?.seekTo(0);
+  }, []);
+
+  const handleCycleSpeed = useCallback(() => {
+    const next = cycleAudiobookSpeed(audiobookSpeedRef.current);
+    audiobookSpeedRef.current = next;
+    setAudiobookSpeed(next);
+    saveAudiobookSpeed(next);
+    driverRef.current?.setPlaybackRate?.(next);
+  }, []);
+
+  const handleCycleRepeat = useCallback(() => {
+    setRepeatMode((prev) => cycleAudioRepeatMode(prev));
+  }, []);
+
   const handleExit = useCallback(() => {
     const snap = buildAndFlushSnapshot(undefined, true);
     onExit(snap);
   }, [buildAndFlushSnapshot, onExit]);
 
-  // Handle auto-advance trigger near media end
   useEffect(() => {
+    driverRef.current?.setPlaybackRate?.(effectivePlaybackRate);
+  }, [effectivePlaybackRate]);
+
+  // Handle auto-advance trigger near media end (video 5s countdown vs audio 0s immediate transition)
+  useEffect(() => {
+    if (playerState !== 'ended') {
+      audioEndedHandledRef.current = false;
+    }
+
+    if (isAudioMode) {
+      if (autoAdvanceCountdown !== null) {
+        setAutoAdvanceCountdown(null);
+      }
+      if (playerState !== 'ended' || audioEndedHandledRef.current) {
+        return;
+      }
+      audioEndedHandledRef.current = true;
+
+      const restartFromBeginning = () => {
+        setPositionMs(0);
+        positionMsRef.current = 0;
+        driverRef.current?.seekTo(0);
+        driverRef.current?.play();
+      };
+      const flushCompletedTrack = () => {
+        const overridePosMs =
+          durationMsRef.current > 0
+            ? Math.max(positionMsRef.current, durationMsRef.current)
+            : positionMsRef.current;
+        buildAndFlushSnapshot(overridePosMs, false);
+      };
+
+      if (effectiveRepeatMode === 'one') {
+        restartFromBeginning();
+        return;
+      }
+
+      if (hasNext && onNext) {
+        flushCompletedTrack();
+        onNext();
+        return;
+      }
+
+      if (effectiveRepeatMode === 'all') {
+        if ((playlist?.length ?? 0) > 1 && onSelectQueueIndexRef.current) {
+          flushCompletedTrack();
+          onSelectQueueIndexRef.current(0);
+        } else {
+          restartFromBeginning();
+        }
+      }
+      return;
+    }
+
     if (autoAdvanceDismissedRef.current) return;
     if (!hasNext || !onNext) return;
     if (autoAdvanceCountdown !== null) return;
@@ -822,7 +1091,18 @@ export function PlayerScreen({
     if (isEnded || isNearEnd) {
       setAutoAdvanceCountdown(5);
     }
-  }, [playerState, positionMs, durationMs, hasNext, onNext, autoAdvanceCountdown]);
+  }, [
+    isAudioMode,
+    effectiveRepeatMode,
+    playlist?.length,
+    playerState,
+    positionMs,
+    durationMs,
+    hasNext,
+    onNext,
+    autoAdvanceCountdown,
+    buildAndFlushSnapshot,
+  ]);
 
   // Countdown timer for auto-advance (pure state decrement)
   useEffect(() => {
@@ -919,12 +1199,17 @@ export function PlayerScreen({
 
       if (!isHlsRef.current) {
         const activeTech = technicalInfoRef.current ?? technicalPropRef.current;
-        const supported = isSupportedOnSamsungTv(
-          activeTech?.video_codec,
-          chosen?.codec,
-          activeTech?.container,
-          forceHtml5Ref.current || isBrowserEnv
-        );
+        const supported = isAudioModeRef.current
+          ? checkAudioCompatibility(
+              chosen?.codec ?? activeTech?.audio_codec,
+              activeTech?.container
+            ).isSupported
+          : isSupportedOnSamsungTv(
+              activeTech?.video_codec,
+              chosen?.codec,
+              activeTech?.container,
+              forceHtml5Ref.current || isBrowserEnv
+            );
         if (
           supported &&
           (driverRef.current?.selectAudioTrack?.(audioIndex, chosen?.stream_index) ?? false)
@@ -1114,8 +1399,105 @@ export function PlayerScreen({
     };
   }, [seekHud]);
 
+  const handleAudioSeekRelative = useCallback(
+    (deltaMs: number) => {
+      const secs = Math.round(Math.abs(deltaMs) / 1000);
+      const direction = deltaMs >= 0 ? 'forward' : 'backward';
+      const label = `${deltaMs >= 0 ? '+' : '-'}${secs}s`;
+      applySeek(deltaMs, direction, label);
+    },
+    [applySeek]
+  );
+
+  const isAudioModalTrapOpen =
+    isSubtitlePopupOpen || isSubtitleModalOpen || isAudioModalOpen || showDetailsModal;
+  const canAmbientDim =
+    isAudioMode &&
+    playerState === 'playing' &&
+    !playbackError &&
+    !isAudioModalTrapOpen &&
+    !isDocumentHidden;
+  const canAmbientDimRef = useRef(canAmbientDim);
+  canAmbientDimRef.current = canAmbientDim;
+
+  const clearAmbientTimer = useCallback(() => {
+    if (ambientTimerRef.current) {
+      clearTimeout(ambientTimerRef.current);
+      ambientTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleAmbientTimer = useCallback(() => {
+    clearAmbientTimer();
+    if (!canAmbientDimRef.current) return;
+    ambientTimerRef.current = setTimeout(() => {
+      ambientTimerRef.current = null;
+      if (canAmbientDimRef.current) {
+        isAmbientDimmedRef.current = true;
+        setIsAmbientDimmed(true);
+      }
+    }, AMBIENT_DIM_DELAY_MS);
+  }, [clearAmbientTimer]);
+
+  const wakeAndResetAmbient = useCallback(() => {
+    if (isAmbientDimmedRef.current) {
+      isAmbientDimmedRef.current = false;
+      setIsAmbientDimmed(false);
+    }
+    scheduleAmbientTimer();
+  }, [scheduleAmbientTimer]);
+
+  useEffect(() => {
+    if (!canAmbientDim) {
+      clearAmbientTimer();
+      if (isAmbientDimmedRef.current) {
+        isAmbientDimmedRef.current = false;
+        setIsAmbientDimmed(false);
+      }
+      return;
+    }
+    scheduleAmbientTimer();
+    return () => clearAmbientTimer();
+  }, [canAmbientDim, clearAmbientTimer, scheduleAmbientTimer]);
+
+  // Register ambient wake/reset listener in layout capture phase so it runs before AudioPlayerOverlay's D-pad listener
+  useLayoutEffect(() => {
+    const handleAmbientKeyDown = (e: KeyboardEvent) => {
+      if (!isAudioModeRef.current) return;
+      if (isAmbientDimmedRef.current) {
+        wakeAndResetAmbient();
+        if (isHardwareMediaTransportKey(e)) {
+          return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        return;
+      }
+      scheduleAmbientTimer();
+    };
+
+    const handlePointerActivity = () => {
+      if (!isAudioModeRef.current) return;
+      wakeAndResetAmbient();
+    };
+
+    window.addEventListener('keydown', handleAmbientKeyDown, true);
+    window.addEventListener('mousemove', handlePointerActivity);
+    window.addEventListener('mousedown', handlePointerActivity);
+    window.addEventListener('touchstart', handlePointerActivity);
+
+    return () => {
+      window.removeEventListener('keydown', handleAmbientKeyDown, true);
+      window.removeEventListener('mousemove', handlePointerActivity);
+      window.removeEventListener('mousedown', handlePointerActivity);
+      window.removeEventListener('touchstart', handlePointerActivity);
+    };
+  }, [scheduleAmbientTimer, wakeAndResetAmbient]);
+
   useEffect(() => {
     return () => {
+      clearAmbientTimer();
       if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
       if (seekHudTimerRef.current) clearTimeout(seekHudTimerRef.current);
       if (seekDebounceTimerRef.current) {
@@ -1208,13 +1590,14 @@ export function PlayerScreen({
       unlockTokens: apiClient.getUnlockTokens ? apiClient.getUnlockTokens() : [],
       forceHls: useHls,
       forceDirect: !useHls,
-      forceHtml5: forceHtml5 || isBrowserEnv,
+      forceHtml5: forceHtml5 || isBrowserEnv || isAudioMode,
       videoCodec: technicalInfoRef.current?.video_codec || technical?.video_codec,
       audioCodec: technicalInfoRef.current?.audio_codec || technical?.audio_codec,
       container: technicalInfoRef.current?.container || technical?.container,
       startSeconds: activeStartMs > 0 ? activeStartMs / 1000 : 0,
-      maxHeight: SAMSUNG_TV_HLS_MAX_HEIGHT,
+      maxHeight: isAudioMode ? undefined : SAMSUNG_TV_HLS_MAX_HEIGHT,
       audioTrackIndex: selectedAudioTrackIndexRef.current,
+      isAudioOnly: isAudioMode,
     });
     const streamUrl = playbackResult.url;
     const isHls = playbackResult.isHls;
@@ -1237,6 +1620,9 @@ export function PlayerScreen({
       if (!fallbackTech) {
         return true;
       }
+      if (isAudioModeRef.current) {
+        return checkAudioCompatibility(fallbackTech.audio_codec, fallbackTech.container).isSupported;
+      }
       const useHtml5Mode = forceHtml5 || isBrowserEnv;
       return isSupportedOnSamsungTv(
         fallbackTech.video_codec,
@@ -1246,14 +1632,20 @@ export function PlayerScreen({
       );
     };
 
-    const driver = createPlayerDriver(forceHtml5);
+    const driver = createPlayerDriver(forceHtml5 || isAudioMode);
     driverRef.current = driver;
+    if (isAudioMode) {
+      driver.setPlaybackRate?.(effectivePlaybackRateRef.current);
+    }
     isDriverInitializedRef.current = false;
     isDriverReadyRef.current = false;
 
     const markDriverReady = () => {
       if (isDriverReadyRef.current) return;
       isDriverReadyRef.current = true;
+      if (isAudioModeRef.current) {
+        driver.setPlaybackRate?.(effectivePlaybackRateRef.current);
+      }
       if (!isHls && selectedAudioTrackIndexRef.current > 0) {
         if (isDocumentHiddenRef.current) {
           pendingAudioSyncAfterForegroundRef.current = true;
@@ -1527,12 +1919,14 @@ export function PlayerScreen({
           const fallbackTech = technicalInfoRef.current ?? technical;
           const canDirectPlayStrict =
             !fallbackTech ||
-            isSupportedOnSamsungTv(
-              fallbackTech.video_codec,
-              fallbackTech.audio_codec,
-              fallbackTech.container,
-              forceHtml5 || isBrowserEnv
-            );
+            (isAudioModeRef.current
+              ? checkAudioCompatibility(fallbackTech.audio_codec, fallbackTech.container).isSupported
+              : isSupportedOnSamsungTv(
+                  fallbackTech.video_codec,
+                  fallbackTech.audio_codec,
+                  fallbackTech.container,
+                  forceHtml5 || isBrowserEnv
+                ));
           const isTranscoderCrashStatus =
             probeRes.status === 500 || probeRes.status === 502 || probeRes.status === 504;
 
@@ -1712,6 +2106,7 @@ export function PlayerScreen({
     apiClient,
     reloadKey,
     forceHtml5,
+    isAudioMode,
     useHls,
     hlsSeekOffsetMs,
     technical,
@@ -1972,7 +2367,8 @@ export function PlayerScreen({
         code === TVKeys.BACK_TIZEN ||
         code === TVKeys.BACK_WEB ||
         code === TVKeys.BACKSPACE ||
-        e.key === 'Escape';
+        e.key === 'Escape' ||
+        e.key === 'Backspace';
 
       if (playbackErrorRef.current) {
         if (isBackKey) {
@@ -1994,6 +2390,13 @@ export function PlayerScreen({
 
       if (isBackKey) {
         if (isModalOpen) {
+          return;
+        }
+
+        if (isAudioModeRef.current) {
+          e.preventDefault();
+          const snap = buildAndFlushSnapshot(undefined, true);
+          onExit(snap);
           return;
         }
 
@@ -2065,6 +2468,16 @@ export function PlayerScreen({
             onNextRef.current();
             return;
           }
+          if (
+            isAudioModeRef.current &&
+            effectiveRepeatModeRef.current === 'all' &&
+            onSelectQueueIndexRef.current
+          ) {
+            e.preventDefault();
+            buildAndFlushSnapshot(undefined, false);
+            onSelectQueueIndexRef.current(0);
+            return;
+          }
         } else if (
           code === TVKeys.MEDIA_TRACK_PREVIOUS ||
           e.key === 'MediaTrackPrevious' ||
@@ -2082,20 +2495,31 @@ export function PlayerScreen({
         }
       }
 
-      if (
+      if (code === TVKeys.PLAY || e.key === 'MediaPlay') {
+        if (isAudioModeRef.current) {
+          driverRef.current?.play();
+        } else {
+          handleTogglePlayPause();
+        }
+      } else if (code === TVKeys.PAUSE || e.key === 'MediaPause') {
+        if (isAudioModeRef.current) {
+          driverRef.current?.pause();
+        } else {
+          handleTogglePlayPause();
+        }
+      } else if (code === TVKeys.STOP || e.key === 'MediaStop') {
+        if (isAudioModeRef.current) {
+          driverRef.current?.pause();
+        }
+      } else if (
         code === TVKeys.PLAY_PAUSE ||
-        code === TVKeys.PLAY ||
-        code === TVKeys.PAUSE ||
         e.key === 'MediaPlayPause' ||
         e.key === ' ' ||
         e.key === 'k'
       ) {
-        if (playerStateRef.current === 'playing') {
-          driverRef.current?.pause();
-        } else {
-          driverRef.current?.play();
-        }
+        handleTogglePlayPause();
       } else if (!isModalOpen && (code === TVKeys.DOWN || e.key === 'ArrowDown')) {
+        if (isAudioModeRef.current) return;
         e.preventDefault();
         if (osdFocusedItemRef.current === 'progress') {
           const controls = getOsdControls();
@@ -2106,13 +2530,14 @@ export function PlayerScreen({
           }
         }
       } else if (!isModalOpen && (code === TVKeys.UP || e.key === 'ArrowUp')) {
+        if (isAudioModeRef.current) return;
         e.preventDefault();
         if (osdFocusedItemRef.current !== 'progress') {
           osdFocusedItemRef.current = 'progress';
           setOsdFocusedItem('progress');
         }
       } else if (code === TVKeys.ENTER || e.key === 'Enter') {
-        if (e.defaultPrevented || isModalOpen) {
+        if (isAudioModeRef.current || e.defaultPrevented || isModalOpen) {
           return;
         }
         if (osdFocusedItemRef.current !== 'progress') {
@@ -2146,7 +2571,7 @@ export function PlayerScreen({
           driverRef.current?.play();
         }
       } else if (code === TVKeys.LEFT || e.key === 'ArrowLeft') {
-        if (isModalOpen) {
+        if (isAudioModeRef.current || isModalOpen) {
           return;
         }
         if (osdFocusedItemRef.current !== 'progress') {
@@ -2164,7 +2589,7 @@ export function PlayerScreen({
         consecutiveRewCountRef.current = 0;
         applySeek(-10000, 'backward', '-10s');
       } else if (code === TVKeys.RIGHT || e.key === 'ArrowRight') {
-        if (isModalOpen) {
+        if (isAudioModeRef.current || isModalOpen) {
           return;
         }
         if (osdFocusedItemRef.current !== 'progress') {
@@ -2206,7 +2631,7 @@ export function PlayerScreen({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onExit, resetOsdTimer, sessionManager, applySeek, buildAndFlushSnapshot]);
+  }, [onExit, resetOsdTimer, sessionManager, applySeek, buildAndFlushSnapshot, handleTogglePlayPause]);
 
   const isSeekingActive = Boolean(seekHud) && !isLiveStream;
   const seekPreviewTimeMs = seekHud ? seekHud.targetMs : positionMs;
@@ -2217,21 +2642,67 @@ export function PlayerScreen({
     serverUrl: cleanServerUrl,
     token,
     durationMs,
-    mediaType: itemMediaType,
+    mediaType: effectiveMediaType,
     isLive: isLiveStream,
     isSeeking: isSeekingActive,
     previewTimeMs: seekPreviewTimeMs,
   });
 
+  const unlockTokens = apiClient.getUnlockTokens ? apiClient.getUnlockTokens() : [];
+  const unlockTokensKey = unlockTokens.join(',');
+  const rawPosterUrl = activeDetailMeta?.posterUrl ?? posterUrlProp ?? currentQueueEntry?.posterUrl;
+  const authenticatedPosterUrl = getAuthenticatedImageUrl(
+    cleanServerUrl,
+    rawPosterUrl,
+    token,
+    unlockTokens
+  );
+  const resolvedAudioTitle = title || activeDetailMeta?.title || currentQueueEntry?.title || '';
+  const resolvedAudioSubtitle =
+    activeDetailMeta?.subtitle ?? subtitleProp ?? currentQueueEntry?.subtitle;
+  const resolvedAudioOverview = activeDetailMeta?.overview;
+  const resolvedAudioReleaseYear = activeDetailMeta?.releaseYear;
+  const activeAudioCodecLabel = (
+    audioTracks.find((t) => t.audio_index === selectedAudioTrackIndex)?.codec ||
+    technicalInfo?.audio_codec ||
+    technical?.audio_codec ||
+    technicalInfo?.container ||
+    technical?.container ||
+    ''
+  )
+    .trim()
+    .toUpperCase();
+  const streamModeLabel = useHls
+    ? 'HLS • AAC'
+    : activeAudioCodecLabel
+    ? `DIRECT • ${activeAudioCodecLabel}`
+    : 'DIRECT';
+
+  const audioQueueEntries: AudioQueueEntry[] | undefined = useMemo(() => {
+    if (!playlist || playlist.length === 0) return undefined;
+    const tokens = unlockTokensKey ? unlockTokensKey.split(',') : [];
+    return playlist.map((entry) => ({
+      id: entry.id,
+      title: entry.title,
+      subtitle: entry.subtitle,
+      posterUrl: entry.posterUrl
+        ? getAuthenticatedImageUrl(cleanServerUrl, entry.posterUrl, token, tokens)
+        : undefined,
+      durationSeconds: entry.durationSeconds,
+    }));
+  }, [playlist, cleanServerUrl, token, unlockTokensKey]);
+
   return (
     <div className="relative w-full h-full bg-transparent overflow-hidden select-none">
       <div ref={containerRef} className="relative w-full h-full bg-transparent" />
-      <SubtitleOverlay
-        text={activeSubtitleText}
-        settings={subtitleSettings}
-        osdVisible={showOSD && !playbackError}
-      />
-      {playerState === 'buffering' && !playbackError && (
+      {!isAudioMode && (
+        <SubtitleOverlay
+          text={activeSubtitleText}
+          settings={subtitleSettings}
+          osdVisible={showOSD && !playbackError}
+        />
+      )}
+      {!isAudioMode && playerState === 'buffering' && !playbackError && (
         <div
           data-testid="player-buffering-spinner"
           role="status"
@@ -2269,38 +2740,72 @@ export function PlayerScreen({
           </div>
         </div>
       )}
-      <div
-        className={`transition-opacity duration-300 ${
-          showOSD && !playbackError ? 'opacity-100' : 'opacity-0 pointer-events-none'
-        }`}
-      >
-        <PlayerOSD
-          title={title}
+      {!isAudioMode && (
+        <div
+          className={`transition-opacity duration-300 ${
+            showOSD && !playbackError ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          }`}
+        >
+          <PlayerOSD
+            title={title}
+            playerState={playerState}
+            positionMs={positionMs}
+            durationMs={durationMs}
+            visible={showOSD && !playbackError}
+            isLive={isLiveStream}
+            isSeeking={isSeekingActive}
+            seekPreviewMs={seekPreviewTimeMs}
+            spriteCrop={storyboard.spriteCrop}
+            frameUrl={storyboard.frameUrl}
+            audioTracks={audioTracks}
+            selectedAudioTrackIndex={selectedAudioTrackIndex}
+            onOpenAudioModal={() => setIsAudioModalOpen(true)}
+            subtitles={subtitles}
+            selectedSubtitleId={selectedSubtitleId}
+            onSelectSubtitle={handleSelectSubtitle}
+            onPopupOpenChange={setIsSubtitlePopupOpen}
+            onOpenSubtitleModal={() => setIsSubtitleModalOpen(true)}
+            onOpenSubtitles={() => setIsSubtitleModalOpen(true)}
+            hasPrevious={hasPrevious}
+            hasNext={hasNext}
+            onPrevious={onPrevious ? handleManualPrevious : undefined}
+            onNext={onNext ? handleManualNext : undefined}
+            focusedItem={osdFocusedItem}
+          />
+        </div>
+      )}
+      {isAudioMode && !playbackError && (
+        <AudioPlayerOverlay
+          mediaType={normalizedAudioMediaType}
+          title={resolvedAudioTitle}
+          subtitle={resolvedAudioSubtitle}
+          overview={resolvedAudioOverview}
+          releaseYear={resolvedAudioReleaseYear}
+          posterUrl={authenticatedPosterUrl}
+          streamModeLabel={streamModeLabel}
           playerState={playerState}
           positionMs={positionMs}
           durationMs={durationMs}
-          visible={showOSD && !playbackError}
-          isLive={isLiveStream}
-          isSeeking={isSeekingActive}
-          seekPreviewMs={seekPreviewTimeMs}
-          spriteCrop={storyboard.spriteCrop}
-          frameUrl={storyboard.frameUrl}
-          audioTracks={audioTracks}
-          selectedAudioTrackIndex={selectedAudioTrackIndex}
-          onOpenAudioModal={() => setIsAudioModalOpen(true)}
-          subtitles={subtitles}
-          selectedSubtitleId={selectedSubtitleId}
-          onSelectSubtitle={handleSelectSubtitle}
-          onPopupOpenChange={setIsSubtitlePopupOpen}
-          onOpenSubtitleModal={() => setIsSubtitleModalOpen(true)}
-          onOpenSubtitles={() => setIsSubtitleModalOpen(true)}
+          playbackRate={effectivePlaybackRate}
+          repeatMode={effectiveRepeatMode}
+          isAmbientDimmed={isAmbientDimmed}
           hasPrevious={hasPrevious}
           hasNext={hasNext}
-          onPrevious={onPrevious ? handleManualPrevious : undefined}
-          onNext={onNext ? handleManualNext : undefined}
-          focusedItem={osdFocusedItem}
+          queue={audioQueueEntries}
+          currentIndex={currentIndex}
+          audioTracks={audioTracks}
+          onOpenAudioModal={() => setIsAudioModalOpen(true)}
+          onTogglePlayPause={handleTogglePlayPause}
+          onSeekRelative={handleAudioSeekRelative}
+          onRestartTrack={handleRestartTrack}
+          onPrevious={hasPrevious && onPrevious ? handleManualPrevious : undefined}
+          onNext={hasNext && onNext ? handleManualNext : undefined}
+          onSelectQueueIndex={onSelectQueueIndex ? handleSelectQueueIndex : undefined}
+          onCycleSpeed={normalizedAudioMediaType === 'audiobook' ? handleCycleSpeed : undefined}
+          onCycleRepeat={normalizedAudioMediaType === 'music' ? handleCycleRepeat : undefined}
+          onExit={handleExit}
         />
-      </div>
+      )}
 
       <SubtitleModal
         isOpen={isSubtitleModalOpen}
@@ -2339,7 +2844,7 @@ export function PlayerScreen({
         />
       )}
 
-      {seekHud && (
+      {!isAudioMode && seekHud && (
         <div
           data-testid="seek-hud-badge"
           className="fixed top-24 left-1/2 -translate-x-1/2 z-50 bg-[#3B1111]/90 backdrop-blur-md border border-[rgba(245,229,229,0.2)] px-6 py-3 rounded-2xl flex items-center space-x-3 text-white text-2xl font-bold shadow-2xl animate-fade-in"
@@ -2356,7 +2861,7 @@ export function PlayerScreen({
         </div>
       )}
 
-      {autoAdvanceCountdown !== null && (
+      {!isAudioMode && autoAdvanceCountdown !== null && (
         <div
           data-testid="auto-advance-overlay"
           className="fixed bottom-24 right-16 z-50 bg-[#3B1111]/95 backdrop-blur-md border border-[rgba(245,229,229,0.2)] p-6 rounded-2xl shadow-2xl flex flex-col items-center space-y-3 animate-fade-in pointer-events-auto"

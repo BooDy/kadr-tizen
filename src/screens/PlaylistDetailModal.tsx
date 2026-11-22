@@ -44,6 +44,10 @@ export interface PlaylistQueuePlayItem {
   title: string;
   resumeMs?: number;
   technical?: MediaItemDetail['technical'];
+  subtitle?: string;
+  posterUrl?: string;
+  mediaType?: string;
+  durationSeconds?: number;
 }
 
 export interface PlaylistDetailModalProps {
@@ -458,6 +462,10 @@ export function PlaylistDetailModal({
         id: entry.card.id,
         title: entry.card.title,
         resumeMs: getPlaylistItemResumeMs(entry),
+        subtitle: entry.card.subtitle,
+        posterUrl: entry.card.poster_url,
+        mediaType: entry.card.media_type,
+        durationSeconds: entry.duration_seconds > 0 ? entry.duration_seconds : undefined,
       }));
       onPlayQueue(queue, clampedStart);
     },

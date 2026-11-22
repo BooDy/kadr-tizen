@@ -30,6 +30,8 @@ import { useFocusable } from '../navigation/useFocusable';
 import { TVKeys } from '../navigation/keys';
 import { getAuthenticatedImageUrl } from '../utils/imageUrl';
 import { toResumePercentageSentinel } from '../utils/playbackProgress';
+import { MediaItemDetail } from '../api/items';
+import { PlaylistItem } from './PlayerScreen';
 
 export interface SearchViewProps {
   client: ApiClient;
@@ -42,7 +44,11 @@ export interface SearchViewProps {
   onPlayItem: (
     itemId: number | string,
     resumeMs?: number,
-    title?: string
+    title?: string,
+    technical?: MediaItemDetail['technical'],
+    playlist?: PlaylistItem[],
+    currentIndex?: number,
+    mediaType?: string
   ) => void;
   onNavigateToSidebar?: () => void;
 }
@@ -1109,7 +1115,15 @@ export function SearchView({
             matched.item_type === 'live_channel'
               ? 0
               : toResumePercentageSentinel(matched.playback_progress ?? undefined);
-          onPlayItemRef.current(matched.id, resumeSentinel, matched.title);
+          onPlayItemRef.current(
+            matched.id,
+            resumeSentinel,
+            matched.title,
+            undefined,
+            undefined,
+            undefined,
+            matched.item_type
+          );
         }
         return;
       }

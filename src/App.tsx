@@ -55,6 +55,9 @@ export default function App() {
     technical?: MediaItemDetail['technical'];
     playlist?: PlaylistQueuePlayItem[];
     currentIndex?: number;
+    mediaType?: string;
+    posterUrl?: string;
+    subtitle?: string;
   } | null>(null);
   const [folderBrowserState, setFolderBrowserState] = useState<{
     libraryId: string;
@@ -270,7 +273,10 @@ export default function App() {
     titleOverride?: string,
     technicalOverride?: MediaItemDetail['technical'],
     playlistOverride?: PlaylistQueuePlayItem[],
-    currentIndexOverride?: number
+    currentIndexOverride?: number,
+    mediaTypeOverride?: string,
+    posterUrlOverride?: string,
+    subtitleOverride?: string
   ) => {
     if (itemId === undefined || itemId === null || itemId === '' || itemId === 'undefined') {
       console.error('[App] Cannot play item with invalid id:', itemId);
@@ -312,6 +318,29 @@ export default function App() {
         }
       }
     }
+
+    const queueItem =
+      playlist && currentIndex !== undefined && currentIndex >= 0 && currentIndex < playlist.length
+        ? playlist[currentIndex]
+        : undefined;
+    if (!title && queueItem?.title) title = queueItem.title;
+    if (!technical && queueItem?.technical) technical = queueItem.technical;
+
+    const activeMatch =
+      activeItem && String(activeItem.id) === String(itemId) ? activeItem : null;
+    const mediaType =
+      mediaTypeOverride ??
+      queueItem?.mediaType ??
+      (activeMatch ? activeMatch.media_type ?? activeMatch.card?.media_type : undefined);
+    const posterUrl =
+      posterUrlOverride ??
+      queueItem?.posterUrl ??
+      (activeMatch ? activeMatch.poster_url ?? activeMatch.card?.poster_url : undefined);
+    const subtitle =
+      subtitleOverride ??
+      queueItem?.subtitle ??
+      (activeMatch ? activeMatch.card?.subtitle : undefined);
+
     title = title || 'Playing';
     setPlayerItem({
       id: itemId,
@@ -320,53 +349,46 @@ export default function App() {
       technical,
       playlist,
       currentIndex,
+      mediaType,
+      posterUrl,
+      subtitle,
     });
     setView('player');
   };
 
-  const handlePlayPlaylistQueue = (queue: PlaylistQueuePlayItem[], startIndex: number) => {
-    const first = queue[startIndex];
-    if (!first) return;
+  const playQueueEntry = (queue: PlaylistQueuePlayItem[], index: number) => {
+    const entry = queue[index];
+    if (!entry) return;
     handlePlayItem(
-      first.id,
-      first.resumeMs ?? 0,
-      first.title,
-      first.technical,
+      entry.id,
+      entry.resumeMs ?? 0,
+      entry.title,
+      entry.technical,
       queue,
-      startIndex
+      index,
+      entry.mediaType,
+      entry.posterUrl,
+      entry.subtitle
     );
+  };
+
+  const handlePlayPlaylistQueue = (queue: PlaylistQueuePlayItem[], startIndex: number) => {
+    playQueueEntry(queue, startIndex);
+  };
+
+  const handleSelectQueueIndex = (index: number) => {
+    if (!playerItem?.playlist) return;
+    playQueueEntry(playerItem.playlist, index);
   };
 
   const handleNextEpisode = () => {
     if (!playerItem?.playlist || playerItem.currentIndex === undefined) return;
-    const nextIdx = playerItem.currentIndex + 1;
-    if (nextIdx < playerItem.playlist.length) {
-      const nextItem = playerItem.playlist[nextIdx];
-      handlePlayItem(
-        nextItem.id,
-        nextItem.resumeMs ?? 0,
-        nextItem.title,
-        nextItem.technical,
-        playerItem.playlist,
-        nextIdx
-      );
-    }
+    playQueueEntry(playerItem.playlist, playerItem.currentIndex + 1);
   };
 
   const handlePreviousEpisode = () => {
     if (!playerItem?.playlist || playerItem.currentIndex === undefined) return;
-    const prevIdx = playerItem.currentIndex - 1;
-    if (prevIdx >= 0) {
-      const prevItem = playerItem.playlist[prevIdx];
-      handlePlayItem(
-        prevItem.id,
-        prevItem.resumeMs ?? 0,
-        prevItem.title,
-        prevItem.technical,
-        playerItem.playlist,
-        prevIdx
-      );
-    }
+    playQueueEntry(playerItem.playlist, playerItem.currentIndex - 1);
   };
 
   const handleEpisodeProgress = (snap: PlaybackProgressSnapshot) => {
@@ -638,6 +660,7 @@ export default function App() {
                 onStartSlideshow={(images) => {
                   setImageViewerState({ images, initialIndex: 0, autoPlay: true });
                 }}
+                onPlayQueue={handlePlayPlaylistQueue}
                 onLockedLibrary={(libraryId) => {
                   setUnlockLibraryId(libraryId);
                 }}
@@ -806,6 +829,9 @@ export default function App() {
             client={client}
             itemId={playerItem.id}
             title={playerItem.title}
+            subtitle={playerItem.subtitle}
+            posterUrl={playerItem.posterUrl}
+            mediaType={playerItem.mediaType}
             serverUrl={serverUrl || ''}
             token={token || ''}
             initialTimeMs={playerItem.startMs}
@@ -814,6 +840,7 @@ export default function App() {
             currentIndex={playerItem.currentIndex}
             onNext={playerItem.playlist ? handleNextEpisode : undefined}
             onPrevious={playerItem.playlist ? handlePreviousEpisode : undefined}
+            onSelectQueueIndex={playerItem.playlist ? handleSelectQueueIndex : undefined}
             onEpisodeProgress={handleEpisodeProgress}
             onExit={handleExitPlayer}
           />

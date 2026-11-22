@@ -45,7 +45,8 @@ export interface BrowseScreenProps {
     title?: string,
     technical?: MediaItemDetail['technical'],
     playlist?: PlaylistItem[],
-    currentIndex?: number
+    currentIndex?: number,
+    mediaType?: string
   ) => void;
   onSwitchProfile: () => void;
   onSwitchServer?: () => void;
@@ -1223,7 +1224,15 @@ export function BrowseScreen({
       const first = queue[startIndex];
       if (!first) return;
       setInternalPlaylistId(null);
-      onPlayItem(first.id, first.resumeMs ?? 0, first.title, first.technical, queue, startIndex);
+      onPlayItem(
+        first.id,
+        first.resumeMs ?? 0,
+        first.title,
+        first.technical,
+        queue,
+        startIndex,
+        first.mediaType
+      );
     },
     [onPlayItem]
   );

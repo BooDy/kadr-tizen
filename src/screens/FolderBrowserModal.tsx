@@ -9,10 +9,12 @@ import { PillButton } from '../components/tv/PillButton';
 import { TVKeys } from '../navigation/keys';
 import { Folder, Play, Loader2, Lock, ImageIcon, ArrowLeft, X, ListPlus, Film } from 'lucide-react';
 import { getAuthenticatedImageUrl } from '../utils/imageUrl';
+import { toResumePercentageSentinel } from '../utils/playbackProgress';
 import {
   AddToPlaylistModal,
   AddToPlaylistTarget,
 } from '../components/playlists/AddToPlaylistModal';
+import type { PlaylistQueuePlayItem } from './PlaylistDetailModal';
 
 export interface FolderBrowserModalProps {
   client: ApiClient;
@@ -25,6 +27,7 @@ export interface FolderBrowserModalProps {
   onSelectItem: (itemId: number | string) => void;
   onSelectImage: (images: FolderImage[], initialIndex: number) => void;
   onStartSlideshow: (images: FolderImage[]) => void;
+  onPlayQueue?: (queue: PlaylistQueuePlayItem[], startIndex: number) => void;
   onLockedLibrary?: (libraryId: string) => void;
   onAddToPlaylist?: (target: AddToPlaylistTarget) => void;
   onPlaylistChanged?: () => void;
@@ -684,6 +687,7 @@ export function FolderBrowserModal({
   onSelectItem,
   onSelectImage,
   onStartSlideshow,
+  onPlayQueue,
   onLockedLibrary,
   onAddToPlaylist,
   onPlaylistChanged,
@@ -831,6 +835,12 @@ export function FolderBrowserModal({
   }, []);
 
   const title = folderData?.library_name || libraryId;
+  const showPlayAllBtn =
+    !loading &&
+    !isLocked &&
+    !error &&
+    (folderData?.items?.length ?? 0) > 0 &&
+    Boolean(onPlayQueue);
   const showAddFolderBtn =
     !loading && !isLocked && !error && !libraryId.startsWith('plugin://');
 
@@ -840,6 +850,9 @@ export function FolderBrowserModal({
     (folderData?.breadcrumbs || []).forEach((_, idx) => {
       ids.add(`folder-breadcrumb-${idx}`);
     });
+    if (showPlayAllBtn) {
+      ids.add('play-folder-all-btn');
+    }
     if (showAddFolderBtn) {
       ids.add('folder-add-to-playlist-btn');
     }
@@ -874,7 +887,7 @@ export function FolderBrowserModal({
     }
 
     return { validNodeIds: ids, contentRows: rows };
-  }, [folderData, loading, isLocked, showAddFolderBtn]);
+  }, [folderData, loading, isLocked, showPlayAllBtn, showAddFolderBtn]);
 
   if (!isOpen) return null;
 
@@ -890,6 +903,7 @@ export function FolderBrowserModal({
   let nextOrder = 1;
   const closeBtnOrder = nextOrder++;
   const breadcrumbOrders = (folderData?.breadcrumbs || []).map(() => nextOrder++);
+  const playAllBtnOrder = showPlayAllBtn ? nextOrder++ : undefined;
   const addFolderBtnOrder = showAddFolderBtn ? nextOrder++ : undefined;
   const unlockBtnOrder = !loading && isLocked ? nextOrder++ : undefined;
   const dirOrders = (folderData?.directories || []).map(() => nextOrder++);
@@ -984,36 +998,72 @@ export function FolderBrowserModal({
             {title}
           </h2>
 
-          {showAddFolderBtn && (
-            <PillButton
-              id="folder-add-to-playlist-btn"
-              groupId="folder-browser-modal"
-              order={addFolderBtnOrder}
-              variant="secondary"
-              size="sm"
-              icon={<ListPlus className="w-4 h-4" />}
-              marginRight="0px"
-              onSelect={() => {
-                lastFocusedItemIdRef.current = 'folder-add-to-playlist-btn';
-                setFocusedIdRef.current?.('folder-add-to-playlist-btn');
-                const crumbs = folderData?.breadcrumbs || [];
-                const currentCrumbName =
-                  crumbs.length > 0 ? crumbs[crumbs.length - 1].name : title;
-                const target: AddToPlaylistTarget = {
-                  kind: 'folder',
-                  libraryId,
-                  path: currentPath,
-                  folderName: currentCrumbName || title,
-                };
-                if (onAddToPlaylist) {
-                  onAddToPlaylist(target);
-                } else {
-                  setInternalAddTarget(target);
-                }
-              }}
-            >
-              Add Folder to Playlist
-            </PillButton>
+          {(showPlayAllBtn || showAddFolderBtn) && (
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              {showPlayAllBtn && (
+                <PillButton
+                  id="play-folder-all-btn"
+                  groupId="folder-browser-modal"
+                  order={playAllBtnOrder}
+                  variant="primary"
+                  size="sm"
+                  icon={<Play className="w-4 h-4 fill-current" />}
+                  marginRight="12px"
+                  onSelect={() => {
+                    lastFocusedItemIdRef.current = 'play-folder-all-btn';
+                    setFocusedIdRef.current?.('play-folder-all-btn');
+                    const items = folderData?.items || [];
+                    if (items.length === 0) return;
+                    const queue: PlaylistQueuePlayItem[] = items.map((item) => ({
+                      id: item.id,
+                      title: item.title,
+                      subtitle: item.subtitle,
+                      posterUrl: item.poster_url,
+                      mediaType: item.media_type,
+                      resumeMs:
+                        item.media_type === 'live_channel'
+                          ? 0
+                          : toResumePercentageSentinel(item.playback_progress),
+                    }));
+                    onPlayQueue?.(queue, 0);
+                  }}
+                >
+                  Play All
+                </PillButton>
+              )}
+
+              {showAddFolderBtn && (
+                <PillButton
+                  id="folder-add-to-playlist-btn"
+                  groupId="folder-browser-modal"
+                  order={addFolderBtnOrder}
+                  variant="secondary"
+                  size="sm"
+                  icon={<ListPlus className="w-4 h-4" />}
+                  marginRight="0px"
+                  onSelect={() => {
+                    lastFocusedItemIdRef.current = 'folder-add-to-playlist-btn';
+                    setFocusedIdRef.current?.('folder-add-to-playlist-btn');
+                    const crumbs = folderData?.breadcrumbs || [];
+                    const currentCrumbName =
+                      crumbs.length > 0 ? crumbs[crumbs.length - 1].name : title;
+                    const target: AddToPlaylistTarget = {
+                      kind: 'folder',
+                      libraryId,
+                      path: currentPath,
+                      folderName: currentCrumbName || title,
+                    };
+                    if (onAddToPlaylist) {
+                      onAddToPlaylist(target);
+                    } else {
+                      setInternalAddTarget(target);
+                    }
+                  }}
+                >
+                  Add Folder to Playlist
+                </PillButton>
+              )}
+            </div>
           )}
         </div>
       </div>
