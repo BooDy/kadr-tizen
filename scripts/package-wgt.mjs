@@ -89,6 +89,7 @@ try {
       execFileSync('zip', ['-r', outWgt, '.'], { cwd: stagingDir, stdio: 'inherit' });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      fs.rmSync(stagingDir, { recursive: true, force: true });
       console.error('Failed to create wgt zip archive:', message);
       process.exit(1);
     }

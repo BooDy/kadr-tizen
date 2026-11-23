@@ -7,12 +7,18 @@ if [ -d "$HOME/tizen-studio/tools" ]; then
   export PATH="$HOME/tizen-studio/tools:$HOME/tizen-studio/tools/ide/bin:$PATH"
 fi
 
-TV_TARGET=${1:-"UA55TU7000UXEG"}
+TV_TARGET=""
+NO_BUILD=0
 
-if [ -z "$TV_TARGET" ]; then
-  echo "Usage: ./scripts/tizen-deploy.sh <TV_IP_OR_TARGET_NAME>"
-  exit 1
-fi
+for arg in "$@"; do
+  if [ "$arg" = "--no-build" ]; then
+    NO_BUILD=1
+  elif [ -z "$TV_TARGET" ]; then
+    TV_TARGET="$arg"
+  fi
+done
+
+TV_TARGET=${TV_TARGET:-"UA55TU7000UXEG"}
 
 # If target looks like an IP address, connect via sdb first
 if [[ "$TV_TARGET" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+ ]]; then
@@ -25,16 +31,16 @@ if [[ "$TV_TARGET" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+ ]]; then
   fi
 fi
 
-echo "Building and signing kadr.wgt..."
-npm run build
-cp config.xml dist/config.xml
-cp public/icon.png dist/icon.png
-cp public/kadr-logo.png dist/kadr-logo.png
+if ! sdb devices | grep -q "device"; then
+  echo "Error: No Samsung Tizen TV is currently connected to sdb."
+  echo "Ensure Developer Mode is enabled on the TV and pass its LAN IP:"
+  echo "  npm run deploy:tv -- <TV_LAN_IP>"
+  exit 1
+fi
 
-if command -v tizen &> /dev/null; then
-  rm -f kadr.wgt Kadr.wgt
-  tizen package -t wgt -s kadr -o . -- dist
-  cp -f Kadr.wgt kadr.wgt 2>/dev/null || true
+echo "Building and signing kadr.wgt..."
+if [ "$NO_BUILD" -eq 1 ]; then
+  npm run package:wgt -- --no-build
 else
   npm run package:wgt
 fi
